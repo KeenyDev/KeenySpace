@@ -6,13 +6,12 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
-import structlog
 
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
