@@ -20,7 +20,7 @@ def format_entry(
         f'id="{entry_id}"',
         f'ts="{ts.isoformat()}"',
         f'actor="{html.escape(actor, quote=True)}"',
-        f'source="{source}"',
+        f'source="{html.escape(source, quote=True)}"',
     ]
     if client_version is not None:
         attrs.append(f'client_version="{html.escape(client_version, quote=True)}"')
