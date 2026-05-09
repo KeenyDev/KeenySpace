@@ -4,3 +4,18 @@
 # Obsidian per-user state
 .obsidian/workspace*.json
 .obsidian/cache
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# IDE
+.idea/
+
