@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 from fastmcp.exceptions import ToolError
+from fastmcp.server.dependencies import get_http_request
 from keenyspace_shared.mcp_contracts import AppendLogResponse, ReadPageResponse
 from sqlalchemy import select
 
@@ -27,7 +28,7 @@ async def read_page(workspace: str, path: str) -> ReadPageResponse:
         user = current_user_from_mcp()
         _ = user
 
-        req = __import__("fastmcp.server.dependencies", fromlist=["get_http_request"]).get_http_request()
+        req = get_http_request()
         app = req.app
 
         async with get_db_session() as session:
@@ -70,7 +71,7 @@ async def append_log(
     with MCP_TOOL_CALL_DURATION.labels(tool="append_log").time():
         user = current_user_from_mcp()
 
-        req = __import__("fastmcp.server.dependencies", fromlist=["get_http_request"]).get_http_request()
+        req = get_http_request()
         app = req.app
 
         async with get_db_session() as session:
