@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import contextlib
 import io
-import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -50,12 +50,8 @@ async def read_page(workspace: str, path: str) -> ReadPageResponse:
         except FileNotFoundError as exc:
             raise ToolError(f"page {path!r} not found in workspace {workspace!r}") from exc
 
-        import contextlib
-        try:
-            raw_content = io.FileIO(fd).read()
-        finally:
-            with contextlib.suppress(OSError):
-                os.close(fd)
+        with io.FileIO(fd) as f:
+            raw_content = f.read()
 
         content_str = raw_content.decode("utf-8", errors="replace")
         frontmatter, body = _split_frontmatter(content_str)
@@ -102,8 +98,6 @@ async def append_log(
                 client_version = ua[:64]
         except Exception:
             pass
-
-        import contextlib
 
         from ulid import ULID as _ULID
         parent_ulid: _ULID | None = None

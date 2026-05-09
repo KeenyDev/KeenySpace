@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import os
 from typing import Any
 
 import yaml
@@ -32,7 +31,6 @@ async def get_page(
     settings = request.app.state.settings
     ws_root = settings.fs.root / "workspaces" / str(ws.uuid)
 
-    import contextlib
     try:
         fd, resolved = open_workspace_page(ws_root, path)
     except UnsafePath as exc:
@@ -40,11 +38,8 @@ async def get_page(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"page {path!r} not found") from exc
 
-    try:
-        raw_content = io.FileIO(fd).read()
-    finally:
-        with contextlib.suppress(OSError):
-            os.close(fd)
+    with io.FileIO(fd) as f:
+        raw_content = f.read()
 
     content_str = raw_content.decode("utf-8", errors="replace")
     frontmatter, body = _split_frontmatter(content_str)
