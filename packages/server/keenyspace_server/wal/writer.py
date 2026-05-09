@@ -48,11 +48,6 @@ async def append_log(
     max_bytes: int = getattr(getattr(settings, "wal", settings), "max_entry_bytes", 256 * 1024)
     multi_worker: bool = getattr(getattr(settings, "auth", settings), "multi_worker", False)
 
-    if len(content.encode()) > max_bytes:
-        raise PayloadTooLarge(
-            f"Content exceeds maximum size of {max_bytes} bytes"
-        )
-
     ws_lock = await locks.for_workspace(ws_uuid)
     async with ws_lock:
         wal_path = ws_root / "logs" / f"{datetime.now(UTC).date().isoformat()}.md"
@@ -70,6 +65,12 @@ async def append_log(
             parent_id=parent_id,
             content=content,
         )
+
+        if len(payload) > max_bytes:
+            raise PayloadTooLarge(
+                f"Serialised entry exceeds maximum size of {max_bytes} bytes"
+            )
+
         await asyncio.to_thread(
             _blocking_append, wal_path, payload, multi_worker
         )
