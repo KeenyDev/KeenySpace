@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     fs: FSSettings = FSSettings()
     wal: WALSettings = WALSettings()
     auth: AuthSettings = AuthSettings()
+    auto_migrate: bool = False
 
 
 @lru_cache
