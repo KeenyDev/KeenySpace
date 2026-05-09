@@ -27,8 +27,13 @@ def _blocking_append(wal_file: Path, payload: bytes, multi_worker: bool) -> None
     try:
         if multi_worker:
             fcntl.flock(fd, fcntl.LOCK_EX)
-        os.write(fd, payload)
-        os.fsync(fd)
+        pre_size = os.lseek(fd, 0, os.SEEK_END)
+        try:
+            os.write(fd, payload)
+            os.fsync(fd)
+        except BaseException:
+            os.ftruncate(fd, pre_size)
+            raise
     finally:
         os.close(fd)
 
