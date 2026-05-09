@@ -11,6 +11,9 @@ _ENTRY_RE = re.compile(
     r"<wal_entry ([^>]+)>(.+?)</wal_entry>",
     re.DOTALL,
 )
+# Invariant: framing.py escapes all attribute values with html.escape(x, quote=True),
+# converting " → &quot;. No literal " can appear inside a value, so [^"]* terminates
+# correctly. Breaking this invariant in framing.py would silently truncate attr values.
 _ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
 
 
