@@ -1,0 +1,21 @@
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12"]
+build-backend = "uv_build"
+
+[project]
+name = "keenyspace"
+version = "0.1.0"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "typer>=0.15",
+    "httpx>=0.28",
+    "fastmcp~=3.2",
+    "platformdirs>=4.3",
+    "rich>=14.0",
+    "pyyaml>=6.0.2",
+    "keenyspace-shared",
+]
+
+[tool.uv.build-backend]
+module-name = "keenyspace"
+module-root = ""
