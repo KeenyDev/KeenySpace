@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno as _errno
 import os
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def open_workspace_page(ws_root: Path, page_path: str) -> tuple[int, Path]:
     try:
         fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError as exc:
-        if exc.errno in (os.errno.ELOOP if hasattr(os, 'errno') else 40, 40):
+        if exc.errno == _errno.ELOOP:
             raise UnsafePath(f"Path {page_path!r} is a symlink") from exc
         raise
 
