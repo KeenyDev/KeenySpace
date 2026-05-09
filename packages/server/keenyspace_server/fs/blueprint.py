@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -21,7 +21,7 @@ def clone_default_blueprint(
 ) -> Path:
     src = fs_root / "blueprints" / blueprint_name
     final = fs_root / "workspaces" / str(ws_uuid)
-    tmp = final.parent / f"{ws_uuid}.tmp.{int(time.monotonic() * 1_000_000)}"
+    tmp = final.parent / f"{ws_uuid}.tmp.{secrets.token_hex(8)}"
 
     shutil.copytree(
         src,
