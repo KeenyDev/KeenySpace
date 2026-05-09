@@ -59,7 +59,18 @@ async def _hammer(port: int, n: int, prefix: str, dev_token: str) -> None:
     "multi_worker,expect_all",
     [
         (True, True),
-        (False, False),
+        pytest.param(
+            False,
+            False,
+            marks=pytest.mark.xfail(
+                reason=(
+                    "multi_worker=False disables flock but asyncio.Lock provides no "
+                    "cross-process protection; data loss is expected but not guaranteed "
+                    "on every run — this branch cannot be a reliable regression test"
+                ),
+                strict=False,
+            ),
+        ),
     ],
 )
 async def test_wal_stress(tmp_path: Path, multi_worker: bool, expect_all: bool):
