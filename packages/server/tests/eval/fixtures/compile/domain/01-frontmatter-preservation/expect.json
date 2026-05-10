@@ -1,0 +1,5 @@
+{
+  "expected_status": "success",
+  "expected_ops": [{"action": "update", "path": "notes/profile.md"}],
+  "required_frontmatter_keys": ["title", "status", "owner", "created", "tags"]
+}

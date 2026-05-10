@@ -1,0 +1,5 @@
+{
+  "expected_status": "success",
+  "expected_ops": [{"action": "update", "path": "notes/index.md"}],
+  "required_body_fragments": ["[[auth]]"]
+}
