@@ -35,14 +35,42 @@ class CompileCoordinator:
         self._dirty: set[UUID] = set()
         self._inflight: dict[UUID, str] = {}
         self._daily_tokens: dict[UUID, int] = defaultdict(int)
+        self._pending_debounce: dict[UUID, asyncio.TimerHandle] = {}
+        self._debounce_tasks: set[asyncio.Task[None]] = set()
 
     def notify_dirty(self, ws_uuid: UUID) -> None:
-        """Sync, fire-and-forget. Plan 03 stub: only records the dirty signal.
+        """Sync, fire-and-forget. Schedules a debounced compile after settings.debounce_seconds.
 
-        Plan 05 replaces this with debounce-and-reschedule wiring; the full CMP-01
-        lifecycle (idle→debounced→running→idle) is therefore verified only after Plan 05.
+        Idempotent within the debounce window: a second call for the same workspace
+        cancels the pending timer and reschedules. If no event loop is running
+        (e.g. called from sync test code), only the dirty-set is updated and the
+        caller can drive trigger() manually.
         """
         self._dirty.add(ws_uuid)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        pending = self._pending_debounce.pop(ws_uuid, None)
+        if pending is not None:
+            pending.cancel()
+
+        def _fire() -> None:
+            self._pending_debounce.pop(ws_uuid, None)
+            task = loop.create_task(self._trigger_after_debounce(ws_uuid))
+            self._debounce_tasks.add(task)
+            task.add_done_callback(self._debounce_tasks.discard)
+
+        handle = loop.call_later(self.settings.debounce_seconds, _fire)
+        self._pending_debounce[ws_uuid] = handle
+
+    async def _trigger_after_debounce(self, ws_uuid: UUID) -> None:
+        try:
+            await self.trigger(ws_uuid, source="append")
+        except Exception as exc:
+            log.warning("compile.debounce_trigger_failed", workspace=str(ws_uuid), error=str(exc))
 
     async def trigger(self, ws_uuid: UUID, source: str) -> CompileTriggerResponse:
         ws_root = await self._workspace_root(ws_uuid)

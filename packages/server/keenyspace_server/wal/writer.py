@@ -83,4 +83,17 @@ async def append_log(
     from keenyspace_server.observability.metrics import WAL_APPENDS_TOTAL
     WAL_APPENDS_TOTAL.labels(workspace=str(ws_uuid), source=source).inc()
 
+    # Phase 2: notify compile coordinator outside the workspace lock scope.
+    # Lazy import avoids circular dependency at module init time and keeps
+    # Phase 1 tests passing when the compile module is not yet wired into Settings.
+    if hasattr(settings, "compile"):
+        try:
+            from keenyspace_server.compile.coordinator import get_coordinator
+        except ImportError:
+            pass
+        else:
+            coordinator = get_coordinator()
+            if coordinator is not None:
+                coordinator.notify_dirty(ws_uuid)
+
     return entry_id
