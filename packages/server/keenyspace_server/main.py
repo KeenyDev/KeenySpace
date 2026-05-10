@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastmcp.utilities.lifespan import combine_lifespans
 from starlette.middleware.authentication import AuthenticationMiddleware
 
+from .api import compile as compile_router
 from .api import health, logs, pages, workspaces
 from .auth.dev_shim import DevTokenAuthBackend
 from .auth.middleware import on_auth_error
@@ -37,7 +38,15 @@ def build_app() -> FastAPI:
             else:
                 server_blueprints_dir = Path(__file__).parent.parent.parent.parent / "blueprints"
             ensure_fs_root_layout(settings.fs.root, server_blueprints_dir)
-            yield
+            from .compile.coordinator import CompileCoordinator, set_coordinator
+            coordinator = CompileCoordinator(settings=settings.compile)
+            app.state.compile_coordinator = coordinator
+            set_coordinator(coordinator)
+            try:
+                yield
+            finally:
+                set_coordinator(None)
+                app.state.compile_coordinator = None
 
     app = FastAPI(
         title="KeenySpace",
@@ -57,6 +66,7 @@ def build_app() -> FastAPI:
     app.include_router(workspaces.router, prefix="/v1/api/workspaces")
     app.include_router(pages.router, prefix="/v1/api/workspaces")
     app.include_router(logs.router, prefix="/v1/api/workspaces")
+    app.include_router(compile_router.router, prefix="/v1/api/workspaces")
 
     @app.get("/v1/admin/api-keys")
     async def admin_stub() -> None:
