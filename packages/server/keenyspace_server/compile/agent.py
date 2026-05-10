@@ -88,6 +88,40 @@ async def search(ctx: RunContext[CompileDeps], query: str) -> str:
     return "\n".join(results) if results else "No matches found."
 
 
+_COMPILE_DENYLIST_PREFIXES: tuple[str, ...] = (
+    ".keenyspace/",
+    "logs/",
+    "_templates/",
+    "raw/",
+)
+_COMPILE_DENYLIST_EXACT: frozenset[str] = frozenset({"CLAUDE.md"})
+
+
+@compile_agent.output_validator
+async def _validate_compile_plan(
+    ctx: RunContext[CompileDeps], plan: CompilePlan
+) -> CompilePlan:
+    """Reject denylist paths early so they consume a model retry, not a tool budget.
+
+    Defense-in-depth: the coordinator's apply_plan denylist gate (Plan 03) is the
+    authoritative final check; this validator catches denylist violations before
+    they cost extra tool calls or reach disk.
+    """
+    for op in plan.ops:
+        for prefix in _COMPILE_DENYLIST_PREFIXES:
+            if op.path.startswith(prefix):
+                raise ModelRetry(
+                    f"PageOp.path {op.path!r} targets a protected area. "
+                    "Only user-facing markdown pages outside .keenyspace/, logs/, "
+                    "_templates/, raw/, and CLAUDE.md are writable."
+                )
+        if op.path in _COMPILE_DENYLIST_EXACT:
+            raise ModelRetry(
+                f"PageOp.path {op.path!r} targets a protected file (CLAUDE.md)."
+            )
+    return plan
+
+
 async def run_compile_agent(
     deps: CompileDeps,
     *,

@@ -12,9 +12,9 @@ from sqlalchemy import select, update
 
 from keenyspace_server.compile.agent import run_compile_agent
 from keenyspace_server.compile.hashing import hash_plan
+from keenyspace_server.compile.loop_detector import LoopDetector
 from keenyspace_server.compile.models import (
     CompileDeps,
-    CompilePlan,
     CompileRunResult,
     CompileStatusResponse,
     CompileTriggerResponse,
@@ -162,6 +162,16 @@ class CompileCoordinator:
             log.info("compile.idempotent_noop", workspace=str(ws_uuid), run_id=run_id, reason="empty_slice")
             return CompileRunResult(status="idempotent_noop", pages_written=0)
 
+        if self._daily_tokens.get(ws_uuid, 0) >= self.settings.daily_token_ceiling:
+            await self._pause(ws_uuid, reason="daily_ceiling", error="daily token ceiling reached")
+            await self._write_run_row(
+                ws_uuid, run_id, started_at, source,
+                status="abort_ceiling", pages_written=0,
+                wal_first_id=slice_.wal_first_id, wal_last_id=slice_.wal_last_id, plan_hash=None,
+            )
+            log.warning("compile.aborted", workspace=str(ws_uuid), reason="daily_ceiling")
+            return CompileRunResult(status="paused", pages_written=0)
+
         await self._write_run_row(
             ws_uuid, run_id, started_at, source,
             status="running", pages_written=0,
@@ -169,19 +179,25 @@ class CompileCoordinator:
         )
 
         deps = CompileDeps(ws_root=ws_root, wal_text=slice_.formatted_text)
+        detector = LoopDetector(max_repeats=3)
         try:
-            plan: CompilePlan = await asyncio.wait_for(
+            plan, detector = await asyncio.wait_for(
                 run_compile_agent(
                     deps,
                     model_name=self.settings.model,
                     max_tool_calls=self.settings.max_tool_calls,
                     max_output_tokens=self.settings.max_output_tokens,
+                    loop_detector=detector,
                 ),
                 timeout=self.settings.max_seconds,
             )
         except UsageLimitExceeded as exc:
-            await self._pause(ws_uuid, reason="budget_exceeded", error=str(exc))
-            await self._update_run_row(ws_uuid, run_id, status="abort_budget", error_message=str(exc))
+            if detector.triggered:
+                await self._pause(ws_uuid, reason="loop_abort", error=str(exc))
+                await self._update_run_row(ws_uuid, run_id, status="abort_loop", error_message=str(exc))
+            else:
+                await self._pause(ws_uuid, reason="budget_exceeded", error=str(exc))
+                await self._update_run_row(ws_uuid, run_id, status="abort_budget", error_message=str(exc))
             raise
         except TimeoutError:
             await self._pause(ws_uuid, reason="timeout", error="agent timeout")
@@ -209,6 +225,11 @@ class CompileCoordinator:
             raise
 
         await self._advance_cursor(ws_uuid, slice_.wal_last_id or "", plan_hash_value, last_wal_id)
+
+        # Conservative daily-token tracking; v1.1 will replace with result.usage() data
+        estimated_tokens = max(1, len(deps.wal_text) // 4)
+        self._daily_tokens[ws_uuid] = self._daily_tokens.get(ws_uuid, 0) + estimated_tokens
+
         await self._update_run_row(
             ws_uuid, run_id,
             status="success",
@@ -222,6 +243,21 @@ class CompileCoordinator:
             pages_written=pages_written, plan_hash=plan_hash_value,
         )
         return CompileRunResult(status="success", pages_written=pages_written, plan_hash=plan_hash_value)
+
+    async def resume(self, ws_uuid: UUID) -> None:
+        """Manual reset of paused workspace state. Idempotent. Per D-14."""
+        async with get_db_session() as session:
+            await session.execute(
+                update(Workspace)
+                .where(Workspace.uuid == ws_uuid)
+                .values(
+                    compile_state="idle",
+                    compile_paused_reason=None,
+                    compile_paused_at=None,
+                )
+            )
+            await session.commit()
+        log.info("compile.resumed", workspace=str(ws_uuid))
 
     async def _read_cursor(self, ws_uuid: UUID) -> CompileCursor | None:
         async with get_db_session() as session:
