@@ -8,6 +8,7 @@ import structlog
 from pydantic_ai import Agent, ModelRetry, RunContext, UsageLimits
 from pydantic_ai.settings import ModelSettings
 
+from keenyspace_server.compile.loop_detector import LoopDetector
 from keenyspace_server.compile.models import CompileDeps, CompilePlan
 from keenyspace_server.fs.path_safety import UnsafePath, open_workspace_page
 
@@ -93,12 +94,18 @@ async def run_compile_agent(
     model_name: str = "claude-sonnet-4-6",
     max_tool_calls: int = 20,
     max_output_tokens: int = 20_000,
-) -> CompilePlan:
-    """Run the compile agent with hard budgets. Raises UsageLimitExceeded on breach.
+    loop_detector: LoopDetector | None = None,
+) -> tuple[CompilePlan, LoopDetector]:
+    """Run the compile agent with hard budgets + loop detection.
 
-    The coordinator catches that and transitions workspace state to 'paused'.
+    Returns (plan, loop_detector) so the coordinator can disambiguate a
+    UsageLimitExceeded raised because the LoopDetector exhausted retries (loop_abort)
+    from a UsageLimitExceeded raised because the model genuinely overran the budget
+    (budget_exceeded). loop_detector.triggered == True implies loop_abort.
+
     Always `await` — never `agent.run_sync()` (would crash inside the async event loop).
     """
+    detector = loop_detector or LoopDetector(max_repeats=3)
     model = f"anthropic:{model_name}" if not model_name.startswith("anthropic:") else model_name
     result = await compile_agent.run(
         deps.wal_text,
@@ -112,5 +119,6 @@ async def run_compile_agent(
             request_limit=max_tool_calls + 1,
             output_tokens_limit=max_output_tokens,
         ),
+        capabilities=[detector],
     )
-    return result.output
+    return result.output, detector

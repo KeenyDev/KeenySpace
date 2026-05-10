@@ -28,6 +28,8 @@ def _looping_model_factory():
 
 @pytest.mark.asyncio
 async def test_loop_detector_aborts_on_repeated_tool_call(tmp_path: Path) -> None:
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "index.md").write_text("# Index\n")
     deps = CompileDeps(ws_root=tmp_path, wal_text="<wal_entry id='X'>data</wal_entry>")
     detector = LoopDetector(max_repeats=3)
     with compile_agent.override(model=FunctionModel(_looping_model_factory())):

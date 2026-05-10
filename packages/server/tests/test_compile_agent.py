@@ -52,7 +52,7 @@ async def test_run_compile_agent_returns_function_model_plan(tmp_path: Path) -> 
 
     deps = CompileDeps(ws_root=tmp_path, wal_text='<wal_entry id="01HX">x</wal_entry>')
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan = await run_compile_agent(deps, model_name="claude-sonnet-4-6")
+        plan, _ = await run_compile_agent(deps, model_name="claude-sonnet-4-6")
     assert isinstance(plan, CompilePlan)
     assert len(plan.ops) == 1
     assert plan.ops[0].path == "notes/test.md"
