@@ -1,6 +1,6 @@
-FROM python:3.14-slim-bookworm AS builder
+FROM python:3.14.1-slim-bookworm AS builder
 
-RUN pip install uv
+RUN pip install --no-cache-dir uv==0.5.20
 
 WORKDIR /app
 COPY pyproject.toml .
@@ -14,7 +14,7 @@ COPY packages/client/keenyspace packages/client/keenyspace
 
 RUN uv sync --frozen --no-dev --package keenyspace-server
 
-FROM python:3.14-slim-bookworm AS runtime
+FROM python:3.14.1-slim-bookworm AS runtime
 
 RUN groupadd --gid 10001 nonroot && \
     useradd --uid 10001 --gid 10001 --no-create-home nonroot

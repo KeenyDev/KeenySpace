@@ -15,10 +15,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz',timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
 
   postgres:
-    image: postgres:17
+    image: postgres:17.2-alpine
     environment:
       POSTGRES_DB: keenyspace
       POSTGRES_USER: keenyspace
@@ -33,6 +39,21 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+
+  test:
+    profiles: ["test"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.test-linux
+    environment:
+      KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:devpw@postgres/keenyspace
+      KEENYSPACE_FS__ROOT: /tmp/keenyspace
+      KEENYSPACE_AUTH__DEV_TOKEN: testtoken
+      KEENYSPACE_AUTO_MIGRATE: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["uv", "run", "--package", "keenyspace-server", "pytest", "packages/server/tests/", "-v"]
 
 volumes:
   keenyspace-fs:

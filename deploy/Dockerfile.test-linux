@@ -1,8 +1,8 @@
-FROM python:3.14-slim-bookworm
+FROM python:3.14.1-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends strace && rm -rf /var/lib/apt/lists/*
 
-RUN pip install uv
+RUN pip install --no-cache-dir uv==0.5.20
 
 WORKDIR /app
 COPY . .
