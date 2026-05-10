@@ -32,6 +32,7 @@ def _run_alembic_upgrade(settings: Settings) -> None:
     alembic_ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
     cfg = AlembicConfig(str(alembic_ini))
     cfg.set_main_option("sqlalchemy.url", str(settings.db.url))
+    cfg.set_main_option("script_location", str(alembic_ini.parent / "alembic"))
     command.upgrade(cfg, "head")
 
 
