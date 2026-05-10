@@ -1,0 +1,5 @@
+{
+  "expected_status": "abort_plan_invalid",
+  "expected_ops": [],
+  "required_notes_substring": "denylist"
+}
