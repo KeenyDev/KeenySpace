@@ -39,14 +39,39 @@ def build_app() -> FastAPI:
                 server_blueprints_dir = Path(__file__).parent.parent.parent.parent / "blueprints"
             ensure_fs_root_layout(settings.fs.root, server_blueprints_dir)
             from .compile.coordinator import CompileCoordinator, set_coordinator
+            from .compile.scheduler import build_scheduler
+
             coordinator = CompileCoordinator(settings=settings.compile)
             app.state.compile_coordinator = coordinator
             set_coordinator(coordinator)
+
+            scheduler = build_scheduler()
+            app.state.scheduler = scheduler
+            scheduler.add_job(
+                coordinator.backstop_all_workspaces,
+                "interval",
+                minutes=settings.compile.backstop_interval_minutes,
+                id="compile_backstop",
+                replace_existing=True,
+            )
+            scheduler.add_job(
+                coordinator.reset_daily_ceiling,
+                "cron",
+                hour=0, minute=0, timezone="UTC",
+                id="compile_daily_reset",
+                replace_existing=True,
+            )
+            scheduler.start()
+
             try:
                 yield
             finally:
+                # APScheduler 3.x shutdown() is sync; D-11 prose "await" wording
+                # is descriptive intent, not a literal API call — see RESEARCH §2.
+                scheduler.shutdown(wait=True)
                 set_coordinator(None)
                 app.state.compile_coordinator = None
+                app.state.scheduler = None
 
     app = FastAPI(
         title="KeenySpace",
