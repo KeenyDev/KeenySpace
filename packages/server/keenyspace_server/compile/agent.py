@@ -127,6 +127,7 @@ async def run_compile_agent(
     *,
     model_name: str = "claude-sonnet-4-6",
     max_tool_calls: int = 20,
+    max_input_tokens: int = 50_000,
     max_output_tokens: int = 20_000,
     loop_detector: LoopDetector | None = None,
 ) -> tuple[CompilePlan, LoopDetector]:
@@ -151,6 +152,7 @@ async def run_compile_agent(
         ),
         usage_limits=UsageLimits(
             request_limit=max_tool_calls + 1,
+            input_tokens_limit=max_input_tokens,
             output_tokens_limit=max_output_tokens,
         ),
         capabilities=[detector],

@@ -285,6 +285,7 @@ class CompileCoordinator:
                     deps,
                     model_name=self.settings.model,
                     max_tool_calls=self.settings.max_tool_calls,
+                    max_input_tokens=self.settings.max_input_tokens,
                     max_output_tokens=self.settings.max_output_tokens,
                     loop_detector=detector,
                 ),
