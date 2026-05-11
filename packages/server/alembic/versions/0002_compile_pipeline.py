@@ -29,7 +29,12 @@ def upgrade() -> None:
     op.create_table(
         "compile_runs",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("workspace_uuid", UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "workspace_uuid",
+            UUID(as_uuid=True),
+            sa.ForeignKey("workspaces.uuid", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("status", sa.String(64), nullable=False),
