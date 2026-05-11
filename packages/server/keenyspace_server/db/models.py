@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Index, String
+from sqlalchemy import ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncAttrs
@@ -102,7 +102,10 @@ class CompileRun(Base):
     __tablename__ = "compile_runs"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
-    workspace_uuid: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True))
+    workspace_uuid: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("workspaces.uuid", ondelete="CASCADE"),
+    )
     started_at: Mapped[datetime]
     completed_at: Mapped[datetime | None]
     status: Mapped[str] = mapped_column(String(64))
