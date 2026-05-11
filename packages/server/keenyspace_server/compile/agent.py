@@ -108,14 +108,15 @@ async def _validate_compile_plan(
     they cost extra tool calls or reach disk.
     """
     for op in plan.ops:
+        path_lower = op.path.casefold()
         for prefix in _COMPILE_DENYLIST_PREFIXES:
-            if op.path.startswith(prefix):
+            if path_lower.startswith(prefix):
                 raise ModelRetry(
                     f"PageOp.path {op.path!r} targets a protected area. "
                     "Only user-facing markdown pages outside .keenyspace/, logs/, "
                     "_templates/, raw/, and CLAUDE.md are writable."
                 )
-        if op.path in _COMPILE_DENYLIST_EXACT:
+        if path_lower in {e.casefold() for e in _COMPILE_DENYLIST_EXACT}:
             raise ModelRetry(
                 f"PageOp.path {op.path!r} targets a protected file (CLAUDE.md)."
             )
