@@ -71,7 +71,10 @@ async def search(ctx: RunContext[CompileDeps], query: str) -> str:
         hits: list[str] = []
         for p in root.rglob("*.md"):
             rel = str(p.relative_to(root))
-            if query_lower in rel.lower():
+            rel_lower = rel.casefold()
+            if any(rel_lower.startswith(pfx) for pfx in _COMPILE_DENYLIST_PREFIXES):
+                continue
+            if query_lower in rel_lower:
                 hits.append(rel)
             else:
                 try:
