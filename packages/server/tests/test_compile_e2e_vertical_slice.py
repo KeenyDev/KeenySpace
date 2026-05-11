@@ -75,7 +75,6 @@ async def test_post_compile_writes_a_page_end_to_end(tmp_path: Path) -> None:
         slug, ws_root = await _seed_workspace(client, dev_token)
         await _append_log(client, slug, dev_token, "hello world")
 
-        from keenyspace_server.compile.coordinator import get_coordinator
         with compile_agent.override(model=FunctionModel(_fake_model)):
             resp = await client.post(
                 f"/v1/api/workspaces/{slug}/compile",
