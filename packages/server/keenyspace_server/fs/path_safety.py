@@ -80,12 +80,14 @@ def is_compile_writable(ws_root: Path, path: str) -> bool:
 
     Refuses anything that fails the 4-layer pre-validation OR matches the D-07 denylist
     ('.keenyspace/', 'logs/', '_templates/', 'raw/' prefixes; 'CLAUDE.md' exact).
+    Case-folded before prefix comparison so 'Logs/foo.md' and 'logs/foo.md' both match.
     """
     try:
         canonical = validate_relative_path(path)
     except UnsafePath:
         return False
+    canonical_lower = canonical.casefold()
     for prefix in _COMPILE_DENYLIST_PREFIXES:
-        if canonical.startswith(prefix):
+        if canonical_lower.startswith(prefix):
             return False
-    return canonical not in _COMPILE_DENYLIST_EXACT
+    return canonical_lower not in {e.casefold() for e in _COMPILE_DENYLIST_EXACT}
