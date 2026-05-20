@@ -8,7 +8,14 @@ services:
     environment:
       KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:devpw@postgres/keenyspace
       KEENYSPACE_FS__ROOT: /var/lib/keenyspace
-      KEENYSPACE_AUTH__DEV_TOKEN: devtoken-replace-me
+      # OIDC contract — Phase 7 (DEP-06) wires Authentik service. Placeholders for compose-up boot.
+      KEENYSPACE_AUTH__OIDC_ISSUER_URL: http://authentik:9000/application/o/keenyspace/
+      KEENYSPACE_AUTH__OIDC_CLIENT_ID: keenyspace-dev
+      KEENYSPACE_AUTH__OIDC_CLIENT_SECRET: client-secret-replace-me
+      KEENYSPACE_AUTH__OIDC_REDIRECT_URI: http://localhost:8000/v1/api/auth/callback
+      KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI: http://localhost:8000/
+      KEENYSPACE_AUTH__SESSION_SECRET_KEY: session-secret-replace-me-min-32-bytes-xxxxxx
+      KEENYSPACE_AUTH__API_KEY_PEPPER: api-key-pepper-replace-me-min-32-bytes-xxxxxx
       KEENYSPACE_AUTO_MIGRATE: "true"
     volumes:
       - keenyspace-fs:/var/lib/keenyspace
@@ -48,7 +55,14 @@ services:
     environment:
       KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:devpw@postgres/keenyspace
       KEENYSPACE_FS__ROOT: /tmp/keenyspace
-      KEENYSPACE_AUTH__DEV_TOKEN: testtoken
+      # OIDC contract — test profile uses placeholders; tests inject pytest-httpserver-backed values.
+      KEENYSPACE_AUTH__OIDC_ISSUER_URL: http://authentik:9000/application/o/keenyspace/
+      KEENYSPACE_AUTH__OIDC_CLIENT_ID: keenyspace-test
+      KEENYSPACE_AUTH__OIDC_CLIENT_SECRET: test-client-secret
+      KEENYSPACE_AUTH__OIDC_REDIRECT_URI: http://localhost:8000/v1/api/auth/callback
+      KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI: http://localhost:8000/
+      KEENYSPACE_AUTH__SESSION_SECRET_KEY: test-session-secret-min-32-bytes-padding-padding
+      KEENYSPACE_AUTH__API_KEY_PEPPER: test-api-key-pepper-min-32-bytes-padding-padding
       KEENYSPACE_AUTO_MIGRATE: "true"
     depends_on:
       postgres:
