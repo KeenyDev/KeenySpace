@@ -81,8 +81,33 @@ def app(app_env):
     return application
 
 
+async def _reset_schema(pg_url: str) -> None:
+    import sqlalchemy as sa
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    eng = create_async_engine(pg_url, isolation_level="AUTOCOMMIT")
+    async with eng.connect() as conn:
+        await conn.execute(sa.text("DROP SCHEMA public CASCADE"))
+        await conn.execute(sa.text("CREATE SCHEMA public"))
+    await eng.dispose()
+
+
 @pytest_asyncio.fixture
-async def client(app):
+async def _engine_lifespan_ctx(app, pg_url):
+    """Reset schema -> engine_lifespan (с auto_migrate=true).
+
+    Каждый test получает чистый DB state; полный app_lifespan (scheduler,
+    coordinator) НЕ запускается — auth тесты этого не требуют.
+    """
+    from keenyspace_server.db.session import engine_lifespan
+
+    await _reset_schema(pg_url)
+    async with engine_lifespan(app):
+        yield
+
+
+@pytest_asyncio.fixture
+async def client(app, _engine_lifespan_ctx):
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(
         transport=transport,
@@ -92,7 +117,48 @@ async def client(app):
 
 
 @pytest_asyncio.fixture
-async def api_key_user(app):
+async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
+    """Wave 1 ASGITransport client с pre-injected request.state.user.
+
+    Wave 2 заменит на CompositeAuthBackend + Bearer ks_live_* paths.
+    До тех пор — middleware-bypass через scope injection: оборачиваем app в
+    test-only ASGI middleware, который ставит scope["user"]/scope["auth"]
+    напрямую, а AuthenticationMiddleware пропускается через `_TestAuthBackend`
+    (заменяем backend на authenticated stub для соответствующего request).
+    """
+    from starlette.authentication import AuthCredentials, AuthenticationBackend
+    from starlette.middleware.authentication import AuthenticationMiddleware
+
+    from keenyspace_server.auth.user import User
+
+    user_sub, _ = api_key_user
+
+    class _TestAuthBackend(AuthenticationBackend):  # type: ignore[misc]
+        async def authenticate(self, conn):  # type: ignore[no-untyped-def]
+            path = conn.url.path
+            if path.startswith(("/healthz", "/readyz", "/metrics")):
+                return None
+            return (
+                AuthCredentials(["authenticated"]),
+                User(sub=user_sub, _display_name=user_sub, source="api_key"),
+            )
+
+    for m in app.user_middleware:
+        if m.cls is AuthenticationMiddleware:
+            m.kwargs["backend"] = _TestAuthBackend()
+            break
+    app.middleware_stack = app.build_middleware_stack()
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as c:
+        yield c
+
+
+@pytest_asyncio.fixture
+async def api_key_user(app, _engine_lifespan_ctx):
     """D-20a fast-path API-key fixture — direct DB seed bypassing OIDC.
 
     Returns: (user_sub: str, plaintext_key: str).
