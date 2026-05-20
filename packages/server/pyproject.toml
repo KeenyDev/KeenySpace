@@ -25,6 +25,8 @@ dependencies = [
     "pydantic-ai-slim[anthropic]>=1.0,<2.0",
     "instructor~=1.14",
     "apscheduler>=3.10,<4.0",
+    "itsdangerous>=2.2,<3.0",
+    "argon2-cffi>=25.1,<26.0",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +40,8 @@ dev = [
     "types-pyyaml>=6.0",
     "respx>=0.21",
     "pytest-httpx>=0.35",
+    "pytest-httpserver>=1.1,<2.0",
+    "freezegun>=1.5,<2.0",
 ]
 
 [project.scripts]
@@ -56,6 +60,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["keenyspace_shared.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["joserfc.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
