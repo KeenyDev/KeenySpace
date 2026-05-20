@@ -235,6 +235,108 @@ async def _seed_api_keys(pg_url):
 
 
 @pytest.fixture
+def rsa_keypair():
+    """Generate RSA keypair для подписи test JWT (D-20b)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem_private = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    return key, pem_private
+
+
+@pytest.fixture
+def mock_authentik_provider(httpserver, rsa_keypair):
+    """D-20b — pytest-httpserver mock Authentik (discovery + JWKS + token + end_session).
+
+    Returns dict {issuer, jwks_uri, token_endpoint, end_session_endpoint,
+    sign_jwt, httpserver}. sign_jwt(claims, kid="test-kid-1") -> JWT signed via
+    RS256.
+    """
+    from joserfc import jwt as joserfc_jwt
+    from joserfc.jwk import RSAKey
+
+    _, pem = rsa_keypair
+    rsa_key = RSAKey.import_key(pem)
+    public_jwk = rsa_key.as_dict(private=False)
+    public_jwk["kid"] = "test-kid-1"
+
+    issuer = httpserver.url_for("/application/o/test").rstrip("/")
+    httpserver.expect_request(
+        "/application/o/test/.well-known/openid-configuration"
+    ).respond_with_json(
+        {
+            "issuer": issuer,
+            "authorization_endpoint": f"{issuer}/authorize",
+            "token_endpoint": f"{issuer}/token",
+            "jwks_uri": f"{issuer}/jwks",
+            "end_session_endpoint": f"{issuer}/end-session",
+            "userinfo_endpoint": f"{issuer}/userinfo",
+            "response_types_supported": ["code"],
+            "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": ["RS256"],
+        }
+    )
+    httpserver.expect_request("/application/o/test/jwks").respond_with_json(
+        {"keys": [public_jwk]}
+    )
+
+    def sign_jwt(claims: dict, kid: str = "test-kid-1") -> str:
+        header = {"alg": "RS256", "kid": kid}
+        return joserfc_jwt.encode(header, claims, rsa_key)
+
+    return {
+        "issuer": issuer,
+        "jwks_uri": f"{issuer}/jwks",
+        "token_endpoint": f"{issuer}/token",
+        "end_session_endpoint": f"{issuer}/end-session",
+        "sign_jwt": sign_jwt,
+        "httpserver": httpserver,
+    }
+
+
+@pytest_asyncio.fixture
+async def app_with_mocked_authentik(
+    mock_authentik_provider, fs_root, pg_url, monkeypatch
+):
+    """Test app wired to mock Authentik provider."""
+    monkeypatch.setenv("KEENYSPACE_DB__URL", pg_url)
+    monkeypatch.setenv("KEENYSPACE_FS__ROOT", str(fs_root))
+    monkeypatch.setenv(
+        "KEENYSPACE_AUTH__OIDC_ISSUER_URL", mock_authentik_provider["issuer"]
+    )
+    monkeypatch.setenv("KEENYSPACE_AUTH__OIDC_CLIENT_ID", "keenyspace-test")
+    monkeypatch.setenv("KEENYSPACE_AUTH__OIDC_CLIENT_SECRET", "secret")
+    monkeypatch.setenv(
+        "KEENYSPACE_AUTH__OIDC_REDIRECT_URI",
+        "http://test/v1/api/auth/callback",
+    )
+    monkeypatch.setenv("KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI", "http://test/")
+    monkeypatch.setenv(
+        "KEENYSPACE_AUTH__API_KEY_PEPPER", "test-pepper-32chars-padded-here!"
+    )
+    monkeypatch.setenv(
+        "KEENYSPACE_AUTH__SESSION_SECRET_KEY", "test-session-secret-32chars-pad!"
+    )
+    monkeypatch.setenv("KEENYSPACE_AUTH__COOKIE_SECURE", "false")
+    monkeypatch.setenv("KEENYSPACE_AUTO_MIGRATE", "true")
+    from keenyspace_server.config import get_settings
+
+    get_settings.cache_clear()
+    from keenyspace_server.db.session import engine_lifespan
+    from keenyspace_server.main import build_app
+
+    await _reset_schema(pg_url)
+    application = build_app()
+    async with engine_lifespan(application):
+        yield application, mock_authentik_provider
+
+
+@pytest.fixture
 def alembic_at_0002(pg_url, app_env):
     """Применяет миграции до 0002 (НЕ до head) и вставляет seed api_keys row.
 
