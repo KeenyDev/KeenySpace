@@ -10,7 +10,7 @@ from starlette.authentication import BaseUser
 class User(BaseUser):
     sub: str
     _display_name: str
-    source: Literal["dev_shim", "oidc", "api_key"]
+    source: Literal["oidc", "api_key"]
 
     @property
     def is_authenticated(self) -> bool:

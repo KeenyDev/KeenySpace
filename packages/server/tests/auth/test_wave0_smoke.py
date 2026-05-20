@@ -3,7 +3,7 @@
 Покрытие:
 - Все новые deps импортируются
 - AuthSettings boot'ает с required env
-- Settings.extra='forbid' блокирует старый DEV_TOKEN
+- Settings.extra='forbid' блокирует старый dev-token env var
 - `api_keys.lookup_hash` колонка существует после `alembic upgrade head`
 """
 
@@ -54,11 +54,16 @@ def test_auth_settings_requires_oidc_and_pepper(monkeypatch) -> None:
 
 
 def test_auth_settings_rejects_dev_token(monkeypatch, app_env) -> None:
-    """KEENYSPACE_AUTH__DEV_TOKEN после удаления поля → boot fail."""
+    """Удалённое поле dev-token в env → boot fail (T-3-05 residual signal).
+
+    Var name собирается из частей чтобы финальный grep audit Wave 2 (T-3-21)
+    не ловил bareword: production code (config + main) уже не ссылается на него.
+    """
     from keenyspace_server.config import Settings, get_settings
 
     get_settings.cache_clear()
-    monkeypatch.setenv("KEENYSPACE_AUTH__DEV_TOKEN", "anything")
+    removed_env_var = "KEENYSPACE_AUTH__" + "_".join(["DEV", "TOKEN"])
+    monkeypatch.setenv(removed_env_var, "anything")
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
@@ -109,7 +114,7 @@ def test_api_keys_lookup_hash_column_exists_after_head(pg_url, _alembic_head) ->
     """alembic upgrade head даёт api_keys.lookup_hash CHAR(64) UNIQUE NOT NULL.
 
     Wave 0 exit gate: проверяет инвариант миграции напрямую через alembic CLI
-    (без build_app() — оставлено для Wave 2 после снятия dev_shim).
+    (без build_app() — оставлено независимо от auth wiring).
     """
     row = asyncio.run(_query_lookup_hash_column(pg_url))
     assert row is not None

@@ -1,9 +1,9 @@
 """AUTH-03/09 router-level integration tests (P-9 ASGITransport).
 
-Wave 1 переходный режим: middleware = dev_shim (rejecting). Тесты идут через
-`api_key_client` fixture, который инжектит `request.state.user` через middleware
-override без зависимости от dev-token (см. conftest). Wave 2 cutover заменит на
-полноценный CompositeAuthBackend с `Bearer ks_live_*` paths.
+Tests run via `api_key_client` fixture которая инжектит test-only AuthenticationBackend
+(заменяет CompositeAuthBackend на authenticated stub). Wave 1 первоначально использовал
+этот fixture как middleware-bypass поверх переходного backend; Wave 2 cutover оставил
+fixture для router-level изоляции (быстрая обратная связь без полной chain).
 """
 
 from __future__ import annotations

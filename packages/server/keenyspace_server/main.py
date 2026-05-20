@@ -13,7 +13,7 @@ from starlette.middleware.authentication import AuthenticationMiddleware
 from .api import compile as compile_router
 from .api import health, logs, pages, workspaces
 from .auth.api_keys import ApiKeyService
-from .auth.dev_shim import DevTokenAuthBackend
+from .auth.composite import CompositeAuthBackend
 from .auth.middleware import on_auth_error
 from .config import get_settings
 from .db.session import engine_lifespan, get_db_session
@@ -84,17 +84,20 @@ def build_app() -> FastAPI:
 
     app.state.settings = settings
     app.state.wal_locks = WorkspaceLockRegistry()
-    app.state.api_key_service = ApiKeyService(
+    api_key_service = ApiKeyService(
         pepper=settings.auth.api_key_pepper,
         db_factory=get_db_session,
         debounce_seconds=settings.auth.api_key_last_used_debounce_seconds,
     )
+    app.state.api_key_service = api_key_service
 
-    # Wave 1 transitional middleware: dev_shim backend без dev_token (всегда отвергает).
-    # Wave 2 (task 03-03-04) заменяет на CompositeAuthBackend с cookie/api_key/oidc paths.
+    composite_backend = CompositeAuthBackend(
+        oidc_client=None,
+        api_key_service=api_key_service,
+    )
     app.add_middleware(
         AuthenticationMiddleware,
-        backend=DevTokenAuthBackend(dev_token=None),
+        backend=composite_backend,
         on_error=on_auth_error,
     )
 

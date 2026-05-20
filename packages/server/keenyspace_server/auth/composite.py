@@ -1,6 +1,6 @@
 """CompositeAuthBackend — resolver chain (cookie > api_key > oidc_bearer).
 
-D-19: replaces DevTokenAuthBackend.
+D-19: единственный production auth backend Phase 3+.
 Wave 2: только api_key resolver активен; cookie + oidc_bearer заполняются в Wave 3.
 """
 
