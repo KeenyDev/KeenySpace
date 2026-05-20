@@ -3,6 +3,7 @@
 Wave 0 регрессионный тест: миграция 0003 проходит на ПУСТОЙ api_keys
 и явно falls на непустой (manual cleanup signal).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -48,9 +49,7 @@ def test_0003_upgrade_succeeds_on_empty_api_keys(pg_url: str, app_env) -> None:
     assert asyncio.run(_check_lookup_hash_column(pg_url)) == "lookup_hash"
 
 
-def test_0003_upgrade_fails_on_seeded_api_keys(
-    pg_url: str, app_env, alembic_at_0002
-) -> None:
+def test_0003_upgrade_fails_on_seeded_api_keys(pg_url: str, app_env, alembic_at_0002) -> None:
     cfg = Config("alembic.ini")
     with pytest.raises(RuntimeError, match=r"api_keys has \d+ row"):
         command.upgrade(cfg, "0003")

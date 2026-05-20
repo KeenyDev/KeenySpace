@@ -72,9 +72,7 @@ class AuditLog(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     actor_sub: Mapped[str] = mapped_column(String(256))
     action: Mapped[str] = mapped_column(String(128))
-    workspace_uuid: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=True
-    )
+    workspace_uuid: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     ts: Mapped[datetime]
 
@@ -91,9 +89,7 @@ class Blueprint(Base):
 class CompileCursor(Base):
     __tablename__ = "compile_cursors"
 
-    workspace_uuid: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True
-    )
+    workspace_uuid: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     last_wal_id: Mapped[str] = mapped_column(String(26))
     last_compile_hash: Mapped[str] = mapped_column(String(64))
     updated_at: Mapped[datetime]
@@ -121,6 +117,4 @@ class CompileRun(Base):
     model: Mapped[str] = mapped_column(String(128))
     error_message: Mapped[str | None]
 
-    __table_args__ = (
-        Index("ix_compile_runs_workspace_started", "workspace_uuid", "started_at"),
-    )
+    __table_args__ = (Index("ix_compile_runs_workspace_started", "workspace_uuid", "started_at"),)

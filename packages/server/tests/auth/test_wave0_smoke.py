@@ -6,6 +6,7 @@
 - Settings.extra='forbid' блокирует старый DEV_TOKEN
 - `api_keys.lookup_hash` колонка существует после `alembic upgrade head`
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,13 +15,16 @@ import pytest
 
 
 def test_new_libs_importable() -> None:
-    import argon2  # noqa: F401
-    import freezegun  # noqa: F401
-    import itsdangerous  # noqa: F401
-    import joserfc.jwk  # noqa: F401
-    import joserfc.jwt  # noqa: F401
-    import pytest_httpserver  # noqa: F401
+    import argon2
+    import freezegun
+    import itsdangerous
+    import joserfc.jwk
+    import joserfc.jwt
+    import pytest_httpserver
     from argon2 import PasswordHasher
+
+    assert argon2 and freezegun and itsdangerous
+    assert joserfc.jwk and joserfc.jwt and pytest_httpserver
 
     ph = PasswordHasher()
     assert ph.time_cost == 3
@@ -43,7 +47,9 @@ def test_auth_settings_requires_oidc_and_pepper(monkeypatch) -> None:
         "KEENYSPACE_AUTH__SESSION_SECRET_KEY",
     ):
         monkeypatch.delenv(k, raising=False)
-    with pytest.raises(Exception):  # pydantic.ValidationError
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         Settings()  # type: ignore[call-arg]
 
 
@@ -53,7 +59,9 @@ def test_auth_settings_rejects_dev_token(monkeypatch, app_env) -> None:
 
     get_settings.cache_clear()
     monkeypatch.setenv("KEENYSPACE_AUTH__DEV_TOKEN", "anything")
-    with pytest.raises(Exception):  # pydantic.ValidationError (extra='forbid')
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         Settings()  # type: ignore[call-arg]
 
 
@@ -97,9 +105,7 @@ def _alembic_head(pg_url, app_env):
     yield
 
 
-def test_api_keys_lookup_hash_column_exists_after_head(
-    pg_url, _alembic_head
-) -> None:
+def test_api_keys_lookup_hash_column_exists_after_head(pg_url, _alembic_head) -> None:
     """alembic upgrade head даёт api_keys.lookup_hash CHAR(64) UNIQUE NOT NULL.
 
     Wave 0 exit gate: проверяет инвариант миграции напрямую через alembic CLI
@@ -108,4 +114,4 @@ def test_api_keys_lookup_hash_column_exists_after_head(
     row = asyncio.run(_query_lookup_hash_column(pg_url))
     assert row is not None
     assert row[1] == "NO"  # NOT NULL
-    assert row[2] == 64    # CHAR(64) max length
+    assert row[2] == 64  # CHAR(64) max length

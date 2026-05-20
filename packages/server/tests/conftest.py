@@ -14,8 +14,12 @@ from httpx import ASGITransport, AsyncClient
 
 def pytest_configure(config):  # type: ignore[no-untyped-def]
     config.addinivalue_line("markers", "eval: marker for compile evaluation suite (Plans 06-08)")
-    config.addinivalue_line("markers", "requires_anthropic: marker for fixtures that hit the real Anthropic API")
-    config.addinivalue_line("markers", "slow: subprocess-uvicorn integration test; runs only in full suite")
+    config.addinivalue_line(
+        "markers", "requires_anthropic: marker for fixtures that hit the real Anthropic API"
+    )
+    config.addinivalue_line(
+        "markers", "slow: subprocess-uvicorn integration test; runs only in full suite"
+    )
 
 
 @pytest.fixture
@@ -68,6 +72,7 @@ def app_env(fs_root, pg_url, monkeypatch):
 @pytest.fixture
 def app(app_env):
     import keenyspace_server.config as cfg_module
+
     cfg_module.get_settings.cache_clear()
 
     from keenyspace_server.main import build_app
@@ -95,10 +100,9 @@ async def api_key_user(app):
     Real argon2 hash + lookup_hash вычисляются здесь же (НЕ ждём Wave 1).
     """
     from argon2 import PasswordHasher
-    from sqlalchemy import text
-
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
+    from sqlalchemy import text
 
     settings = get_settings()
     pepper = settings.auth.api_key_pepper
