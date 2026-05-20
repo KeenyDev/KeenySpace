@@ -23,11 +23,11 @@ class Workspace(Base):
     display_name: Mapped[str] = mapped_column(String(256))
     blueprint_ref: Mapped[str] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(32))
-    created_at: Mapped[datetime]
-    archived_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     compile_state: Mapped[str] = mapped_column(String(32), server_default="idle")
     compile_paused_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    compile_paused_at: Mapped[datetime | None]
+    compile_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_workspaces_slug", "slug"),)
 
@@ -39,7 +39,7 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(256))
     email: Mapped[str | None] = mapped_column(String(256), nullable=True)
     source: Mapped[str] = mapped_column(String(32))
-    created_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Session(Base):
@@ -48,8 +48,8 @@ class Session(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     user_sub: Mapped[str] = mapped_column(String(256))
     token_hash: Mapped[str] = mapped_column(String(256))
-    expires_at: Mapped[datetime]
-    created_at: Mapped[datetime]
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ApiKey(Base):
@@ -83,7 +83,7 @@ class Blueprint(Base):
     name: Mapped[str] = mapped_column(String(128), primary_key=True)
     version: Mapped[str] = mapped_column(String(32))
     description: Mapped[str] = mapped_column(String(512))
-    created_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class CompileCursor(Base):
@@ -92,7 +92,7 @@ class CompileCursor(Base):
     workspace_uuid: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     last_wal_id: Mapped[str] = mapped_column(String(26))
     last_compile_hash: Mapped[str] = mapped_column(String(64))
-    updated_at: Mapped[datetime]
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class CompileRun(Base):
@@ -103,8 +103,8 @@ class CompileRun(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("workspaces.uuid", ondelete="CASCADE"),
     )
-    started_at: Mapped[datetime]
-    completed_at: Mapped[datetime | None]
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(64))
     trigger_source: Mapped[str] = mapped_column(String(32))
     wal_first_id: Mapped[str | None] = mapped_column(String(26), nullable=True)

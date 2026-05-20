@@ -84,6 +84,12 @@ def build_app() -> FastAPI:
 
     app.state.settings = settings
     app.state.wal_locks = WorkspaceLockRegistry()
+    # FastMCP get_http_request() may return a synthetic request whose .app points
+    # at the mounted mcp_app rather than the outer FastAPI app. MCP tools access
+    # app.state.settings / wal_locks — mirror them onto mcp_app.state so the
+    # mount-level request resolves the same attributes (out-of-scope baseline gap).
+    mcp_app.state.settings = settings
+    mcp_app.state.wal_locks = app.state.wal_locks
     api_key_service = ApiKeyService(
         pepper=settings.auth.api_key_pepper,
         db_factory=get_db_session,

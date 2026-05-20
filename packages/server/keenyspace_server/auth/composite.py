@@ -35,9 +35,7 @@ class CompositeAuthBackend(AuthenticationBackend):
         self._oidc = oidc_client
         self._keys = api_key_service
 
-    async def authenticate(
-        self, conn: HTTPConnection
-    ) -> tuple[AuthCredentials, User] | None:
+    async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, User] | None:
         path = conn.url.path
         for prefix in PUBLIC_PREFIXES:
             if path.startswith(prefix):
