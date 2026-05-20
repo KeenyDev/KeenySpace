@@ -60,6 +60,7 @@ class ApiKey(Base):
     name: Mapped[str] = mapped_column(String(128))
     prefix: Mapped[str] = mapped_column(String(16), default="ks_live_")
     hash: Mapped[str] = mapped_column(String(256))
+    lookup_hash: Mapped[str] = mapped_column(String(64), unique=True)
     last_used_at: Mapped[datetime | None]
     created_at: Mapped[datetime]
     revoked_at: Mapped[datetime | None]
