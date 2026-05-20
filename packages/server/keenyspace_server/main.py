@@ -6,20 +6,22 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastmcp.utilities.lifespan import combine_lifespans
 from starlette.middleware.authentication import AuthenticationMiddleware
 
 from .api import compile as compile_router
 from .api import health, logs, pages, workspaces
+from .auth.api_keys import ApiKeyService
 from .auth.dev_shim import DevTokenAuthBackend
 from .auth.middleware import on_auth_error
 from .config import get_settings
-from .db.session import engine_lifespan
+from .db.session import engine_lifespan, get_db_session
 from .fs.bootstrap import ensure_fs_root_layout
 from .mcp.server import build_mcp, build_mcp_skeleton
 from .observability.logging import configure_logging
 from .observability.metrics import build_instrumentator
+from .routers import api_keys as api_keys_router
 from .wal.locks import WorkspaceLockRegistry
 
 
@@ -57,7 +59,9 @@ def build_app() -> FastAPI:
             scheduler.add_job(
                 coordinator.reset_daily_ceiling,
                 "cron",
-                hour=0, minute=0, timezone="UTC",
+                hour=0,
+                minute=0,
+                timezone="UTC",
                 id="compile_daily_reset",
                 replace_existing=True,
             )
@@ -80,10 +84,17 @@ def build_app() -> FastAPI:
 
     app.state.settings = settings
     app.state.wal_locks = WorkspaceLockRegistry()
+    app.state.api_key_service = ApiKeyService(
+        pepper=settings.auth.api_key_pepper,
+        db_factory=get_db_session,
+        debounce_seconds=settings.auth.api_key_last_used_debounce_seconds,
+    )
 
+    # Wave 1 transitional middleware: dev_shim backend без dev_token (всегда отвергает).
+    # Wave 2 (task 03-03-04) заменяет на CompositeAuthBackend с cookie/api_key/oidc paths.
     app.add_middleware(
         AuthenticationMiddleware,
-        backend=DevTokenAuthBackend(settings.auth.dev_token),
+        backend=DevTokenAuthBackend(dev_token=None),
         on_error=on_auth_error,
     )
 
@@ -92,10 +103,7 @@ def build_app() -> FastAPI:
     app.include_router(pages.router, prefix="/v1/api/workspaces")
     app.include_router(logs.router, prefix="/v1/api/workspaces")
     app.include_router(compile_router.router, prefix="/v1/api/workspaces")
-
-    @app.get("/v1/admin/api-keys")
-    async def admin_stub() -> None:
-        raise HTTPException(status_code=501, detail="admin api-keys is Phase 3")
+    app.include_router(api_keys_router.router, prefix="/v1/api/auth/api-keys")
 
     app.mount("/v1/mcp", mcp_app)
 

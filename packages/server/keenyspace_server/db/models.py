@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, String
+from sqlalchemy import DateTime, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncAttrs
@@ -61,9 +61,9 @@ class ApiKey(Base):
     prefix: Mapped[str] = mapped_column(String(16), default="ks_live_")
     hash: Mapped[str] = mapped_column(String(256))
     lookup_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    last_used_at: Mapped[datetime | None]
-    created_at: Mapped[datetime]
-    revoked_at: Mapped[datetime | None]
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuditLog(Base):
@@ -74,7 +74,7 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(128))
     workspace_uuid: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
-    ts: Mapped[datetime]
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Blueprint(Base):

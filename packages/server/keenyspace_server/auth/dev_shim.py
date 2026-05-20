@@ -18,9 +18,7 @@ class DevTokenAuthBackend(AuthenticationBackend):
     def __init__(self, dev_token: str | None = None) -> None:
         self._dev_token = dev_token
 
-    async def authenticate(
-        self, conn: HTTPConnection
-    ) -> tuple[AuthCredentials, User] | None:
+    async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, User] | None:
         path = conn.url.path
         for prefix in PUBLIC_PREFIXES:
             if path.startswith(prefix):
