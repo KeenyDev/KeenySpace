@@ -14,11 +14,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from starlette.authentication import AuthenticationError
-from starlette.requests import HTTPConnection
-
 from keenyspace_server.auth.composite import PUBLIC_PREFIXES, CompositeAuthBackend
 from keenyspace_server.auth.user import User
+from starlette.authentication import AuthenticationError
+from starlette.requests import HTTPConnection
 
 
 def _conn(path: str, headers: dict[str, str] | None = None) -> HTTPConnection:

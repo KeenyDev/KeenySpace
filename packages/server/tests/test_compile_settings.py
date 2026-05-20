@@ -25,6 +25,14 @@ def test_settings_compile_field_loads_env() -> None:
         "KEENYSPACE_DB__URL": "postgresql+asyncpg://x:x@localhost/x",
         "KEENYSPACE_COMPILE__MODEL": "claude-opus-4-7",
         "KEENYSPACE_COMPILE__MAX_TOOL_CALLS": "10",
+        # Wave 0 AuthSettings required fields.
+        "KEENYSPACE_AUTH__OIDC_ISSUER_URL": "http://localhost:9999/application/o/test/",
+        "KEENYSPACE_AUTH__OIDC_CLIENT_ID": "test-client",
+        "KEENYSPACE_AUTH__OIDC_CLIENT_SECRET": "test-secret",
+        "KEENYSPACE_AUTH__OIDC_REDIRECT_URI": "http://localhost:8000/v1/api/auth/callback",
+        "KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI": "http://localhost:8000/",
+        "KEENYSPACE_AUTH__API_KEY_PEPPER": "test-pepper-32chars-padded-here!",
+        "KEENYSPACE_AUTH__SESSION_SECRET_KEY": "test-session-secret-32chars-pad!",
     }
     with patch.dict(os.environ, env, clear=True):
         s = Settings()  # type: ignore[call-arg]
