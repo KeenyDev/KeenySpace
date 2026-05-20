@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastmcp.utilities.lifespan import combine_lifespans
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -17,6 +17,7 @@ from .auth.api_keys import ApiKeyService
 from .auth.composite import CompositeAuthBackend
 from .auth.middleware import on_auth_error
 from .auth.oidc import OidcClient, build_oauth
+from .auth.refresh_dep import refresh_if_needed
 from .config import get_settings
 from .db.session import engine_lifespan, get_db_session
 from .fs.bootstrap import ensure_fs_root_layout
@@ -131,11 +132,36 @@ def build_app() -> FastAPI:
     )
 
     app.include_router(health.router)
-    app.include_router(workspaces.router, prefix="/v1/api/workspaces")
-    app.include_router(pages.router, prefix="/v1/api/workspaces")
-    app.include_router(logs.router, prefix="/v1/api/workspaces")
-    app.include_router(compile_router.router, prefix="/v1/api/workspaces")
-    app.include_router(api_keys_router.router, prefix="/v1/api/auth/api-keys")
+    # D-03 inline auto-refresh: cookie-path browser sessions get inline rotate
+    # via FastAPI dependency when ks_at exp is within refresh_threshold_seconds.
+    # NOT applied to auth router (login/callback public; refresh/logout self-manage
+    # cookies) nor to MCP mount (API-key path per D-13).
+    protected_deps = [Depends(refresh_if_needed)]
+    app.include_router(
+        workspaces.router,
+        prefix="/v1/api/workspaces",
+        dependencies=protected_deps,
+    )
+    app.include_router(
+        pages.router,
+        prefix="/v1/api/workspaces",
+        dependencies=protected_deps,
+    )
+    app.include_router(
+        logs.router,
+        prefix="/v1/api/workspaces",
+        dependencies=protected_deps,
+    )
+    app.include_router(
+        compile_router.router,
+        prefix="/v1/api/workspaces",
+        dependencies=protected_deps,
+    )
+    app.include_router(
+        api_keys_router.router,
+        prefix="/v1/api/auth/api-keys",
+        dependencies=protected_deps,
+    )
     app.include_router(auth_router.router, prefix="/v1/api/auth")
 
     app.mount("/v1/mcp", mcp_app)
