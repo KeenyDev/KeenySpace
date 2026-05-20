@@ -14,6 +14,7 @@ from starlette.authentication import (
 from starlette.requests import HTTPConnection
 
 from keenyspace_server.auth.api_keys import ApiKeyService
+from keenyspace_server.auth.oidc import OidcClient
 from keenyspace_server.auth.user import User
 
 PUBLIC_PREFIXES = (
@@ -29,10 +30,10 @@ class CompositeAuthBackend(AuthenticationBackend):
     def __init__(
         self,
         *,
-        oidc_client: object | None,
+        oidc_client: OidcClient | None,
         api_key_service: ApiKeyService,
     ) -> None:
-        self._oidc = oidc_client
+        self._oidc: OidcClient | None = oidc_client
         self._keys = api_key_service
 
     async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, User] | None:
@@ -50,7 +51,12 @@ class CompositeAuthBackend(AuthenticationBackend):
         return (AuthCredentials(["authenticated"]), user)
 
     async def _try_cookie(self, conn: HTTPConnection) -> User | None:
-        return None
+        if self._oidc is None:
+            return None
+        token = conn.cookies.get("ks_at")
+        if not token:
+            return None
+        return await self._oidc.validate_access_token(token, conn=conn)
 
     async def _try_api_key(self, conn: HTTPConnection) -> User | None:
         auth = conn.headers.get("Authorization", "")
@@ -62,4 +68,12 @@ class CompositeAuthBackend(AuthenticationBackend):
         return await self._keys.verify(token)
 
     async def _try_oidc_bearer(self, conn: HTTPConnection) -> User | None:
-        return None
+        if self._oidc is None:
+            return None
+        auth = conn.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return None
+        token = auth[len("Bearer ") :]
+        if token.startswith("ks_live_"):
+            return None
+        return await self._oidc.validate_access_token(token, conn=None)

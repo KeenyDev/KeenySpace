@@ -9,12 +9,14 @@ import uvicorn
 from fastapi import FastAPI
 from fastmcp.utilities.lifespan import combine_lifespans
 from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 from .api import compile as compile_router
 from .api import health, logs, pages, workspaces
 from .auth.api_keys import ApiKeyService
 from .auth.composite import CompositeAuthBackend
 from .auth.middleware import on_auth_error
+from .auth.oidc import OidcClient, build_oauth
 from .config import get_settings
 from .db.session import engine_lifespan, get_db_session
 from .fs.bootstrap import ensure_fs_root_layout
@@ -22,6 +24,7 @@ from .mcp.server import build_mcp, build_mcp_skeleton
 from .observability.logging import configure_logging
 from .observability.metrics import build_instrumentator
 from .routers import api_keys as api_keys_router
+from .routers import auth as auth_router
 from .wal.locks import WorkspaceLockRegistry
 
 
@@ -97,14 +100,34 @@ def build_app() -> FastAPI:
     )
     app.state.api_key_service = api_key_service
 
+    oauth = build_oauth(settings)
+    app.state.oauth = oauth
+    oidc_client = OidcClient(oauth, settings.auth)
+    app.state.oidc_client = oidc_client
+
     composite_backend = CompositeAuthBackend(
-        oidc_client=None,
+        oidc_client=oidc_client,
         api_key_service=api_key_service,
     )
+    # Middleware order — Starlette wraps in reverse-add order; LAST add_middleware
+    # = OUTERMOST = runs first on inbound request. SessionMiddleware must run
+    # BEFORE AuthenticationMiddleware so request.session is populated before
+    # CompositeAuthBackend.authenticate (which delegates to OidcClient using
+    # request session under /v1/api/auth). Path-scoped to /v1/api/auth so the
+    # cookie does not leak onto /v1/mcp or other surfaces (T-3-37).
     app.add_middleware(
         AuthenticationMiddleware,
         backend=composite_backend,
         on_error=on_auth_error,
+    )
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.auth.session_secret_key,
+        session_cookie="ks_oidc_session",
+        max_age=900,
+        same_site="lax",
+        https_only=settings.auth.cookie_secure,
+        path="/v1/api/auth",
     )
 
     app.include_router(health.router)
@@ -113,6 +136,7 @@ def build_app() -> FastAPI:
     app.include_router(logs.router, prefix="/v1/api/workspaces")
     app.include_router(compile_router.router, prefix="/v1/api/workspaces")
     app.include_router(api_keys_router.router, prefix="/v1/api/auth/api-keys")
+    app.include_router(auth_router.router, prefix="/v1/api/auth")
 
     app.mount("/v1/mcp", mcp_app)
 
