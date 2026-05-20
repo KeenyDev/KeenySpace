@@ -32,7 +32,29 @@ def test_app():
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setenv("KEENYSPACE_DB__URL", "postgresql+asyncpg://u:p@h/d")
     monkeypatch.setenv("KEENYSPACE_FS__ROOT", "/tmp/k")
-    monkeypatch.setenv("KEENYSPACE_AUTH__DEV_TOKEN", "test")
+    monkeypatch.setenv(
+        "KEENYSPACE_AUTH__OIDC_ISSUER_URL",
+        "http://localhost:9999/application/o/test/",
+    )
+    monkeypatch.setenv("KEENYSPACE_AUTH__OIDC_CLIENT_ID", "test-client")
+    monkeypatch.setenv("KEENYSPACE_AUTH__OIDC_CLIENT_SECRET", "test-secret")
+    monkeypatch.setenv(
+        "KEENYSPACE_AUTH__OIDC_REDIRECT_URI",
+        "http://localhost:8000/v1/api/auth/callback",
+    )
+    monkeypatch.setenv(
+        "KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI",
+        "http://localhost:8000/",
+    )
+    monkeypatch.setenv(
+        "KEENYSPACE_AUTH__API_KEY_PEPPER",
+        "test-pepper-32chars-padded-here!",
+    )
+    monkeypatch.setenv(
+        "KEENYSPACE_AUTH__SESSION_SECRET_KEY",
+        "test-session-secret-32chars-pad!",
+    )
+    monkeypatch.setenv("KEENYSPACE_AUTH__COOKIE_SECURE", "false")
 
     import keenyspace_server.config as cfg_module
     cfg_module.get_settings.cache_clear()

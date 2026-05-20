@@ -107,24 +107,38 @@ async def _engine_lifespan_ctx(app, pg_url):
 
 
 @pytest_asyncio.fixture
-async def client(app, _engine_lifespan_ctx):
+async def client(app, _engine_lifespan_ctx, api_key_user):
+    """Default client: authenticated через real CompositeAuthBackend + Bearer ks_live_*.
+
+    Wave 2 cutover (D-19/D-21): integration tests proxy через настоящую auth chain,
+    no middleware-bypass. Negative-auth assertions используют `anon_client`.
+    """
+    _, plaintext = api_key_user
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(
         transport=transport,
         base_url="http://test",
+        headers={"Authorization": f"Bearer {plaintext}"},
     ) as c:
         yield c
 
 
 @pytest_asyncio.fixture
-async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
-    """Wave 1 ASGITransport client с pre-injected request.state.user.
+async def anon_client(app, _engine_lifespan_ctx):
+    """Anonymous client для negative tests (auth_bypass, public endpoints)."""
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
 
-    Wave 2 заменит на CompositeAuthBackend + Bearer ks_live_* paths.
-    До тех пор — middleware-bypass через scope injection: оборачиваем app в
-    test-only ASGI middleware, который ставит scope["user"]/scope["auth"]
-    напрямую, а AuthenticationMiddleware пропускается через `_TestAuthBackend`
-    (заменяем backend на authenticated stub для соответствующего request).
+
+@pytest_asyncio.fixture
+async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
+    """Router-level fast-path: authenticated через test-only AuthenticationBackend stub.
+
+    Используется Wave 1 router tests для изоляции от composite resolver chain
+    (быстрая обратная связь без full DB verify roundtrip). Production path
+    тестируется через default `client` fixture + integration tests против
+    real composite backend.
     """
     from starlette.authentication import AuthCredentials, AuthenticationBackend
     from starlette.middleware.authentication import AuthenticationMiddleware
