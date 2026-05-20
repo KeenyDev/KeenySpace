@@ -31,8 +31,7 @@ def build_oauth(settings: Settings) -> OAuth:
         client_id=settings.auth.oidc_client_id,
         client_secret=settings.auth.oidc_client_secret,
         server_metadata_url=(
-            f"{settings.auth.oidc_issuer_url.rstrip('/')}"
-            "/.well-known/openid-configuration"
+            f"{settings.auth.oidc_issuer_url.rstrip('/')}/.well-known/openid-configuration"
         ),
         client_kwargs={
             "scope": "openid profile email groups",
@@ -69,27 +68,21 @@ class OidcClient:
             return False
         try:
             return (float(exp) - time.time()) < threshold_seconds
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
 
-    async def validate_access_token(
-        self, token: str, *, conn: Any = None
-    ) -> User | None:
+    async def validate_access_token(self, token: str, *, conn: Any = None) -> User | None:
         keyset = await self._jwks_cache.get()
         if keyset is None:
             return None
         try:
-            decoded = joserfc_jwt.decode(
-                token, keyset, algorithms=["RS256", "ES256"]
-            )
+            decoded = joserfc_jwt.decode(token, keyset, algorithms=["RS256", "ES256"])
         except InvalidKeyIdError:
             keyset = await self._jwks_cache.force_refresh()
             if keyset is None:
                 return None
             try:
-                decoded = joserfc_jwt.decode(
-                    token, keyset, algorithms=["RS256", "ES256"]
-                )
+                decoded = joserfc_jwt.decode(token, keyset, algorithms=["RS256", "ES256"])
             except JoseError:
                 return None
         except JoseError:
@@ -123,9 +116,7 @@ class OidcClient:
         if not isinstance(sub_value, str):
             return None
         display_name = (
-            decoded.claims.get("preferred_username")
-            or decoded.claims.get("name")
-            or sub_value
+            decoded.claims.get("preferred_username") or decoded.claims.get("name") or sub_value
         )
         return User(
             sub=sub_value,
@@ -140,12 +131,8 @@ class OidcClient:
             log.warning("auth.token.refresh.metadata_failed")
             return None
         try:
-            async with AsyncOAuth2Client(
-                self._client_id, self._auth.oidc_client_secret
-            ) as client:
-                token = await client.refresh_token(
-                    token_endpoint, refresh_token=refresh_token
-                )
+            async with AsyncOAuth2Client(self._client_id, self._auth.oidc_client_secret) as client:
+                token = await client.refresh_token(token_endpoint, refresh_token=refresh_token)
                 if isinstance(token, dict):
                     return token
                 return dict(token)

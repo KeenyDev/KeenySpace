@@ -140,3 +140,140 @@ def test_public_prefixes_constant_includes_required() -> None:
 def test_public_prefixes_is_tuple_for_immutability() -> None:
     """T-3-25: tuple, not list — prevents accidental .append() drift."""
     assert isinstance(PUBLIC_PREFIXES, tuple)
+
+
+# Wave 3: cookie + oidc_bearer resolver coverage (03-04-04 wiring).
+
+
+def _conn_with_cookies(
+    path: str, cookies: dict[str, str] | None = None, headers: dict[str, str] | None = None
+) -> HTTPConnection:
+    raw_headers = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
+    if cookies:
+        cookie_header = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        raw_headers.append((b"cookie", cookie_header.encode()))
+    scope = {
+        "type": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": raw_headers,
+        "scheme": "http",
+        "server": ("test", 80),
+        "state": {},
+    }
+    return HTTPConnection(scope)
+
+
+@pytest.mark.asyncio
+async def test_cookie_resolver_happy_path() -> None:
+    """ks_at cookie → OidcClient.validate_access_token → User(source='oidc')."""
+    fake_user = User(sub="u-oidc", _display_name="alice", source="oidc")
+    fake_oidc = AsyncMock()
+    fake_oidc.validate_access_token.return_value = fake_user
+    fake_keys = AsyncMock()
+    backend = CompositeAuthBackend(oidc_client=fake_oidc, api_key_service=fake_keys)
+    conn = _conn_with_cookies("/v1/api/workspaces/", cookies={"ks_at": "jwt-token"})
+    result = await backend.authenticate(conn)
+    assert result is not None
+    creds, user = result
+    assert "authenticated" in creds.scopes
+    assert user.sub == "u-oidc"
+    assert user.source == "oidc"
+    fake_oidc.validate_access_token.assert_awaited_once()
+    fake_keys.verify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cookie_resolver_tampered_jwt_falls_through_to_401() -> None:
+    """validate_access_token returns None (signature mismatch) → AuthError."""
+    fake_oidc = AsyncMock()
+    fake_oidc.validate_access_token.return_value = None
+    fake_keys = AsyncMock()
+    backend = CompositeAuthBackend(oidc_client=fake_oidc, api_key_service=fake_keys)
+    conn = _conn_with_cookies("/v1/api/workspaces/", cookies={"ks_at": "tampered.jwt.zzz"})
+    with pytest.raises(AuthenticationError):
+        await backend.authenticate(conn)
+
+
+@pytest.mark.asyncio
+async def test_cookie_resolver_no_oidc_client_returns_none() -> None:
+    """Wave 2 posture: oidc_client=None → cookie resolver no-op."""
+    fake_keys = AsyncMock()
+    backend = CompositeAuthBackend(oidc_client=None, api_key_service=fake_keys)
+    conn = _conn_with_cookies("/v1/api/workspaces/", cookies={"ks_at": "anything"})
+    with pytest.raises(AuthenticationError):
+        await backend.authenticate(conn)
+
+
+@pytest.mark.asyncio
+async def test_oidc_bearer_resolver_happy_path() -> None:
+    """Authorization: Bearer <non-ks_live-JWT> → OidcClient.validate_access_token."""
+    fake_user = User(sub="u-bearer", _display_name="bob", source="oidc")
+    fake_oidc = AsyncMock()
+    fake_oidc.validate_access_token.return_value = fake_user
+    fake_keys = AsyncMock()
+    backend = CompositeAuthBackend(oidc_client=fake_oidc, api_key_service=fake_keys)
+    conn = _conn_with_cookies(
+        "/v1/api/workspaces/",
+        headers={"Authorization": "Bearer eyJhbGciOiJSUzI1NiJ9.payload.sig"},
+    )
+    result = await backend.authenticate(conn)
+    assert result is not None
+    _, user = result
+    assert user.sub == "u-bearer"
+    assert user.source == "oidc"
+    fake_oidc.validate_access_token.assert_awaited_once()
+    fake_keys.verify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_oidc_bearer_resolver_tampered_jwt_falls_through_to_401() -> None:
+    fake_oidc = AsyncMock()
+    fake_oidc.validate_access_token.return_value = None
+    fake_keys = AsyncMock()
+    backend = CompositeAuthBackend(oidc_client=fake_oidc, api_key_service=fake_keys)
+    conn = _conn_with_cookies(
+        "/v1/api/workspaces/",
+        headers={"Authorization": "Bearer eyJhbGciOiJSUzI1NiJ9.tampered.sig"},
+    )
+    with pytest.raises(AuthenticationError):
+        await backend.authenticate(conn)
+
+
+@pytest.mark.asyncio
+async def test_oidc_bearer_resolver_skips_ks_live_prefix() -> None:
+    """ks_live_* стартует api_key path; oidc_bearer не дёргается."""
+    fake_oidc = AsyncMock()
+    fake_keys = AsyncMock()
+    fake_user = User(sub="u", _display_name="u", source="api_key")
+    fake_keys.verify.return_value = fake_user
+    backend = CompositeAuthBackend(oidc_client=fake_oidc, api_key_service=fake_keys)
+    conn = _conn_with_cookies(
+        "/v1/api/workspaces/",
+        headers={"Authorization": "Bearer ks_live_validkey"},
+    )
+    result = await backend.authenticate(conn)
+    assert result is not None
+    fake_keys.verify.assert_awaited_once_with("ks_live_validkey")
+    fake_oidc.validate_access_token.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolver_order_cookie_before_api_key() -> None:
+    """Plan resolver chain: cookie > api_key > oidc_bearer."""
+    fake_user_cookie = User(sub="u-c", _display_name="c", source="oidc")
+    fake_oidc = AsyncMock()
+    fake_oidc.validate_access_token.return_value = fake_user_cookie
+    fake_keys = AsyncMock()
+    backend = CompositeAuthBackend(oidc_client=fake_oidc, api_key_service=fake_keys)
+    conn = _conn_with_cookies(
+        "/v1/api/workspaces/",
+        cookies={"ks_at": "cookie-jwt"},
+        headers={"Authorization": "Bearer ks_live_alsovalid"},
+    )
+    result = await backend.authenticate(conn)
+    assert result is not None
+    _, user = result
+    assert user.source == "oidc"
+    fake_keys.verify.assert_not_awaited()

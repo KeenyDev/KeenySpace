@@ -74,9 +74,7 @@ async def test_browser_path_inline_refresh_when_at_near_expiry(
         follow_redirects=False,
     ) as c:
         resp = await c.get("/v1/api/auth/api-keys")
-    assert resp.status_code != 401, (
-        f"expected inline refresh, got 401: {resp.text[:200]}"
-    )
+    assert resp.status_code != 401, f"expected inline refresh, got 401: {resp.text[:200]}"
     assert resp.status_code == 200
     set_cookies = resp.headers.get_list("set-cookie")
     assert any("ks_at=" in c and new_at in c for c in set_cookies), (

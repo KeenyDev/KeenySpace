@@ -281,9 +281,7 @@ def mock_authentik_provider(httpserver, rsa_keypair):
             "id_token_signing_alg_values_supported": ["RS256"],
         }
     )
-    httpserver.expect_request("/application/o/test/jwks").respond_with_json(
-        {"keys": [public_jwk]}
-    )
+    httpserver.expect_request("/application/o/test/jwks").respond_with_json({"keys": [public_jwk]})
 
     def sign_jwt(claims: dict, kid: str = "test-kid-1") -> str:
         header = {"alg": "RS256", "kid": kid}
@@ -300,15 +298,11 @@ def mock_authentik_provider(httpserver, rsa_keypair):
 
 
 @pytest_asyncio.fixture
-async def app_with_mocked_authentik(
-    mock_authentik_provider, fs_root, pg_url, monkeypatch
-):
+async def app_with_mocked_authentik(mock_authentik_provider, fs_root, pg_url, monkeypatch):
     """Test app wired to mock Authentik provider."""
     monkeypatch.setenv("KEENYSPACE_DB__URL", pg_url)
     monkeypatch.setenv("KEENYSPACE_FS__ROOT", str(fs_root))
-    monkeypatch.setenv(
-        "KEENYSPACE_AUTH__OIDC_ISSUER_URL", mock_authentik_provider["issuer"]
-    )
+    monkeypatch.setenv("KEENYSPACE_AUTH__OIDC_ISSUER_URL", mock_authentik_provider["issuer"])
     monkeypatch.setenv("KEENYSPACE_AUTH__OIDC_CLIENT_ID", "keenyspace-test")
     monkeypatch.setenv("KEENYSPACE_AUTH__OIDC_CLIENT_SECRET", "secret")
     monkeypatch.setenv(
@@ -316,12 +310,8 @@ async def app_with_mocked_authentik(
         "http://test/v1/api/auth/callback",
     )
     monkeypatch.setenv("KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI", "http://test/")
-    monkeypatch.setenv(
-        "KEENYSPACE_AUTH__API_KEY_PEPPER", "test-pepper-32chars-padded-here!"
-    )
-    monkeypatch.setenv(
-        "KEENYSPACE_AUTH__SESSION_SECRET_KEY", "test-session-secret-32chars-pad!"
-    )
+    monkeypatch.setenv("KEENYSPACE_AUTH__API_KEY_PEPPER", "test-pepper-32chars-padded-here!")
+    monkeypatch.setenv("KEENYSPACE_AUTH__SESSION_SECRET_KEY", "test-session-secret-32chars-pad!")
     monkeypatch.setenv("KEENYSPACE_AUTH__COOKIE_SECURE", "false")
     monkeypatch.setenv("KEENYSPACE_AUTO_MIGRATE", "true")
     from keenyspace_server.config import get_settings
