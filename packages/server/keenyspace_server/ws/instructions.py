@@ -17,6 +17,13 @@ log = structlog.get_logger(__name__)
 _INSTRUCTIONS_MAX_BYTES = 64 * 1024
 _OUTPUT_MAX_CHARS = 32 * 1024
 _RENDER_TIMEOUT_SECONDS = 5.0
+# Pre-render complexity bounds (WR-02): asyncio.wait_for only cancels the
+# awaiting coroutine; the Jinja render itself runs in a worker thread that has
+# no cancellation primitive. A pathological template can pin a thread for
+# hours and exhaust the default threadpool. We mitigate by parsing first and
+# rejecting templates with too many nodes or too deeply nested control flow.
+_TEMPLATE_MAX_AST_NODES = 200
+_TEMPLATE_MAX_LOOP_DEPTH = 3
 
 _JINJA_ENV = SandboxedEnvironment(
     undefined=jinja2.StrictUndefined,
@@ -32,12 +39,43 @@ class InstructionTemplateError(ValueError):
     pass
 
 
+def _check_template_complexity(template_str: str) -> None:
+    try:
+        ast = _JINJA_ENV.parse(template_str)
+    except jinja2.TemplateSyntaxError as exc:
+        raise InstructionTemplateError(f"template syntax error: {exc}") from exc
+
+    node_count = 0
+    max_loop_depth = 0
+    stack: list[tuple[Any, int]] = [(ast, 0)]
+    while stack:
+        node, depth = stack.pop()
+        node_count += 1
+        if node_count > _TEMPLATE_MAX_AST_NODES:
+            raise InstructionTemplateError(
+                f"template too complex: exceeds {_TEMPLATE_MAX_AST_NODES} AST nodes"
+            )
+        child_depth = depth + 1 if isinstance(node, jinja2.nodes.For) else depth
+        if child_depth > max_loop_depth:
+            max_loop_depth = child_depth
+            if max_loop_depth > _TEMPLATE_MAX_LOOP_DEPTH:
+                raise InstructionTemplateError(
+                    f"template too complex: loop nesting exceeds {_TEMPLATE_MAX_LOOP_DEPTH}"
+                )
+        for child in node.iter_child_nodes():
+            stack.append((child, child_depth))
+
+
 def _render_one(template_str: str, ctx: dict[str, Any]) -> str:
     tmpl = _JINJA_ENV.from_string(template_str)
     return tmpl.render(**ctx)
 
 
 async def _render_async(template_str: str, ctx: dict[str, Any]) -> str:
+    # Reject pathological templates BEFORE handing off to a worker thread that
+    # cannot be cancelled. asyncio.wait_for below remains as a defence-in-depth
+    # bound for renders that pass complexity but still take time.
+    _check_template_complexity(template_str)
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(_render_one, template_str, ctx),
