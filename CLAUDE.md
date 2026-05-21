@@ -78,6 +78,10 @@ These are decisions; do NOT relitigate without explicit user request.
 - **No emojis in code or docs** unless explicitly requested.
 - **No comments unless WHY is non-obvious.** No "what" comments — well-named identifiers explain themselves.
 
+## Code search
+
+Use [`vex`](https://github.com/tenatarika/vex) (hybrid structural + semantic code search; `vex index && vex search`) for symbol lookup, callers/callees, and "where is X defined" questions across the Python server + client codebase. Prefer it over plain `grep` / `find` for navigation — it's faster (~4ms FST lookup after index) and more token-efficient (`vex show` extracts symbol bodies, not whole files). If the index is stale or missing, run `vex index --path .` once (semantic embeddings via `--semantic` optional, costs a 86 MB model download on first run). Plain `rg` / `grep` is still fine for free-text content search across `.md` files or one-off greps that don't need symbol structure.
+
 ## Per-phase context
 
 When working on a specific phase, the GSD tooling produces local artefacts:
