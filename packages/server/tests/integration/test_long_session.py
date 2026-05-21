@@ -33,9 +33,7 @@ async def test_1h_api_key_session_no_401(app, _engine_lifespan_ctx, api_key_user
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     start = datetime(2026, 5, 20, 0, 0, 0, tzinfo=UTC)
     with freeze_time(start) as frozen:
-        async with AsyncClient(
-            transport=transport, base_url="http://test", headers=headers
-        ) as c:
+        async with AsyncClient(transport=transport, base_url="http://test", headers=headers) as c:
             for minute in range(0, 65, 5):  # 0, 5, 10, ..., 60
                 frozen.move_to(start + timedelta(minutes=minute))
                 resp = await c.get("/v1/api/auth/api-keys")
@@ -44,15 +42,12 @@ async def test_1h_api_key_session_no_401(app, _engine_lifespan_ctx, api_key_user
                     f"(body: {resp.text[:200]})"
                 )
                 assert resp.status_code == 200, (
-                    f"unexpected {resp.status_code} at minute {minute}: "
-                    f"{resp.text[:200]}"
+                    f"unexpected {resp.status_code} at minute {minute}: {resp.text[:200]}"
                 )
 
 
 @pytest.mark.asyncio
-async def test_api_key_path_is_idp_independent(
-    app, _engine_lifespan_ctx, api_key_user
-) -> None:
+async def test_api_key_path_is_idp_independent(app, _engine_lifespan_ctx, api_key_user) -> None:
     """D-17 + Success Criterion #3 sanity: API-key path работает независимо от IdP.
 
     CompositeAuthBackend resolver order = cookie → api_key → oidc_bearer.
@@ -64,8 +59,6 @@ async def test_api_key_path_is_idp_independent(
     _, plaintext = api_key_user
     headers = {"Authorization": f"Bearer {plaintext}"}
     transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(
-        transport=transport, base_url="http://test", headers=headers
-    ) as c:
+    async with AsyncClient(transport=transport, base_url="http://test", headers=headers) as c:
         resp = await c.get("/v1/api/auth/api-keys")
     assert resp.status_code == 200, resp.text

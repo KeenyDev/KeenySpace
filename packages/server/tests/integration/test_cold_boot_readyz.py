@@ -63,9 +63,7 @@ async def test_readyz_green_when_idp_unreachable(
     app_with_unreachable_authentik,
 ) -> None:
     """Success Criterion #5: cold boot, /readyz 200 даже если Authentik dead."""
-    transport = ASGITransport(
-        app=app_with_unreachable_authentik, raise_app_exceptions=False
-    )
+    transport = ASGITransport(app=app_with_unreachable_authentik, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         resp = await c.get("/readyz")
     assert resp.status_code == 200, resp.text
@@ -84,16 +82,12 @@ async def test_readyz_makes_no_oidc_http_call(
     trigger discovery (lazy) → respx route НЕ должен быть called.
     """
     route = respx.get(url__startswith="http://nonexistent-idp.invalid/").mock()
-    transport = ASGITransport(
-        app=app_with_unreachable_authentik, raise_app_exceptions=False
-    )
+    transport = ASGITransport(app=app_with_unreachable_authentik, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         for _ in range(5):
             resp = await c.get("/readyz")
             assert resp.status_code == 200
-    assert not route.called, (
-        "readyz triggered HTTP call to oidc_issuer_url — discovery is NOT lazy"
-    )
+    assert not route.called, "readyz triggered HTTP call to oidc_issuer_url — discovery is NOT lazy"
 
 
 @pytest.mark.asyncio
@@ -101,9 +95,7 @@ async def test_healthz_green_when_idp_unreachable(
     app_with_unreachable_authentik,
 ) -> None:
     """Sanity: /healthz (liveness) тоже green — independent of IdP."""
-    transport = ASGITransport(
-        app=app_with_unreachable_authentik, raise_app_exceptions=False
-    )
+    transport = ASGITransport(app=app_with_unreachable_authentik, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         resp = await c.get("/healthz")
     assert resp.status_code == 200
