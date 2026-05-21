@@ -64,6 +64,7 @@ async def append_log(
     # Skip when DB engine hasn't been initialized (unit-test environments without lifespan).
     try:
         from sqlalchemy import select as _select
+
         from keenyspace_server.db.models import Workspace as _Workspace
         from keenyspace_server.db.session import get_db_session as _get_db_session
         async with _get_db_session() as _session:
