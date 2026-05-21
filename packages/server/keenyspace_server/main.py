@@ -12,7 +12,16 @@ from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from .api import compile as compile_router
-from .api import health, logs, pages, workspaces
+from .api import (
+    health,
+    logs,
+    pages,
+    workspace_archive,
+    workspace_export,
+    workspace_import,
+    workspace_list,
+    workspaces,
+)
 from .auth.api_keys import ApiKeyService
 from .auth.composite import CompositeAuthBackend
 from .auth.middleware import on_auth_error
@@ -154,6 +163,26 @@ def build_app() -> FastAPI:
     )
     app.include_router(
         compile_router.router,
+        prefix="/v1/api/workspaces",
+        dependencies=protected_deps,
+    )
+    app.include_router(
+        workspace_list.router,
+        prefix="/v1/api/workspaces",
+        dependencies=protected_deps,
+    )
+    app.include_router(
+        workspace_archive.router,
+        prefix="/v1/api/workspaces",
+        dependencies=protected_deps,
+    )
+    app.include_router(
+        workspace_export.router,
+        prefix="/v1/api/workspaces",
+        dependencies=protected_deps,
+    )
+    app.include_router(
+        workspace_import.router,
         prefix="/v1/api/workspaces",
         dependencies=protected_deps,
     )
