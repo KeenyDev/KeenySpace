@@ -159,14 +159,22 @@ async def validate_import_zip(zip_path: Path) -> _ZipValidation:
 
 
 def _unpack_zip_sync(zip_path: Path, dest: Path) -> None:
-    with zipfile.ZipFile(zip_path) as zf:
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            mode = info.external_attr >> 16
-            if stat.S_ISLNK(mode):
-                continue
-            zf.extract(info, dest)
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                mode = info.external_attr >> 16
+                if stat.S_ISLNK(mode):
+                    continue
+                zf.extract(info, dest)
+    except zipfile.BadZipFile as exc:
+        # Surface CRC / truncation failures during extraction as a typed 422
+        # rather than a generic 500 (the outer try in import_workspace catches
+        # WorkspaceImportError but not BadZipFile).
+        raise WorkspaceImportError(
+            "bad_zip", f"zip extraction failed: {exc}"
+        ) from exc
 
 
 def _rename_and_fsync(src: Path, dst: Path) -> None:
