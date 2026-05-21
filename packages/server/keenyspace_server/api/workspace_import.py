@@ -17,6 +17,7 @@ from keenyspace_shared.mcp_contracts import WorkspaceImportResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.db.session import get_db
+from keenyspace_server.ws.export import MAX_EXPORT_UNCOMPRESSED_BYTES
 from keenyspace_server.ws.import_ import (
     WorkspaceImportError,
     WorkspaceSlugConflictError,
@@ -32,10 +33,17 @@ _UPLOAD_CHUNK_BYTES = 64 * 1024
 # the sum of entry sizes inside the zip, AFTER the upload has fully landed
 # on disk. Without a compressed-byte cap, a zip-bomb attacker can stream an
 # arbitrarily large blob into <fs_root>/.tmp/upload_*.zip and exhaust disk
-# before validation runs. 100 MB is a generous ceiling for typical workspace
-# zips while still bounding worst-case disk pressure under a single-worker
-# uvicorn deployment.
-_MAX_COMPRESSED_UPLOAD_BYTES = 100 * 1024 * 1024
+# before validation runs.
+#
+# WR-17: cap matched to MAX_EXPORT_UNCOMPRESSED_BYTES so a worst-case
+# incompressible export at the export ceiling still round-trips through
+# import. A tighter cap silently breaks `keenyspace backup` / `restore` for
+# workspaces dominated by binary attachments (images, PDFs, encrypted blobs)
+# where compression ratio is ~1:1 and the zip is the same size as the
+# original tree. Zip-bomb defence is preserved by MAX_IMPORT_UNCOMPRESSED_BYTES
+# enforced post-upload in _validate_zip_sync (sum of info.file_size across
+# entries) — raising the compressed cap does not reopen that hole.
+_MAX_COMPRESSED_UPLOAD_BYTES = MAX_EXPORT_UNCOMPRESSED_BYTES
 
 
 @router.post("/import", response_model=WorkspaceImportResponse, status_code=201)
