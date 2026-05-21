@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import io
-import stat
 import zipfile
 from pathlib import Path
 
 import pytest
-
 from keenyspace_server.ws.import_ import (
-    MAX_IMPORT_UNCOMPRESSED_BYTES,
     WorkspaceImportError,
-    WorkspaceSlugConflictError,
     _validate_zip_sync,
     validate_import_zip,
 )

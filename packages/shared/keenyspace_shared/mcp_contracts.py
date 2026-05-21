@@ -78,3 +78,8 @@ class Instructions(BaseModel):
     tool_whitelist: list[str]
     steps: list[str]
     model: str | None = None
+
+
+class WorkspaceImportResponse(BaseModel):
+    uuid: str
+    slug: str
