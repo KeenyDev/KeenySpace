@@ -178,8 +178,16 @@ def _unpack_zip_sync(zip_path: Path, dest: Path) -> None:
 
 
 def _rename_and_fsync(src: Path, dst: Path) -> None:
-    """Atomic rename + parent dir fsync for durability (matches write_atomic)."""
-    os.rename(src, dst)
+    """Atomic rename + parent dir fsync for durability (matches write_atomic).
+
+    Uses ``os.replace`` for parity with ``fs/blueprint.py`` (WR-01 standardised
+    the fs/ layer on ``os.replace`` because it overwrites the destination
+    atomically on POSIX; ``os.rename`` raises ``OSError(EEXIST)`` on a
+    non-empty destination directory). ``final_dir`` is always a fresh UUID in
+    the import path, but matching the convention keeps the fs/ surface
+    consistent for future readers.
+    """
+    os.replace(src, dst)
     parent = dst.parent
     fd = os.open(parent, os.O_RDONLY)
     try:
