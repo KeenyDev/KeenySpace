@@ -12,7 +12,10 @@ def _write_instruction(path: Path, frontmatter: str, body: str) -> None:
 
 @pytest.mark.asyncio
 async def test_missing_file_raises_instruction_not_found(tmp_path: Path) -> None:
-    from keenyspace_server.ws.instructions import InstructionNotFoundError, load_and_render_instructions
+    from keenyspace_server.ws.instructions import (
+        InstructionNotFoundError,
+        load_and_render_instructions,
+    )
 
     with pytest.raises(InstructionNotFoundError, match="ingest"):
         await load_and_render_instructions(
@@ -57,7 +60,10 @@ async def test_renders_body_with_context(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_strict_undefined_raises_template_error(tmp_path: Path) -> None:
-    from keenyspace_server.ws.instructions import InstructionTemplateError, load_and_render_instructions
+    from keenyspace_server.ws.instructions import (
+        InstructionTemplateError,
+        load_and_render_instructions,
+    )
 
     instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
     _write_instruction(instr_path, "tool_whitelist: []\nsteps: []", "{{ context.missing_key }}")
@@ -73,7 +79,10 @@ async def test_strict_undefined_raises_template_error(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_dunder_access_blocked_raises_template_error(tmp_path: Path) -> None:
-    from keenyspace_server.ws.instructions import InstructionTemplateError, load_and_render_instructions
+    from keenyspace_server.ws.instructions import (
+        InstructionTemplateError,
+        load_and_render_instructions,
+    )
 
     instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
     _write_instruction(instr_path, "tool_whitelist: []\nsteps: []", "{{ workspace.__class__ }}")
@@ -89,7 +98,10 @@ async def test_dunder_access_blocked_raises_template_error(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_oversized_file_raises_template_error(tmp_path: Path) -> None:
-    from keenyspace_server.ws.instructions import InstructionTemplateError, load_and_render_instructions
+    from keenyspace_server.ws.instructions import (
+        InstructionTemplateError,
+        load_and_render_instructions,
+    )
 
     instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
     instr_path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +118,10 @@ async def test_oversized_file_raises_template_error(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_tool_whitelist_must_be_list_of_strings(tmp_path: Path) -> None:
-    from keenyspace_server.ws.instructions import InstructionTemplateError, load_and_render_instructions
+    from keenyspace_server.ws.instructions import (
+        InstructionTemplateError,
+        load_and_render_instructions,
+    )
 
     instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
     _write_instruction(instr_path, "tool_whitelist: not_a_list\nsteps: []", "body")
@@ -122,7 +137,10 @@ async def test_tool_whitelist_must_be_list_of_strings(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_steps_must_be_list_of_strings(tmp_path: Path) -> None:
-    from keenyspace_server.ws.instructions import InstructionTemplateError, load_and_render_instructions
+    from keenyspace_server.ws.instructions import (
+        InstructionTemplateError,
+        load_and_render_instructions,
+    )
 
     instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
     _write_instruction(instr_path, "tool_whitelist: []\nsteps:\n  k: v", "body")
