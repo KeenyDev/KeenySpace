@@ -30,7 +30,10 @@ def _move_instructions_to_keenyspace(ws_dir: Path) -> None:
             instructions_dst=str(instructions_dst),
         )
         return
-    os.rename(instructions_src, instructions_dst)
+    # os.replace is idempotent and avoids the TOCTOU race between the exists()
+    # check above and the move below; on POSIX it atomically overwrites a
+    # destination of the same type.
+    os.replace(instructions_src, instructions_dst)
 
 
 def clone_default_blueprint(
@@ -52,8 +55,9 @@ def clone_default_blueprint(
         ignore_dangling_symlinks=True,
     )
     os.replace(tmp, final)
-    _move_instructions_to_keenyspace(final)
-
+    # Write workspace config BEFORE moving _instructions/ so that a failure
+    # mid-move (or an early-return on already-exists) doesn't leave a workspace
+    # with no .keenyspace/config.yaml. Config mkdirs .keenyspace/ first.
     _write_workspace_config(
         final,
         ws_uuid,
@@ -61,6 +65,7 @@ def clone_default_blueprint(
         display_name or str(ws_uuid),
         f"{blueprint_name}@v0.1",
     )
+    _move_instructions_to_keenyspace(final)
     return final
 
 
