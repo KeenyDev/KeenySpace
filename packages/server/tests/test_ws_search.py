@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 
@@ -58,8 +57,7 @@ def test_search_workspace_files_content_match(tmp_path: Path) -> None:
     (ws / "notes").mkdir(parents=True)
     (ws / "notes" / "foo.md").write_text("alpha bravo charlie")
     (ws / "other.md").write_text("delta echo")
-    pattern = re.compile("bravo", re.IGNORECASE)
-    result = search_workspace_files(ws, pattern)
+    result = search_workspace_files(ws, "bravo")
     assert "notes/foo.md" in result
     assert "other.md" not in result
 
@@ -71,8 +69,7 @@ def test_search_workspace_files_filename_match(tmp_path: Path) -> None:
     (ws / "notes").mkdir(parents=True)
     (ws / "notes" / "foo.md").write_text("nothing relevant")
     (ws / "bar.md").write_text("also nothing")
-    pattern = re.compile("foo", re.IGNORECASE)
-    result = search_workspace_files(ws, pattern)
+    result = search_workspace_files(ws, "foo")
     assert "notes/foo.md" in result
     assert "bar.md" not in result
 
@@ -83,8 +80,7 @@ def test_search_workspace_files_case_insensitive(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "page.md").write_text("Contains Foobar in content")
-    pattern = re.compile("foobar", re.IGNORECASE)
-    result = search_workspace_files(ws, pattern)
+    result = search_workspace_files(ws, "foobar")
     assert "page.md" in result
 
 
@@ -95,6 +91,5 @@ def test_search_workspace_files_skips_keenyspace(tmp_path: Path) -> None:
     (ws / ".keenyspace").mkdir(parents=True)
     (ws / ".keenyspace" / "secret.md").write_text("secret content foobar")
     (ws / "public.md").write_text("public content")
-    pattern = re.compile("foobar", re.IGNORECASE)
-    result = search_workspace_files(ws, pattern)
+    result = search_workspace_files(ws, "foobar")
     assert not any(".keenyspace" in p for p in result)

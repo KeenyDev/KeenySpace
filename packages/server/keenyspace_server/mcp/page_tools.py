@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from pathlib import Path
 
 from fastmcp.exceptions import ToolError
@@ -120,14 +119,14 @@ async def search_workspace_tool(
         if len(query) > _QUERY_MAX_LEN:
             raise ToolError(f"query exceeds maximum length of {_QUERY_MAX_LEN}")
 
-        try:
-            pattern = re.compile(query, re.IGNORECASE)
-        except re.error as exc:
-            raise ToolError(f"invalid search query (regex): {exc}") from exc
-
+        # MCP-05 contract makes no mention of regex semantics; treat query as
+        # a case-insensitive literal substring. This eliminates the ReDoS
+        # surface that arbitrary user-supplied regex would create on a
+        # single-worker uvicorn (a pathological pattern can stall the entire
+        # process). See WR-08.
         settings = app.state.settings
         ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
-        matches = await asyncio.to_thread(search_workspace_files, ws_root, pattern)
+        matches = await asyncio.to_thread(search_workspace_files, ws_root, query)
 
         page_size = _validated_limit(limit)
         try:
