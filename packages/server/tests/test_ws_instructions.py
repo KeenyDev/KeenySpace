@@ -187,6 +187,97 @@ async def test_model_string_passes_through(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_rejects_template_with_too_many_ast_nodes(tmp_path: Path) -> None:
+    """WR-02/WR-13: AST node-count bound rejects unbounded templates.
+
+    150 ``{{ xN }}`` interpolations expand to substantially more than 200
+    nodes in Jinja's AST (each expression is wrapped in Output/Name nodes),
+    triggering the ``_TEMPLATE_MAX_AST_NODES`` ceiling defined in
+    ``ws/instructions.py``. Locking this in keeps a future refactor from
+    silently raising or removing the bound.
+    """
+    from keenyspace_server.ws.instructions import (
+        InstructionTemplateError,
+        load_and_render_instructions,
+    )
+
+    body = "".join(f"{{{{ context.x{i} }}}}" for i in range(150))
+    instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
+    _write_instruction(instr_path, "tool_whitelist: []\nsteps: []", body)
+    ctx = {f"x{i}": str(i) for i in range(150)}
+
+    with pytest.raises(InstructionTemplateError, match="too complex"):
+        await load_and_render_instructions(
+            tmp_path,
+            command="ingest",
+            workspace_meta={"slug": "ws"},
+            context=ctx,
+        )
+
+
+@pytest.mark.asyncio
+async def test_rejects_template_with_loop_nesting_too_deep(tmp_path: Path) -> None:
+    """WR-02/WR-13: nested-for depth bound rejects pathological recursion.
+
+    Four nested ``{% for %}`` loops exceed the ``_TEMPLATE_MAX_LOOP_DEPTH``
+    bound of 3. The complexity check runs BEFORE the asyncio.to_thread render
+    handoff so a malicious template never reaches the uncancellable worker.
+    """
+    from keenyspace_server.ws.instructions import (
+        InstructionTemplateError,
+        load_and_render_instructions,
+    )
+
+    body = (
+        "{% for a in [1] %}"
+        "{% for b in [1] %}"
+        "{% for c in [1] %}"
+        "{% for d in [1] %}x{% endfor %}"
+        "{% endfor %}"
+        "{% endfor %}"
+        "{% endfor %}"
+    )
+    instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
+    _write_instruction(instr_path, "tool_whitelist: []\nsteps: []", body)
+
+    with pytest.raises(InstructionTemplateError, match="loop nesting"):
+        await load_and_render_instructions(
+            tmp_path,
+            command="ingest",
+            workspace_meta={"slug": "ws"},
+            context={},
+        )
+
+
+@pytest.mark.asyncio
+async def test_allows_template_within_complexity_bounds(tmp_path: Path) -> None:
+    """WR-02/WR-13: regression guard that idiomatic templates still render.
+
+    Three nested loops are at (not over) the depth bound; ensures the bound
+    is correctly applied as exclusive-on-overflow, not off-by-one strict.
+    """
+    from keenyspace_server.ws.instructions import load_and_render_instructions
+
+    body = (
+        "{% for a in context.xs %}"
+        "{% for b in context.xs %}"
+        "{% for c in context.xs %}{{ a }}{{ b }}{{ c }}{% endfor %}"
+        "{% endfor %}"
+        "{% endfor %}"
+    )
+    instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
+    _write_instruction(instr_path, "tool_whitelist: []\nsteps: []", body)
+
+    result = await load_and_render_instructions(
+        tmp_path,
+        command="ingest",
+        workspace_meta={"slug": "ws"},
+        context={"xs": [1]},
+    )
+    assert result.prompt == "111"
+
+
+@pytest.mark.asyncio
 async def test_steps_rendered_with_context(tmp_path: Path) -> None:
     from keenyspace_server.ws.instructions import load_and_render_instructions
 
