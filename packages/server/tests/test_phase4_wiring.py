@@ -61,13 +61,6 @@ def test_mcp_tool_stubs_importable() -> None:
 @pytest.mark.asyncio
 async def test_stubs_raise_not_implemented() -> None:
     from keenyspace_server.mcp.recent_tool import get_recent_changes_tool
-    from keenyspace_server.mcp.workspace_tools import get_workspace_info_tool, list_workspaces_tool
-
-    with pytest.raises(NotImplementedError):
-        await list_workspaces_tool()
-
-    with pytest.raises(NotImplementedError):
-        await get_workspace_info_tool("test-ws")
 
     with pytest.raises(NotImplementedError):
         await get_recent_changes_tool("test-ws")
