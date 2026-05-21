@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -11,7 +13,7 @@ from keenyspace_shared.mcp_contracts import (
     ListWorkspacesResponse,
     WorkspaceInfo,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.db.models import CompileRun, Workspace
@@ -64,6 +66,47 @@ async def _build_workspace_info(
     )
 
 
+async def _fetch_last_compile_map(
+    session: AsyncSession, ws_uuids: list[UUID]
+) -> dict[UUID, datetime | None]:
+    """Batch-fetch last successful compile completion per workspace.
+
+    Replaces N+1 SELECT-per-workspace with one grouped query (WR-10/WR-11).
+    """
+    if not ws_uuids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                CompileRun.workspace_uuid,
+                func.max(CompileRun.completed_at),
+            )
+            .where(
+                CompileRun.workspace_uuid.in_(ws_uuids),
+                CompileRun.status == "success",
+            )
+            .group_by(CompileRun.workspace_uuid)
+        )
+    ).all()
+    found: dict[UUID, datetime | None] = {ws_uuid: completed for ws_uuid, completed in rows}
+    return {uuid_: found.get(uuid_) for uuid_ in ws_uuids}
+
+
+def _info_from_parts(
+    ws: Workspace, page_count: int, last_compile_at: datetime | None
+) -> WorkspaceInfo:
+    return WorkspaceInfo(
+        uuid=str(ws.uuid),
+        slug=ws.slug,
+        status=ws.status,
+        blueprint_pin=ws.blueprint_ref,
+        archived_at=ws.archived_at,
+        compile_state=ws.compile_state,
+        page_count=page_count,
+        last_compile_at=last_compile_at,
+    )
+
+
 @router.get("/", response_model=ListWorkspacesResponse)
 async def list_workspaces_http(
     request: Request,
@@ -87,10 +130,25 @@ async def list_workspaces_http(
         raise HTTPException(status_code=422, detail=f"malformed cursor: {exc}") from exc
 
     settings = request.app.state.settings
-    infos: list[WorkspaceInfo] = []
-    for ws in page_rows:
-        ws_dir = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
-        infos.append(await _build_workspace_info(ws, ws_dir, session))
+    # WR-10/WR-11: batch the last_compile_at SELECT (one query for the whole
+    # page instead of N+1) and parallelize the per-workspace FS scans. We do
+    # the DB query OUTSIDE of asyncio.gather because AsyncSession is not safe
+    # for concurrent use; only the thread-bound _count_pages_sync calls run
+    # in parallel.
+    last_compile_map = await _fetch_last_compile_map(
+        session, [ws.uuid for ws in page_rows]
+    )
+    fs_root = Path(settings.fs.root)
+    page_counts = await asyncio.gather(
+        *[
+            asyncio.to_thread(_count_pages_sync, fs_root / "workspaces" / str(ws.uuid))
+            for ws in page_rows
+        ]
+    )
+    infos: list[WorkspaceInfo] = [
+        _info_from_parts(ws, page_count, last_compile_map.get(ws.uuid))
+        for ws, page_count in zip(page_rows, page_counts, strict=True)
+    ]
 
     return ListWorkspacesResponse(workspaces=infos, next_cursor=next_cursor)
 
