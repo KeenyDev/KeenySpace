@@ -337,9 +337,14 @@ async def import_workspace(
             # DatabaseError, RuntimeError during lifespan shutdown) would leave
             # final_dir on disk with no DB row referencing it. The slug stays
             # claimable (no row was committed), but the orphan dir would
-            # accumulate indefinitely without a doctor sweep. Roll back and reap
-            # the now-orphaned FS so retry stays clean.
-            await session.rollback()
+            # accumulate indefinitely without a doctor sweep. Reap the FS
+            # BEFORE attempting rollback: the same failure conditions that
+            # caused commit() to fail (closed connection, pool exhaustion,
+            # lifespan shutdown) also cause rollback() to raise, and a raised
+            # rollback would skip the rmtree, leaving the orphan on disk and
+            # collapsing this handler back to the original CR-01 failure mode.
+            # Set outcome before rollback too so the metric label is correct
+            # even if rollback throws.
             shutil.rmtree(final_dir, ignore_errors=True)
             outcome = "fs_orphan_reaped"
             log.warning(
@@ -347,6 +352,18 @@ async def import_workspace(
                 slug=slug,
                 uuid=str(new_uuid),
             )
+            try:
+                await session.rollback()
+            except Exception as rb_exc:
+                # Best-effort rollback: the original commit exception is the
+                # primary signal, so swallow the rollback failure here and just
+                # log it. Re-raising would clobber the more meaningful original
+                # error that the outer caller needs to see.
+                log.warning(
+                    "workspace.import.rollback_after_commit_failure",
+                    slug=slug,
+                    error=str(rb_exc),
+                )
             raise
 
         outcome = "success"
