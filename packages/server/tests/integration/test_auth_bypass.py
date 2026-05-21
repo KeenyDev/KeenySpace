@@ -1,15 +1,17 @@
-"""AUTH-08 regression — graduated against real CompositeAuthBackend (Wave 2).
+"""AUTH-08 regression test — graduated to REAL CompositeAuthBackend (Wave 2).
 
-Покрытие:
-- Anonymous request → 401 на ВСЕ non-public routes (T-3-20 middleware bypass)
-- Bearer edge cases (malformed / wrong format / non-ks_live) → 401 (T-3-23)
-- Valid Bearer ks_live_* → не-401/403 (positive case Pattern 8 step 4-5)
-- Revoked API key → 401 (T-3-26)
-- WHITELIST в test суперсет CompositeAuthBackend PUBLIC_PREFIXES (T-3-25 drift)
-- /v1/admin/api-keys удалён (Phase 2 stub removed)
+Parametrized по `app.router.routes`; coverage гарантирует:
+  - все non-public routes возвращают 401 anonymous (T-3-20, T-3-42)
+  - все Wave 1+3 added endpoints (api-keys, refresh, logout) включены
+    в matrix и проверяются (T-3-42)
+  - /v1/admin/api-keys (deleted Wave 1) НЕ в matrix
+  - expired/malformed ks_at cookie → 401 (T-3-43)
+  - revoked API key → 401 (T-3-26)
+  - WHITELIST в test суперсет CompositeAuthBackend PUBLIC_PREFIXES (T-3-25 drift)
 
 Fixtures: `app` (function-scoped с lifespan + DB ready) + `anon_client` (anonymous)
-+ `client` (authenticated ks_live_* Bearer) — все из conftest.
++ `client` (authenticated ks_live_* Bearer) + `app_with_mocked_authentik`
+(Wave 3 mock IdP, для expired-JWT cases) — все из conftest.
 """
 
 from __future__ import annotations
@@ -136,3 +138,81 @@ def test_whitelist_is_superset_of_backend_public_prefixes():
     from keenyspace_server.auth.composite import PUBLIC_PREFIXES
 
     assert set(PUBLIC_PREFIXES).issubset(WHITELIST)
+
+
+def test_collected_routes_include_new_phase3_endpoints(app):
+    """T-3-42: новые endpoints из Wave 1+3 включены в auth-bypass matrix.
+
+    Любой новый protected endpoint автоматически попадает в parametrized
+    anonymous-401 sweep. Этот тест pin'ит контракт что Wave 1+3 deltas
+    реально находятся в `app.router.routes` под ожидаемыми путями.
+    """
+    collected = {(m, p) for m, p in _collect_routes(app)}
+    # Wave 1 — API-key CRUD под /v1/api/auth/api-keys
+    assert ("POST", "/v1/api/auth/api-keys") in collected
+    assert ("GET", "/v1/api/auth/api-keys") in collected
+    assert ("DELETE", "/v1/api/auth/api-keys/{key_id}") in collected
+    # Wave 3 — refresh + logout (authed; cookie- или ks_live-driven)
+    assert ("POST", "/v1/api/auth/refresh") in collected
+    assert ("POST", "/v1/api/auth/logout") in collected
+    # F-02 cleanup — /v1/admin/api-keys удалён в Wave 1
+    paths_only = {p for _, p in collected}
+    assert "/v1/admin/api-keys" not in paths_only
+    # /login + /callback — public (в WHITELIST, поэтому НЕ в matrix)
+    assert ("GET", "/v1/api/auth/login") not in collected
+    assert ("GET", "/v1/api/auth/callback") not in collected
+
+
+@pytest.mark.asyncio
+async def test_expired_jwt_in_cookie_returns_401(app_with_mocked_authentik) -> None:
+    """T-3-43 + leeway 30s: ks_at past exp+leeway → 401.
+
+    joserfc JWTClaimsRegistry(leeway=30) в OidcClient.validate_access_token
+    отвергает токен где `exp` истёк больше чем на 30 секунд назад. Cookie с
+    таким JWT попадает в `_try_cookie` resolver → InvalidTokenError →
+    composite chain пытается api_key (нет Bearer) → oidc_bearer (нет Bearer) →
+    AuthenticationError → 401.
+    """
+    import time
+
+    application, provider = app_with_mocked_authentik
+    issuer = provider["issuer"]
+    expired_token = provider["sign_jwt"](
+        {
+            "iss": issuer,
+            "aud": "keenyspace-test",
+            "sub": "u-exp",
+            "iat": int(time.time()) - 7200,
+            "exp": int(time.time()) - 100,  # 100s past exp (>leeway 30s)
+        }
+    )
+    transport = ASGITransport(app=application, raise_app_exceptions=False)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={"ks_at": expired_token},
+    ) as c:
+        resp = await c.get("/v1/api/auth/api-keys")
+    assert resp.status_code == 401, (
+        f"expired ks_at should yield 401, got {resp.status_code}: {resp.text[:200]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_malformed_cookie_returns_401(app_with_mocked_authentik) -> None:
+    """T-3-42 + T-3-43: malformed ks_at cookie (not a JWT) → 401.
+
+    `_try_cookie` resolver catches DecodeError / InvalidTokenError / любой
+    parse fail, возвращает None — composite chain доходит до 401.
+    """
+    application, _ = app_with_mocked_authentik
+    transport = ASGITransport(app=application, raise_app_exceptions=False)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={"ks_at": "not.a.jwt"},
+    ) as c:
+        resp = await c.get("/v1/api/auth/api-keys")
+    assert resp.status_code == 401, (
+        f"malformed ks_at should yield 401, got {resp.status_code}: {resp.text[:200]}"
+    )
