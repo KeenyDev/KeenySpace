@@ -67,6 +67,24 @@ COMPILE_PAGES_WRITTEN_TOTAL = Counter(
     ["workspace", "action"],
 )
 
+WORKSPACE_ARCHIVE_TOTAL = Counter(
+    "keenyspace_workspace_archive_total",
+    "Total workspace archive/unarchive operations",
+    ["action"],
+)
+
+WORKSPACE_EXPORT_BYTES_TOTAL = Counter(
+    "keenyspace_workspace_export_bytes_total",
+    "Total bytes exported as zip",
+    ["workspace"],
+)
+
+WORKSPACE_IMPORT_TOTAL = Counter(
+    "keenyspace_workspace_import_total",
+    "Total workspace import operations",
+    ["outcome"],
+)
+
 
 def build_instrumentator() -> Instrumentator:
     return Instrumentator(
