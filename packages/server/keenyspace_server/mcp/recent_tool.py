@@ -59,6 +59,14 @@ async def get_recent_changes_tool(
                 since_dt = datetime.fromisoformat(since)
             except ValueError as exc:
                 raise ToolError(f"invalid since timestamp: {exc}") from exc
+            # Reject naive datetimes: .timestamp() on a naive dt uses local
+            # system time, producing a timezone-incoherent comparison against
+            # st_mtime_ns (always UTC). Per WR-09.
+            if since_dt.tzinfo is None:
+                raise ToolError(
+                    "since timestamp must include timezone offset "
+                    "(e.g. 'Z' or '+00:00')"
+                )
             since_ns = int(since_dt.timestamp() * 1_000_000_000)
 
         settings = app.state.settings
