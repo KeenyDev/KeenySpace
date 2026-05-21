@@ -169,7 +169,13 @@ async def import_workspace(
     fs_root: Path = settings.fs.root
     workspaces_dir = fs_root / "workspaces"
     workspaces_dir.mkdir(parents=True, exist_ok=True)
-    import_tmp = workspaces_dir / f".import_tmp_{secrets.token_hex(8)}"
+    # Stage extraction under a sibling .tmp/ tree so workspace iteration (admin
+    # UI, doctor sweep) never sees ephemeral .import_tmp_* entries. The .tmp/
+    # dir lives on the same fs_root mount as workspaces/, so the final
+    # os.rename(import_tmp, final_dir) stays atomic.
+    tmp_root = fs_root / ".tmp"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    import_tmp = tmp_root / f"import_{secrets.token_hex(8)}"
     final_dir = workspaces_dir / str(new_uuid)
 
     cleanup_tmp = True

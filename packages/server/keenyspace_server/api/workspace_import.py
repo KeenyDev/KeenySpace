@@ -42,7 +42,12 @@ async def import_endpoint(
     fs_root: Path = settings.fs.root
     workspaces_dir = fs_root / "workspaces"
     workspaces_dir.mkdir(parents=True, exist_ok=True)
-    upload_tmp = workspaces_dir / f".upload_tmp_{secrets.token_hex(8)}.zip"
+    # Dedicated sibling tmp dir keeps ephemeral upload/import scratch out of
+    # `workspaces/` (which must contain only UUID directories). Same fs_root
+    # mount, so os.rename to workspaces/<uuid>/ stays atomic.
+    tmp_root = fs_root / ".tmp"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    upload_tmp = tmp_root / f"upload_{secrets.token_hex(8)}.zip"
 
     try:
         with upload_tmp.open("wb") as f:
