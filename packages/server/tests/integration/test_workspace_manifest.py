@@ -213,3 +213,61 @@ async def test_manifest_anonymous_401(app, pg_url) -> None:
                 pytest.skip("server not ready")
             resp = await client.get("/v1/api/workspaces/any/manifest")
             assert resp.status_code == 401
+
+
+async def test_pages_raw_returns_bytes(app, pg_url) -> None:
+    """GET /pages-raw/{path} returns raw file bytes (added in Plan 05-03 Task 3)."""
+    await _reset_schema(pg_url)
+    async with app.router.lifespan_context(app):
+        _, plaintext = await _seed_api_key_post_lifespan()
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
+            health = await client.get("/healthz")
+            if health.status_code in (500, 503):
+                pytest.skip("server not ready")
+            slug = await _seed_workspace(client)
+            ws_dir = _workspace_dir(app, slug)
+            payload = b"# raw bytes\nline 2\n"
+            (ws_dir / "concepts").mkdir(parents=True, exist_ok=True)
+            (ws_dir / "concepts" / "foo.md").write_bytes(payload)
+
+            resp = await client.get(
+                f"/v1/api/workspaces/{slug}/pages-raw/concepts/foo.md"
+            )
+            assert resp.status_code == 200
+            assert resp.content == payload
+            assert resp.headers["content-type"].startswith("application/octet-stream")
+
+
+async def test_pages_raw_rejects_dotfiles(app, pg_url) -> None:
+    await _reset_schema(pg_url)
+    async with app.router.lifespan_context(app):
+        _, plaintext = await _seed_api_key_post_lifespan()
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
+            health = await client.get("/healthz")
+            if health.status_code in (500, 503):
+                pytest.skip("server not ready")
+            slug = await _seed_workspace(client)
+            for forbidden in (
+                ".obsidian/workspace.json",
+                ".keenyspace/config.yaml",
+                "logs/2026.md",
+                "tmp/junk.md",
+                "../etc/passwd",
+                "notes.txt",
+            ):
+                resp = await client.get(
+                    f"/v1/api/workspaces/{slug}/pages-raw/{forbidden}"
+                )
+                assert resp.status_code in (400, 404), (
+                    f"{forbidden!r} should be rejected, got {resp.status_code}"
+                )
