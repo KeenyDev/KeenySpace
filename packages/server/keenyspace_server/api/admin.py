@@ -501,15 +501,29 @@ async def admin_restore(
         src_workspaces = tmp_dir / "fs_root" / "workspaces"
         src_blueprints = tmp_dir / "fs_root" / "blueprints"
         (fs_root / "workspaces").mkdir(parents=True, exist_ok=True)
+        # WR-08: the prior shutil.rmtree(..., ignore_errors=True) is
+        # best-effort and may silently leave partial subtrees (open file
+        # handles, immutable dirs, files in use by compile). os.rename to
+        # an existing directory then raises IsADirectoryError /
+        # OSError(EEXIST) mid-loop, leaving the restore HALF-APPLIED with
+        # `admin.restore.applied` audit row already committed. Detect-and-
+        # delete the conflicting target before rename, and surface the
+        # failure rather than ignore_errors-papering over it.
         if src_workspaces.exists():
             for item in src_workspaces.iterdir():
-                # Pitfall #8: same-volume rename so the move stays atomic; tmp
-                # lives under fs_root by construction.
-                os.rename(item, fs_root / "workspaces" / item.name)
+                target = fs_root / "workspaces" / item.name
+                if target.exists():
+                    shutil.rmtree(target)
+                # Pitfall #8: same-volume rename so the move stays atomic;
+                # tmp lives under fs_root by construction.
+                os.rename(item, target)
         (fs_root / "blueprints").mkdir(parents=True, exist_ok=True)
         if src_blueprints.exists():
             for item in src_blueprints.iterdir():
-                os.rename(item, fs_root / "blueprints" / item.name)
+                target = fs_root / "blueprints" / item.name
+                if target.exists():
+                    shutil.rmtree(target)
+                os.rename(item, target)
 
         await write_audit(
             session,
