@@ -37,3 +37,7 @@ test = [
 [tool.uv.build-backend]
 module-name = "keenyspace"
 module-root = ""
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
