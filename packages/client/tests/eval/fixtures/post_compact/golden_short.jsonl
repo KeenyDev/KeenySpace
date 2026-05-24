@@ -1,0 +1,5 @@
+{"role":"user","content":"Let's refactor the auth flow in workspace demo."}
+{"role":"assistant","content":"Sure — which file currently mints the API keys?"}
+{"role":"user","content":"It's packages/server/keenyspace_server/auth/api_keys.py and the route lives under api/auth.py."}
+{"role":"assistant","content":"I'll read both and propose a unified mint helper."}
+{"role":"user","content":"Yes, and keep the ks_live_ prefix invariant in mind."}

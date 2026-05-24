@@ -1,9 +1,9 @@
 """JSONL dispatch for daemon socket events.
 
-Wave 5 ships the transport. The session-start source=compact branch returns
-an explicit not-implemented payload so hook integration tests can verify the
-round-trip without depending on an LLM. Wave 6 (Plan 06) replaces the stub
-with the pydantic-ai post-compact orchestrator per D-09.
+Wave 6 (D-09): session-start source=compact now invokes the pydantic-ai
+post-compact orchestrator and writes a response payload back on the same
+connection. Every other kind (incl. post-compact per F-09) is pure
+fire-and-forget — daemon just logged the event.
 """
 
 from __future__ import annotations
@@ -27,13 +27,11 @@ async def dispatch(envelope: dict[str, Any], writer: asyncio.StreamWriter) -> No
         workspace_slug=envelope.get("workspace_slug"),
     )
     if kind == "session-start" and source == "compact":
-        # Wave 6 will implement the LLM orchestration; Wave 5 ships a stub
-        # so hook integration tests can verify the request-response transport.
-        response = {
-            "ok": False,
-            "content": None,
-            "error": "not_implemented_in_wave_5",
-        }
+        # Deferred import: keeps daemon cold-start cheap; pydantic-ai is only
+        # touched once a compact event actually arrives.
+        from keenyspace.daemon.post_compact import assemble_context
+
+        response = await assemble_context(envelope)
         writer.write(json.dumps(response).encode() + b"\n")
         try:  # noqa: SIM105 — await cannot live inside contextlib.suppress
             await writer.drain()

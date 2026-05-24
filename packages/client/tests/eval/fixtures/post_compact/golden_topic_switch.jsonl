@@ -1,0 +1,20 @@
+{"role":"user","content":"Let's audit the auth flow first."}
+{"role":"assistant","content":"OK — composite middleware reads Authorization, dispatches to OIDC or ks_live_ key handler."}
+{"role":"user","content":"Both go through packages/server/keenyspace_server/auth/composite.py."}
+{"role":"assistant","content":"Right. The api_keys.py file mints ks_live_ via secrets.token_urlsafe + argon2id lookup_hash."}
+{"role":"user","content":"And the device-code flow is delegated to Authentik per Phase 3 D-14."}
+{"role":"assistant","content":"Acknowledged."}
+{"role":"user","content":"Actually wait — drop auth. I want to switch to the compile pipeline."}
+{"role":"assistant","content":"Switching context."}
+{"role":"user","content":"Compile lives in packages/server/keenyspace_server/compile/agent.py."}
+{"role":"assistant","content":"Pydantic-ai Agent + UsageLimits + asyncio.wait_for + LoopDetector — same pattern Phase 5 D-05 reuses on the client."}
+{"role":"user","content":"And the loop detector?"}
+{"role":"assistant","content":"packages/server/keenyspace_server/compile/loop_detector.py — same (tool, args_hash) repeated 3x triggers."}
+{"role":"user","content":"OK that's enough on compile."}
+{"role":"assistant","content":"What now?"}
+{"role":"user","content":"Let's talk about backup."}
+{"role":"assistant","content":"backup endpoint is POST /v1/admin/backup; streams tar.gz."}
+{"role":"user","content":"Manifest shape — manifest.json must be the FIRST tar entry."}
+{"role":"assistant","content":"Right. Plus pg_dump.sql, fs_root/workspaces/*, fs_root/blueprints/*."}
+{"role":"user","content":"Auth on those?"}
+{"role":"assistant","content":"Phase 3 composite middleware; v1 = all auth'd see all."}
