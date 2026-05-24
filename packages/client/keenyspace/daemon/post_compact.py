@@ -14,6 +14,7 @@ Transcript content and assembled text are NEVER logged (T-05.06-05).
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any
 
 import structlog
@@ -32,6 +33,19 @@ log = structlog.get_logger(__name__)
 
 
 _TEST_HATCH_ENV = "KEENYSPACE_TEST_AGENT_RESPONSE"
+
+
+def _test_hatch_allowed() -> bool:
+    """Honour the test hatch only inside pytest or when KEENYSPACE_DEV=1.
+
+    Production daemon builds MUST NOT respect KEENYSPACE_TEST_AGENT_RESPONSE
+    even if an attacker can poison the launchd/systemd environment — that env
+    var would bypass auth, MCP get_instructions, and the LLM model, returning
+    attacker-controlled text as additionalContext to Claude Code.
+    """
+    if "pytest" in sys.modules:
+        return True
+    return os.environ.get("KEENYSPACE_DEV") == "1"
 
 
 async def assemble_context(envelope: dict[str, Any]) -> dict[str, Any]:
@@ -60,7 +74,7 @@ async def assemble_context(envelope: dict[str, Any]) -> dict[str, Any]:
         }
 
     test_response = os.environ.get(_TEST_HATCH_ENV)
-    if test_response is not None:
+    if test_response is not None and _test_hatch_allowed():
         log.info(
             "post_compact.test_hatch_active",
             workspace=workspace_slug,
