@@ -26,6 +26,10 @@ def _root_callback() -> None:
     from keenyspace.auth import _validate_auth_file_mode
 
     _validate_auth_file_mode()
+    # Register `workspace` subcommands lazily so cold-boot of `--help` stays
+    # under the 600ms target — the module body only adds @workspace_app.command
+    # decorators and lightweight imports.
+    import keenyspace.cli.workspace  # noqa: F401
 
 
 @app.command(name="init")
