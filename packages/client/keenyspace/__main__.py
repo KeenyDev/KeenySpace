@@ -12,13 +12,15 @@ import typer
 
 app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich", add_completion=False)
 workspace_app = typer.Typer(name="workspace", help="Workspace operations")
-daemon_app = typer.Typer(name="daemon", help="Background daemon controls")
 hook_app = typer.Typer(name="hook", help="Internal: Claude Code hook entry points")
-service_app = typer.Typer(name="service", help="OS service registration")
 app.add_typer(workspace_app)
-app.add_typer(daemon_app)
 app.add_typer(hook_app, hidden=True)
-app.add_typer(service_app)
+
+# --- 05-05 daemon/hook/service registration ---
+from keenyspace.daemon.cli import daemon_app  # noqa: E402
+
+app.add_typer(daemon_app)
+# --- end 05-05 ---
 
 
 @app.callback()

@@ -2,12 +2,40 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+import tempfile
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 import pytest_asyncio
+
+
+@pytest.fixture
+def short_xdg_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Short /tmp-based XDG_STATE_HOME so AF_UNIX sockets bind under macOS 104-byte cap.
+
+    pytest tmp_path is too long for asyncio.start_unix_server on macOS. Tests
+    that bind the daemon socket override XDG_STATE_HOME with this fixture;
+    config files still live under temp_config_dir.
+    """
+    short = Path(tempfile.mkdtemp(prefix="ks-d-", dir="/tmp"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(short))
+    state_dir = short / "keenyspace"
+    yield state_dir
+    for p in state_dir.glob("*"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    try:
+        state_dir.rmdir()
+    except OSError:
+        pass
+    try:
+        short.rmdir()
+    except OSError:
+        pass
 
 
 @pytest.fixture
