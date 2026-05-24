@@ -132,5 +132,73 @@ def status_cmd() -> None:
     asyncio.run(run_status())
 
 
+# --- 05-04 ingest/query/lint/compile commands ---
+
+
+@app.command(name="ingest")
+def ingest_cmd(
+    path: str = typer.Argument(..., help="File or directory of .md to ingest"),
+    workspace: str | None = typer.Option(
+        None, "--workspace", help="Override resolved workspace slug"
+    ),
+) -> None:
+    """Server-driven ingest: extract knowledge fragments from <path> into WAL."""
+    import asyncio
+    from pathlib import Path
+
+    from keenyspace.cli.ingest import run_ingest
+
+    asyncio.run(run_ingest(Path(path), workspace=workspace))
+
+
+@app.command(name="query")
+def query_cmd(
+    question: str = typer.Argument(..., help="Question to ask the workspace agent"),
+    workspace: str | None = typer.Option(
+        None, "--workspace", help="Override resolved workspace slug"
+    ),
+) -> None:
+    """Read-only Q&A over workspace knowledge."""
+    import asyncio
+
+    from keenyspace.cli.query import run_query
+
+    asyncio.run(run_query(question, workspace=workspace))
+
+
+@app.command(name="lint")
+def lint_cmd(
+    workspace: str | None = typer.Option(
+        None, "--workspace", help="Override resolved workspace slug"
+    ),
+) -> None:
+    """Wiki health audit (broken wikilinks, orphan pages, frontmatter schema)."""
+    import asyncio
+
+    from keenyspace.cli.lint import run_lint
+
+    asyncio.run(run_lint(workspace=workspace))
+
+
+@app.command(name="compile")
+def compile_cmd(
+    workspace: str | None = typer.Option(
+        None, "--workspace", help="Override resolved workspace slug"
+    ),
+    wait: bool = typer.Option(
+        False, "--wait", help="Block until compile finishes or 5min timeout"
+    ),
+) -> None:
+    """Trigger server compile pass (fire-and-forget; --wait polls compile_status)."""
+    import asyncio
+
+    from keenyspace.cli.compile_cmd import run_compile_cmd
+
+    asyncio.run(run_compile_cmd(workspace, wait=wait))
+
+
+# --- end 05-04 ---
+
+
 if __name__ == "__main__":
     app()
