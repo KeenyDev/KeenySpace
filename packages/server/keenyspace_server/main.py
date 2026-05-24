@@ -198,11 +198,20 @@ def build_app() -> FastAPI:
         prefix="/v1/api/auth/api-keys",
         dependencies=protected_deps,
     )
-    app.include_router(
-        admin.router,
-        prefix="/v1/admin",
-        dependencies=protected_deps,
-    )
+    # CR-02: admin routes (backup / restore) wipe and replace the entire
+    # deployment. Even though Phase 3 AUTH-09 framed v1 as "all authed see
+    # all", the destructive-write half is qualitatively different — any
+    # leaked ks_live_* token would let an attacker DELETE FROM workspaces /
+    # users / api_keys and rmtree the fs_root. Until users.is_admin lands
+    # (deferred to v1.5 multi-tenant work), require an explicit server-side
+    # opt-in env flag so misconfigured self-hosts don't expose /v1/admin/*
+    # by default. Disabled-by-default reduces blast radius.
+    if os.environ.get("KEENYSPACE_ADMIN_API_ENABLED") == "1":
+        app.include_router(
+            admin.router,
+            prefix="/v1/admin",
+            dependencies=protected_deps,
+        )
     app.include_router(auth_router.router, prefix="/v1/api/auth")
 
     app.mount("/v1/mcp", mcp_app)

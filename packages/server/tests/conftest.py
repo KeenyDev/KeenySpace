@@ -66,6 +66,9 @@ def app_env(fs_root, pg_url, monkeypatch):
     )
     monkeypatch.setenv("KEENYSPACE_AUTH__COOKIE_SECURE", "false")
     monkeypatch.setenv("KEENYSPACE_AUTO_MIGRATE", "true")
+    # CR-02: admin routes are disabled by default in production; enable
+    # explicitly for tests so integration suites exercise /v1/admin/*.
+    monkeypatch.setenv("KEENYSPACE_ADMIN_API_ENABLED", "1")
     return {"fs_root": fs_root, "pg_url": pg_url}
 
 
