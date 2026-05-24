@@ -260,11 +260,22 @@ async def admin_backup(
                 buf.seek(0)
                 buf.truncate()
 
+                # WR-07: tar.add() recursively walks the directory tree
+                # synchronously, reading file bytes and writing them to the
+                # tarfile object. Under single-worker uvicorn that blocks
+                # every other handler — health probes, hook callbacks,
+                # MCP tool calls — for the duration of the walk. Offload
+                # to a worker thread; the BytesIO buf is drained AFTER the
+                # to_thread call (no concurrent writer/reader, no need to
+                # interleave yield mid-walk for correctness).
+                def _tar_add_dir(
+                    tar_obj: tarfile.TarFile, src: Path, arcname: str
+                ) -> None:
+                    tar_obj.add(str(src), arcname=arcname, filter=_filter)
+
                 if workspaces_dir.exists():
-                    tar.add(
-                        str(workspaces_dir),
-                        arcname="fs_root/workspaces",
-                        filter=_filter,
+                    await asyncio.to_thread(
+                        _tar_add_dir, tar, workspaces_dir, "fs_root/workspaces"
                     )
                     chunk = buf.getvalue()
                     if chunk:
@@ -274,10 +285,8 @@ async def admin_backup(
                     buf.truncate()
 
                 if blueprints_dir.exists():
-                    tar.add(
-                        str(blueprints_dir),
-                        arcname="fs_root/blueprints",
-                        filter=_filter,
+                    await asyncio.to_thread(
+                        _tar_add_dir, tar, blueprints_dir, "fs_root/blueprints"
                     )
                     chunk = buf.getvalue()
                     if chunk:
@@ -338,12 +347,19 @@ async def admin_restore(
                     break
                 fp.write(chunk)
 
-        try:
+        # WR-07: tar.extractall walks the entire archive synchronously
+        # (file IO + writes). Offload to a worker thread so the event
+        # loop can continue serving health probes and concurrent
+        # requests during a large restore.
+        def _extract_tar() -> None:
             with tarfile.open(archive_path, "r:gz") as tar:
                 # Pitfall #3: Python 3.14 defaults tarfile filter to "data" but
                 # we set it explicitly so a future stdlib regression cannot widen
                 # the attack surface silently.
                 tar.extractall(path=tmp_dir, filter="data")
+
+        try:
+            await asyncio.to_thread(_extract_tar)
         except tarfile.OutsideDestinationError as exc:
             ADMIN_RESTORE_TOTAL.labels(outcome="path_traversal").inc()
             raise HTTPException(
