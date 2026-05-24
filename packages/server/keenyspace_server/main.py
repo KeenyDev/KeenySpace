@@ -20,6 +20,7 @@ from .api import (
     workspace_export,
     workspace_import,
     workspace_list,
+    workspace_manifest,
     workspaces,
 )
 from .auth.api_keys import ApiKeyService
@@ -183,6 +184,11 @@ def build_app() -> FastAPI:
     )
     app.include_router(
         workspace_import.router,
+        prefix="/v1/api/workspaces",
+        dependencies=protected_deps,
+    )
+    app.include_router(
+        workspace_manifest.router,
         prefix="/v1/api/workspaces",
         dependencies=protected_deps,
     )

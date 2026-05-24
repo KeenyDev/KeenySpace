@@ -85,6 +85,12 @@ WORKSPACE_IMPORT_TOTAL = Counter(
     ["outcome"],
 )
 
+WORKSPACE_MANIFEST_TOTAL = Counter(
+    "keenyspace_workspace_manifest_total",
+    "Total /<slug>/manifest invocations",
+    ["outcome"],
+)
+
 
 ADMIN_BACKUP_TOTAL = Counter(
     "keenyspace_admin_backup_total",
