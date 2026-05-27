@@ -1,0 +1,59 @@
+# Authentik blueprint — provisions the KeenySpace OIDC client on boot.
+#
+# Auto-discovered + applied by the authentik-worker from /blueprints/custom/
+# (mounted read-only in deploy/docker-compose.yml). Idempotent: re-applies on
+# every worker start and survives `docker compose down -v`, so the dogfood
+# stack always comes up with a working IdP without manual API provisioning.
+#
+# Contract (must stay in sync with deploy/docker-compose.yml keenyspace env):
+#   - client_id keenyspace-cli  == KEENYSPACE_AUTH__OIDC_CLIENT_ID (token aud)
+#   - application slug keenyspace -> issuer .../application/o/keenyspace/
+#     == KEENYSPACE_AUTH__OIDC_ISSUER_URL (token iss)
+#   - public client: the CLI device-code flow (login.py CLIENT_ID=keenyspace-cli)
+#     sends no client_secret.
+version: 1
+metadata:
+  name: keenyspace-dogfood-oidc
+  labels:
+    blueprints.goauthentik.io/instance: keenyspace-dogfood-oidc
+entries:
+  - model: authentik_providers_oauth2.oauth2provider
+    id: keenyspace-cli-provider
+    identifiers:
+      name: keenyspace-cli
+    attrs:
+      name: keenyspace-cli
+      client_type: public
+      client_id: keenyspace-cli
+      authorization_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
+      invalidation_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      signing_key:
+        !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+      issuer_mode: per_provider
+      sub_mode: hashed_user_id
+      include_claims_in_id_token: true
+      redirect_uris:
+        - matching_mode: strict
+          url: http://localhost:8000/v1/api/auth/callback
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+  - model: authentik_core.application
+    id: keenyspace-app
+    identifiers:
+      slug: keenyspace
+    attrs:
+      name: KeenySpace
+      slug: keenyspace
+      provider: !KeyOf keenyspace-cli-provider
+  # Enable the RFC 8628 device-code flow brand-wide so `keenyspace login`
+  # (headless device flow) can complete its verification step.
+  - model: authentik_brands.brand
+    identifiers:
+      domain: authentik-default
+    attrs:
+      flow_device_code:
+        !Find [authentik_flows.flow, [slug, default-authentication-flow]]

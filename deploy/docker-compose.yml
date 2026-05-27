@@ -8,9 +8,10 @@ services:
     environment:
       KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:devpw@postgres/keenyspace
       KEENYSPACE_FS__ROOT: /var/lib/keenyspace
-      # OIDC contract — Phase 7 (DEP-06) wires Authentik service. Placeholders for compose-up boot.
+      # OIDC contract — Authentik wired in this branch (DEP-06 pulled forward for Phase 6 dogfood).
+      # client_id MUST match the CLI device-flow client (keenyspace-cli) so token aud validates.
       KEENYSPACE_AUTH__OIDC_ISSUER_URL: http://authentik:9000/application/o/keenyspace/
-      KEENYSPACE_AUTH__OIDC_CLIENT_ID: keenyspace-dev
+      KEENYSPACE_AUTH__OIDC_CLIENT_ID: keenyspace-cli
       KEENYSPACE_AUTH__OIDC_CLIENT_SECRET: client-secret-replace-me
       KEENYSPACE_AUTH__OIDC_REDIRECT_URI: http://localhost:8000/v1/api/auth/callback
       KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI: http://localhost:8000/
@@ -22,12 +23,98 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      authentik:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz',timeout=2).status==200 else 1)"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 15s
+    restart: unless-stopped
+
+  authentik-postgresql:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: authentik
+      POSTGRES_DB: authentik
+      POSTGRES_PASSWORD: authentik-db-password-replace-me
+    volumes:
+      - authentik-postgresql:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d authentik -U authentik"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  authentik-redis:
+    image: redis:alpine
+    command: --save 60 1 --loglevel warning
+    volumes:
+      - authentik-redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  authentik:
+    image: ghcr.io/goauthentik/server:2024.10
+    command: server
+    environment:
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: authentik-db-password-replace-me
+      AUTHENTIK_SECRET_KEY: authentik-secret-key-replace-me-50-bytes-padding-padding-padding
+      AUTHENTIK_BOOTSTRAP_PASSWORD: authentik-admin-replace-me
+      AUTHENTIK_BOOTSTRAP_EMAIL: admin@keenyspace.local
+      AUTHENTIK_BOOTSTRAP_TOKEN: authentik-bootstrap-token-replace-me-32-bytes-padding
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+      - ./authentik/blueprints:/blueprints/custom:ro
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      authentik-postgresql:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:2024.10
+    command: worker
+    environment:
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: authentik-db-password-replace-me
+      AUTHENTIK_SECRET_KEY: authentik-secret-key-replace-me-50-bytes-padding-padding-padding
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+      - authentik-certs:/certs
+      - ./authentik/blueprints:/blueprints/custom:ro
+    depends_on:
+      authentik-postgresql:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
     restart: unless-stopped
 
   postgres:
@@ -72,3 +159,8 @@ services:
 volumes:
   keenyspace-fs:
   postgres-data:
+  authentik-postgresql:
+  authentik-redis:
+  authentik-media:
+  authentik-templates:
+  authentik-certs:
