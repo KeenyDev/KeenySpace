@@ -27,6 +27,7 @@ WHITELIST = {
     "/docs",
     "/openapi.json",
     "/redoc",
+    "/v1/api/auth/discovery",
     "/v1/api/auth/login",
     "/v1/api/auth/callback",
 }
