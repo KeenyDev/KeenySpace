@@ -153,3 +153,38 @@ def test_from_cwd_unresolved_exits_2(
     result = cli_runner.invoke(main_mod.app, ["workspace", "from-cwd"])  # type: ignore[attr-defined]
     assert result.exit_code == 2
     assert "unresolved" in result.output
+
+
+def test_workspace_subcommands_reachable_from_cli_entrypoint() -> None:
+    """Regression guard (Phase 6 dogfood P1): `workspace` subcommands must be
+    dispatchable through the real CLI entrypoint, not just importable.
+
+    The WR-04 lazy import previously lived in @workspace_app.callback(), which
+    Click runs AFTER subcommand resolution, so `keenyspace workspace use` died
+    with "No such command 'use'". The fix imports keenyspace.cli.workspace
+    eagerly when sys.argv[1] == "workspace".
+
+    We invoke the entry point exactly as the console script does
+    (`from keenyspace.__main__ import app; app()`) in a fresh process with a
+    workspace argv. NOTE: `python -m keenyspace` is NOT used — under -m the
+    module runs as __main__, so workspace.py's `from keenyspace.__main__ import
+    workspace_app` would bind a duplicate module and registration would be
+    invisible (a -m harness artifact, not a product bug).
+    """
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; sys.argv = ['keenyspace', 'workspace', '--help']; "
+        "from keenyspace.__main__ import app; app()"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        timeout=10,
+        env={**os.environ, "COLUMNS": "200"},
+    )
+    out = result.stdout.decode()
+    assert "use" in out and "list" in out and "archive" in out, out
+    assert "No such command" not in result.stderr.decode()
