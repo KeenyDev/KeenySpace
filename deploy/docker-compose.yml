@@ -5,6 +5,12 @@ services:
       dockerfile: deploy/Dockerfile
     ports:
       - "8000:8000"
+    # Optional local overrides + secrets (gitignored). Any KEENYSPACE_* var here
+    # (e.g. KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS for model-specific output caps)
+    # is injected into the container. Lower precedence than `environment:` below.
+    env_file:
+      - path: .env
+        required: false
     environment:
       KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:devpw@postgres/keenyspace
       KEENYSPACE_FS__ROOT: /var/lib/keenyspace
