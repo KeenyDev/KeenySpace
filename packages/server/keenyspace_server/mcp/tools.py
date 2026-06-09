@@ -11,6 +11,7 @@ from fastmcp.server.dependencies import get_http_request
 from keenyspace_shared.mcp_contracts import AppendLogResponse, ReadPageResponse
 from sqlalchemy import select
 
+from keenyspace_server.compile.coordinator import get_coordinator
 from keenyspace_server.compile.models import CompileStatusResponse, CompileTriggerResponse
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
@@ -129,9 +130,6 @@ async def compile_tool(workspace: str) -> CompileTriggerResponse:
         user = current_user_from_mcp()
         _ = user
 
-        req = get_http_request()
-        app = req.app
-
         async with get_db_session() as session:
             result = await session.execute(select(Workspace).where(Workspace.slug == workspace))
             ws = result.scalar_one_or_none()
@@ -145,7 +143,12 @@ async def compile_tool(workspace: str) -> CompileTriggerResponse:
                 f"call POST /v1/api/workspaces/{workspace}/compile/resume to clear"
             )
 
-        coordinator = app.state.compile_coordinator
+        # Use the module-global coordinator (set in app_lifespan via
+        # set_coordinator), not request.app.state: under the mounted FastMCP
+        # app the request's app.state is not the root app's, so
+        # app.state.compile_coordinator is absent there. The REST endpoints run
+        # on the root app and correctly read app.state.
+        coordinator = get_coordinator()
         if coordinator is None:
             raise ToolError("compile coordinator not initialised")
         try:
@@ -161,9 +164,6 @@ async def compile_status_tool(workspace: str) -> CompileStatusResponse:
         user = current_user_from_mcp()
         _ = user
 
-        req = get_http_request()
-        app = req.app
-
         async with get_db_session() as session:
             result = await session.execute(select(Workspace).where(Workspace.slug == workspace))
             ws = result.scalar_one_or_none()
@@ -171,7 +171,7 @@ async def compile_status_tool(workspace: str) -> CompileStatusResponse:
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
 
-        coordinator = app.state.compile_coordinator
+        coordinator = get_coordinator()
         if coordinator is None:
             raise ToolError("compile coordinator not initialised")
         status_result: CompileStatusResponse = await coordinator.status(ws.uuid)
