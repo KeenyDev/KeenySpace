@@ -23,7 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.auth.audit import write_audit
 from keenyspace_server.db.models import Workspace
-from keenyspace_server.fs.blueprint import _write_workspace_config
+from keenyspace_server.fs.blueprint import (
+    _move_instructions_to_keenyspace,
+    _write_workspace_config,
+)
 from keenyspace_server.observability.metrics import WORKSPACE_IMPORT_TOTAL
 from keenyspace_server.ws.export import EXPORT_SKIP_TOP_LEVEL
 
@@ -293,6 +296,13 @@ async def import_workspace(
             slug,
             blueprint_ref,
         )
+
+        # Normalise instruction layout to match blueprint-clone create: move any
+        # top-level `_instructions/` into `.keenyspace/instructions/` (where
+        # get_instructions resolves them). Idempotent: a no-op when the zip has
+        # no `_instructions/` (e.g. an export→import roundtrip already carries
+        # `.keenyspace/instructions/`).
+        await asyncio.to_thread(_move_instructions_to_keenyspace, import_tmp)
 
         now = datetime.now(UTC)
         ws = Workspace(

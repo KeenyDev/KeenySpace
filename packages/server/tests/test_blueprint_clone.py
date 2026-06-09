@@ -63,3 +63,51 @@ def test_clone_writes_config_yaml(tmp_path: Path) -> None:
     config = yaml.safe_load(config_path.read_text())
     assert config["blueprint"] == "test-bp@v0.1"
     assert config["slug"] == "myslug"
+
+
+def test_move_instructions_to_keenyspace(tmp_path: Path) -> None:
+    """Phase 6 dogfood (Fix A): the canonical layout-normalisation helper that
+    both blueprint-clone create and workspace import reuse so get_instructions
+    can resolve `.keenyspace/instructions/<command>.md`."""
+    from keenyspace_server.fs.blueprint import _move_instructions_to_keenyspace
+
+    ws = tmp_path / "ws"
+    (ws / "_instructions").mkdir(parents=True)
+    (ws / "_instructions" / "ingest.md").write_text("---\ntool_whitelist: []\n---\nHi.\n")
+    (ws / ".keenyspace").mkdir()
+
+    _move_instructions_to_keenyspace(ws)
+
+    assert (ws / ".keenyspace" / "instructions" / "ingest.md").is_file()
+    assert not (ws / "_instructions").exists()
+
+
+def test_move_instructions_noop_when_absent(tmp_path: Path) -> None:
+    """Roundtrip safety: a no-op when there is no top-level _instructions/."""
+    from keenyspace_server.fs.blueprint import _move_instructions_to_keenyspace
+
+    ws = tmp_path / "ws"
+    (ws / ".keenyspace" / "instructions").mkdir(parents=True)
+    (ws / ".keenyspace" / "instructions" / "ingest.md").write_text("x")
+
+    _move_instructions_to_keenyspace(ws)  # must not raise
+
+    # Existing .keenyspace/instructions/ is left intact.
+    assert (ws / ".keenyspace" / "instructions" / "ingest.md").read_text() == "x"
+
+
+def test_move_instructions_preserves_existing_dst(tmp_path: Path) -> None:
+    """If .keenyspace/instructions/ already exists, do not clobber it."""
+    from keenyspace_server.fs.blueprint import _move_instructions_to_keenyspace
+
+    ws = tmp_path / "ws"
+    (ws / "_instructions").mkdir(parents=True)
+    (ws / "_instructions" / "ingest.md").write_text("from-_instructions")
+    (ws / ".keenyspace" / "instructions").mkdir(parents=True)
+    (ws / ".keenyspace" / "instructions" / "ingest.md").write_text("already-here")
+
+    _move_instructions_to_keenyspace(ws)
+
+    assert (
+        ws / ".keenyspace" / "instructions" / "ingest.md"
+    ).read_text() == "already-here"
