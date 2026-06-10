@@ -1,0 +1,62 @@
+KeenySpace
+Copyright (c) 2026 Dmitry Dankov and KeenySpace contributors
+
+This software is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+See the LICENSE file for the full license text.
+
+Third-party components
+----------------------
+
+The following third-party components are used in this project. Each component
+retains its own license.
+
+FastAPI — MIT License
+  https://github.com/tiangolo/fastapi
+
+FastMCP — Apache-2.0 License
+  https://github.com/jlowin/fastmcp
+
+Pydantic — MIT License
+  https://github.com/pydantic/pydantic
+
+pydantic-settings — MIT License
+  https://github.com/pydantic/pydantic-settings
+
+SQLAlchemy — MIT License
+  https://github.com/sqlalchemy/sqlalchemy
+
+asyncpg — Apache-2.0 License
+  https://github.com/MagicStack/asyncpg
+
+Alembic — MIT License
+  https://github.com/sqlalchemy/alembic
+
+Authlib — BSD-3-Clause License
+  https://github.com/lepture/authlib
+
+PyJWT — MIT License
+  https://github.com/jpadilla/pyjwt
+
+itsdangerous — BSD-3-Clause License
+  https://github.com/pallets/itsdangerous
+
+pydantic-ai — MIT License
+  https://github.com/pydantic/pydantic-ai
+
+instructor — MIT License
+  https://github.com/jxnl/instructor
+
+structlog — Apache-2.0 / MIT License
+  https://github.com/hynek/structlog
+
+Typer — MIT License
+  https://github.com/tiangolo/typer
+
+httpx — BSD-3-Clause License
+  https://github.com/encode/httpx
+
+Caddy — Apache-2.0 License
+  https://github.com/caddyserver/caddy
+
+Authentik — MIT License
+  https://github.com/goauthentik/authentik
