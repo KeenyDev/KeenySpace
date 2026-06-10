@@ -231,3 +231,52 @@ async def test_empty_stdin_exits_clean(
     await handlers_mod.handle_post_tool()
     await asyncio.sleep(0.05)
     assert len(mock_daemon["received"]) == 1
+
+
+async def test_hook_drops_on_default_workspace(
+    temp_config_dir: dict[str, Path],
+    short_xdg_state: Path,
+    mock_daemon: dict[str, Any],
+    monkeypatch,
+    capsys,
+) -> None:
+    (temp_config_dir["config_dir"] / "config.yaml").write_text("default_workspace: fallback\n")
+    import keenyspace.config as cfg_mod
+    importlib.reload(cfg_mod)
+    cfg_mod.get_client_settings.cache_clear()  # type: ignore[attr-defined]
+    import keenyspace.workspace_inference as inf_mod
+    importlib.reload(inf_mod)
+    handlers_mod, paths_mod = await _reload_hooks_modules()
+    _set_stdin(monkeypatch, {"cwd": "/tmp/no-mapping-here", "session_id": "s99"})
+    await handlers_mod.handle_post_tool()
+    await asyncio.sleep(0.05)
+    assert len(mock_daemon["received"]) == 0, "expected event to be dropped"
+    err = capsys.readouterr().err
+    assert "no workspace mapping" in err
+    assert "/tmp/no-mapping-here" in err
+    state = json.loads(paths_mod.DROPPED_JSON.read_text())
+    assert state["by_kind"]["unmapped-workspace"]["count"] == 1
+
+
+async def test_hook_forwards_when_mapped(
+    temp_config_dir: dict[str, Path],
+    short_xdg_state: Path,
+    mock_daemon: dict[str, Any],
+    monkeypatch,
+) -> None:
+    import yaml
+
+    map_path = temp_config_dir["config_dir"] / "workspace-map.yaml"
+    cwd_path = str(Path("/tmp").resolve())
+    map_path.write_text(yaml.safe_dump({"paths": {cwd_path: "mapped"}}))
+    import keenyspace.config as cfg_mod
+    importlib.reload(cfg_mod)
+    cfg_mod.get_client_settings.cache_clear()  # type: ignore[attr-defined]
+    import keenyspace.workspace_inference as inf_mod
+    importlib.reload(inf_mod)
+    handlers_mod, _ = await _reload_hooks_modules()
+    _set_stdin(monkeypatch, {"cwd": "/tmp", "session_id": "s77"})
+    await handlers_mod.handle_post_tool()
+    await asyncio.sleep(0.05)
+    assert len(mock_daemon["received"]) == 1
+    assert mock_daemon["received"][0]["workspace_slug"] == "mapped"
