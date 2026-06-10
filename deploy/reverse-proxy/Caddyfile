@@ -1,0 +1,9 @@
+{$DOMAIN:localhost:80} {
+    reverse_proxy keenyspace:8000 {
+        flush_interval -1
+        transport http {
+            read_timeout 600s
+        }
+        header_up Host {upstream_hostport}
+    }
+}
