@@ -12,7 +12,7 @@ services:
       - path: .env
         required: false
     environment:
-      KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:devpw@postgres/keenyspace
+      KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:${POSTGRES_PASSWORD:-devpw}@postgres/keenyspace
       KEENYSPACE_FS__ROOT: /var/lib/keenyspace
       # OIDC contract — Authentik wired in this branch (DEP-06 pulled forward for Phase 6 dogfood).
       # client_id MUST match the CLI device-flow client (keenyspace-cli) so token aud validates.
@@ -24,11 +24,12 @@ services:
       KEENYSPACE_AUTH__OIDC_ISSUER_URL: http://localhost:9000/application/o/keenyspace/
       KEENYSPACE_AUTH__OIDC_INTERNAL_ISSUER_URL: http://authentik:9000/application/o/keenyspace/
       KEENYSPACE_AUTH__OIDC_CLIENT_ID: keenyspace-cli
-      KEENYSPACE_AUTH__OIDC_CLIENT_SECRET: client-secret-replace-me
+      KEENYSPACE_AUTH__OIDC_CLIENT_SECRET: ${KEENYSPACE_OIDC_CLIENT_SECRET:-client-secret-replace-me}
       KEENYSPACE_AUTH__OIDC_REDIRECT_URI: http://localhost:8000/v1/api/auth/callback
       KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI: http://localhost:8000/
-      KEENYSPACE_AUTH__SESSION_SECRET_KEY: session-secret-replace-me-min-32-bytes-xxxxxx
-      KEENYSPACE_AUTH__API_KEY_PEPPER: api-key-pepper-replace-me-min-32-bytes-xxxxxx
+      KEENYSPACE_AUTH__SESSION_SECRET_KEY: ${KEENYSPACE_SESSION_SECRET_KEY:-session-secret-replace-me-min-32-bytes-xxxxxx}
+      KEENYSPACE_AUTH__API_KEY_PEPPER: ${KEENYSPACE_API_KEY_PEPPER:-api-key-pepper-replace-me-min-32-bytes-xxxxxx}
+      KEENYSPACE_AUTH__REQUIRED_GROUP: ${KEENYSPACE_AUTH__REQUIRED_GROUP:-}
       KEENYSPACE_AUTO_MIGRATE: "true"
       # Compile is provider-neutral (pydantic-ai). Anthropic stays the default
       # (D-04); override provider/model + supply the matching key via deploy/.env
@@ -59,7 +60,7 @@ services:
     environment:
       POSTGRES_USER: authentik
       POSTGRES_DB: authentik
-      POSTGRES_PASSWORD: authentik-db-password-replace-me
+      POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-authentik-db-password-replace-me}
     volumes:
       - authentik-postgresql:/var/lib/postgresql/data
     healthcheck:
@@ -84,22 +85,23 @@ services:
     restart: unless-stopped
 
   authentik:
-    image: ghcr.io/goauthentik/server:2024.10
+    image: ghcr.io/goauthentik/server:2026.2
     command: server
     environment:
       AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__PASSWORD: authentik-db-password-replace-me
-      AUTHENTIK_SECRET_KEY: authentik-secret-key-replace-me-50-bytes-padding-padding-padding
-      AUTHENTIK_BOOTSTRAP_PASSWORD: authentik-admin-replace-me
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-authentik-db-password-replace-me}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-authentik-secret-key-replace-me-50-bytes-padding-padding-padding}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-authentik-admin-replace-me}
       AUTHENTIK_BOOTSTRAP_EMAIL: admin@keenyspace.local
-      AUTHENTIK_BOOTSTRAP_TOKEN: authentik-bootstrap-token-replace-me-32-bytes-padding
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-authentik-bootstrap-token-replace-me-32-bytes-padding}
     volumes:
-      - authentik-media:/media
+      - authentik-media:/data/media
       - authentik-templates:/templates
       - ./authentik/blueprints:/blueprints/custom:ro
+      - ./authentik/branding:/blueprints/custom/branding:ro
     ports:
       - "9000:9000"
       - "9443:9443"
@@ -117,20 +119,21 @@ services:
     restart: unless-stopped
 
   authentik-worker:
-    image: ghcr.io/goauthentik/server:2024.10
+    image: ghcr.io/goauthentik/server:2026.2
     command: worker
     environment:
       AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__PASSWORD: authentik-db-password-replace-me
-      AUTHENTIK_SECRET_KEY: authentik-secret-key-replace-me-50-bytes-padding-padding-padding
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-authentik-db-password-replace-me}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-authentik-secret-key-replace-me-50-bytes-padding-padding-padding}
     volumes:
-      - authentik-media:/media
+      - authentik-media:/data/media
       - authentik-templates:/templates
       - authentik-certs:/certs
       - ./authentik/blueprints:/blueprints/custom:ro
+      - ./authentik/branding:/blueprints/custom/branding:ro
     depends_on:
       authentik-postgresql:
         condition: service_healthy
@@ -143,7 +146,7 @@ services:
     environment:
       POSTGRES_DB: keenyspace
       POSTGRES_USER: keenyspace
-      POSTGRES_PASSWORD: devpw
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpw}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
@@ -153,6 +156,22 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost:80}
+    depends_on:
+      keenyspace:
+        condition: service_healthy
     restart: unless-stopped
 
   test:
@@ -185,3 +204,5 @@ volumes:
   authentik-media:
   authentik-templates:
   authentik-certs:
+  caddy-data:
+  caddy-config:
