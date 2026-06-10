@@ -32,10 +32,12 @@ if len(sys.argv) > 1 and sys.argv[1] == "workspace":
     import keenyspace.cli.workspace  # noqa: F401
 
 # --- 05-05 daemon/hook/service registration ---
+from keenyspace.cli.hooks import hooks_app  # noqa: E402
 from keenyspace.cli.service import service_app  # noqa: E402
 from keenyspace.daemon.cli import daemon_app  # noqa: E402
 
 app.add_typer(daemon_app)
+app.add_typer(hooks_app)
 app.add_typer(service_app)
 
 

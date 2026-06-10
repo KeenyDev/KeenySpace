@@ -1038,6 +1038,7 @@ test = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "ruff" },
     { name = "types-pyyaml" },
 ]
 
@@ -1067,6 +1068,7 @@ provides-extras = ["test"]
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=2.0.0" },
+    { name = "ruff", specifier = ">=0.15.12" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260508" },
 ]
 
