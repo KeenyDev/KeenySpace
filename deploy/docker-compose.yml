@@ -103,8 +103,10 @@ services:
     volumes:
       - authentik-media:/data/media
       - authentik-templates:/templates
+      # branding assets live inside ./authentik/blueprints/branding — a nested
+      # bind into the :ro blueprints mount fails (read-only parent), so the
+      # single blueprints mount carries them.
       - ./authentik/blueprints:/blueprints/custom:ro
-      - ./authentik/branding:/blueprints/custom/branding:ro
     ports:
       - "9000:9000"
       - "9443:9443"
@@ -136,7 +138,6 @@ services:
       - authentik-templates:/templates
       - authentik-certs:/certs
       - ./authentik/blueprints:/blueprints/custom:ro
-      - ./authentik/branding:/blueprints/custom/branding:ro
     depends_on:
       authentik-postgresql:
         condition: service_healthy
