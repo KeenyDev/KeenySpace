@@ -29,7 +29,7 @@ docker compose -f deploy/docker-compose.yml up -d
 After containers are healthy (check with `docker compose -f deploy/docker-compose.yml ps`):
 
 ```sh
-pip install keenyspace   # or: uv tool install keenyspace
+uv tool install --from ./packages/client keenyspace
 keenyspace login
 ```
 

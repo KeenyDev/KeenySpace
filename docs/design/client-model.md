@@ -4,8 +4,8 @@ status: as-built design (v0.1.0-alpha), migrated from concepts/ and verified aga
 
 # Client model
 
-The `keenyspace` CLI client is a Python package installed via `uv tool install keenyspace`
-(or `pip install keenyspace`). It provides:
+The `keenyspace` CLI client is a Python package installed from the cloned repo via
+`uv tool install --from ./packages/client keenyspace`. It provides:
 
 - CLI commands for interacting with workspaces.
 - A background daemon for hook delivery and periodic tasks.

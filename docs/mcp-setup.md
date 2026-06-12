@@ -144,6 +144,6 @@ compile. There is no direct page write surface.
   shipped configs. The provided Caddy/nginx configs disable response buffering
   (`flush_interval -1` / `proxy_buffering off`) — a custom proxy in between must do
   the same.
-- **403 after login:** the group entry gate is enabled and your user is not in the
+- **401 after login:** the group entry gate is enabled and your user is not in the
   required Authentik group. See the production hardening section of
   [docs/oidc-authentik-setup.md](oidc-authentik-setup.md).

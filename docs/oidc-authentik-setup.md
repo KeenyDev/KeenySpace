@@ -146,7 +146,7 @@ auth.{$DOMAIN} {
 Sub-path proxying (`example.com/auth/`) changes the OIDC issuer URL embedded in every
 token (`iss` claim becomes `https://example.com/auth/application/o/keenyspace/`), and
 Authentik's internal redirects do not reliably rewrite under a path prefix. The result
-is silent auth breakage: login appears to succeed, then every API call gets 403 with
+is silent auth breakage: login appears to succeed, then every API call gets 401 with
 `auth.token.iss_mismatch` in the server logs.
 
 Whatever URL your users reach Authentik at, the split-horizon issuer variables must
@@ -176,7 +176,7 @@ Restrict server access to members of one Authentik group:
 
 Behavior:
 
-- OIDC users NOT in the group are rejected at authentication with a plain 403. The
+- OIDC users NOT in the group are rejected at authentication with a plain 401. The
   error deliberately does not name the required group.
 - API keys (`ks_live_*`) BYPASS the gate. A key can only be minted by a user who passed
   the gate at mint time, so possession proves admission — and long-running MCP sessions

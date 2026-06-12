@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 ENV_FILE="$(dirname "$0")/.env"
 if [[ -f "$ENV_FILE" ]]; then
   echo ".env already exists - delete it first to regenerate"

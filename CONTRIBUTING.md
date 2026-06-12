@@ -43,7 +43,7 @@ uv run --package keenyspace-server pytest packages/server/tests/
 To run the client tests:
 
 ```
-uv run --package keenyspace-client pytest packages/client/tests/
+uv run --package keenyspace pytest packages/client/tests/
 ```
 
 Linting and type checking (both must pass before submitting a PR):

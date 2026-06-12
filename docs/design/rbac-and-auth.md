@@ -49,7 +49,7 @@ built-in OAuthProxy is not used (incompatible with the mount-path architecture).
 Optionally, membership in a specific IdP group can be required for access. When
 `KEENYSPACE_AUTH__REQUIRED_GROUP` is set, `CompositeAuthBackend.authenticate()` checks the
 `groups` claim in the OIDC token after validation. Requests from users not in the required
-group receive HTTP 403.
+group receive HTTP 401.
 
 API key holders bypass the group gate — API keys are minted by admins and represent
 already-authorized machine access.
