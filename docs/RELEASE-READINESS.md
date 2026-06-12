@@ -25,7 +25,7 @@ IMPORTANT: This document was produced by automated GSD plan execution (07-07). T
 
 - [x] **Public GitHub repo with README, CONTRIBUTING, LICENSE, NOTICE, code of conduct** — `README.md` (English, 3-step quickstart: git clone -> `./deploy/gen-secrets.sh` -> `docker compose -f deploy/docker-compose.yml up -d`; positioning, what-it-is/is-not, docs table, license + contributing links), `CONTRIBUTING.md`, `LICENSE`, `NOTICE`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1). The repo is currently private; Section 4 documents the exact flip command. Evidence: 07-03 SUMMARY (commits 97a164f/0a5f559).
 
-- [x] **Versioned release (v0.1.0 alpha)** — `publish.yml` triggers on `v*` tags, builds the multi-arch image, and creates a GitHub prerelease via `softprops/action-gh-release@v2` referencing `docs/release-notes/v0.1.0-alpha.1.md` as the body. The tag has NOT been pushed yet; Section 4 documents the exact commands. Evidence: 07-06 SUMMARY (commit 45e9140).
+- [x] **Versioned release (v0.1.0 alpha)** — `publish.yml` triggers on `v*` tags, builds the multi-arch image via a TAG_ARGS loop (CR-01 fixed in 07-08: both amd64 and arm64 source images are passed to `imagetools create`), and creates a GitHub prerelease via `softprops/action-gh-release@v2` using `body_path: docs/release-notes/v0.1.0-alpha.1.md` as the release body (WR-08 fixed in 07-08). The tag has NOT been pushed yet; Section 4 documents the exact commands. Evidence: 07-06 SUMMARY (commit 45e9140), 07-08 SUMMARY.
 
 - [x] **Minimal docs site / repo README with install, usage, MCP setup** — Five operator docs committed: `docs/install.md` (docker-compose install guide), `docs/mcp-setup.md` (api-key mint, /v1/mcp/ Bearer, Claude Code wiring, 11-tool verify roundtrip), `docs/upgrade.md` (version-pin policy, Alembic ordering, Authentik /media worked example, backup gate), `docs/backup-restore.md`, `docs/oidc-authentik-setup.md`. Six design docs at `docs/design/` (architecture, workspace-model, rbac-and-auth, mcp-and-http-surface, client-model, sync-and-storage), each as-built-verified. Evidence: 07-05 SUMMARY (commits 52486d7/3adead1), 07-03 SUMMARY (commit 2f21857).
 
@@ -45,7 +45,7 @@ IMPORTANT: This document was produced by automated GSD plan execution (07-07). T
 
 **C3: A backup-restore drill (`keenyspace backup` -> wipe FS root + Postgres -> `keenyspace restore <archive>`) leaves all workspaces, API keys (hashed), audit log, and pages intact; the user can re-login and `pull` immediately afterward.**
 
-- [x] **VERIFIED (backup phase + drill script complete; destructive half in CI)** — 07-04 Task 3 checkpoint live evidence: `keenyspace backup` produced a 2.2 MB tarball containing `manifest.json` + `pg_dump.sql` + 1612 fs_root entries; workspace count returned 3. The `deploy/scripts/backup-restore-drill.sh` script (commit 5cb04db) implements the full drill including the destructive `down -v` -> restore cycle with `COMPOSE_PROJECT_NAME=ks-drill` throwaway guard. The destructive half was deliberately deferred from local execution (port conflicts with live dogfood stack) to CI execution via `drill.yml` on throwaway runners — the script is complete and CI-ready. Release blocker fixed during this phase: `pg_dump` was missing from the Docker image until commit 899cc7b added `postgresql-client-17`.
+- [x] **VERIFIED (backup phase live; destructive half structurally runnable in CI — gates on next tag push)** — 07-04 Task 3 checkpoint live evidence: `keenyspace backup` produced a 2.2 MB tarball containing `manifest.json` + `pg_dump.sql` + 1612 fs_root entries; workspace count returned 3. The `deploy/scripts/backup-restore-drill.sh` script (commit 5cb04db) implements the full drill including the destructive `down -v` -> restore cycle with `COMPOSE_PROJECT_NAME=ks-drill` throwaway guard. The destructive half runs in `drill.yml` CI — CR-02/CR-03 blockers were fixed in 07-08: `keenyspace` CLI is now on PATH, a workspace is seeded before the drill, and auth is provisioned via `client_credentials` + `deploy/docker-compose.drill.yml` (no static repo secret required). The destructive CI cycle has not yet executed on a green tag; it will run on the next `v*` tag push. Release blocker fixed during this phase: `pg_dump` was missing from the Docker image until commit 899cc7b added `postgresql-client-17`.
 
 **C4: The repo is public with `LICENSE` (AGPL-3.0), `NOTICE`, `README` (3-step quickstart), `CONTRIBUTING.md` (DCO `Signed-off-by` requirement), code of conduct, and the existing `concepts/` directory migrated to `docs/design/`.**
 
@@ -78,7 +78,7 @@ IMPORTANT: This document was produced by automated GSD plan execution (07-07). T
 | REL-04 | Public GitHub repo with README, CONTRIBUTING, code of conduct | `README.md` (3-step quickstart), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1) | 07-03 | Complete (repo flip: Section 4) |
 | REL-05 | SemVer release v0.1.0 published as alpha (Docker image tag + GitHub release) | `publish.yml` (multi-arch build + GHCR push + GitHub prerelease on v* tag); tag push: Section 4 | 07-06 | Ready (tag push: maintainer action) |
 | REL-06 | `concepts/` migrated to `docs/design/` | `docs/design/` (6 files: architecture, workspace-model, rbac-and-auth, mcp-and-http-surface, client-model, sync-and-storage); `git rm -r concepts/`: Section 4 pre-flip | 07-03 | Complete (concepts/ cleanup: Section 4) |
-| REL-07 | Backup-restore drill executed and documented before release | `deploy/scripts/backup-restore-drill.sh` (complete); backup phase verified live 2026-06-11 (2.2 MB tarball, 3 workspaces); destructive half in `drill.yml` CI | 07-04 | Complete |
+| REL-07 | Backup-restore drill executed and documented before release | `deploy/scripts/backup-restore-drill.sh` (complete); backup phase verified live 2026-06-11 (2.2 MB tarball, 3 workspaces); destructive half in `drill.yml` CI (structurally runnable after CR-02/03 fix in 07-08; executes on next tag push) | 07-04, 07-08 | Complete |
 | REL-08 | Pre-defined ship criteria from PROJECT.md verified one-by-one | This document (RELEASE-READINESS.md) | 07-07 | Complete |
 | REL-09 | Pre-announce to small circle (3-5 people), collect >= 1 week feedback before broader release | Section 5 of this document (maintainer checklist) | 07-07 | Maintainer action |
 
@@ -119,15 +119,10 @@ git push origin v0.1.0-alpha.1
 ```
 
 This triggers two GitHub Actions workflows:
-- `publish.yml`: builds multi-arch amd64+arm64 Docker image, pushes to `ghcr.io/uber910/keenyspace:0.1.0-alpha.1`, creates a GitHub prerelease using `docs/release-notes/v0.1.0-alpha.1.md` as the body.
-- `drill.yml`: runs the backup-restore drill and both SSE proxy tests (Caddy + nginx) on throwaway CI runners. Requires the `KS_DRILL_API_KEY` repo secret to be provisioned before the tag push.
+- `publish.yml`: builds multi-arch amd64+arm64 Docker image via TAG_ARGS loop (both per-arch source images referenced), pushes to `ghcr.io/uber910/keenyspace:0.1.0-alpha.1`, creates a GitHub prerelease using `body_path: docs/release-notes/v0.1.0-alpha.1.md` as the release body (softprops/action-gh-release@v2 `body_path` input).
+- `drill.yml`: runs the backup-restore drill and both SSE proxy tests (Caddy + nginx) on throwaway CI runners. `drill.yml` mints a throwaway `ks_live_*` key against the fresh stack via `client_credentials` — no repo secret required.
 
 Note: the tag commit uses git identity `Dmitry Dankov <12ddankov12@gmail.com>`. Confirm with `git config user.name` and `git config user.email` before tagging.
-
-### Provision CI secrets before tag push
-
-In the GitHub repo Settings > Secrets and variables > Actions, add:
-- `KS_DRILL_API_KEY` — an active `ks_live_*` API key from the drill's KeenySpace instance (or a throwaway test key provisioned in the drill's setup step).
 
 ### Verify the released image
 

@@ -1,0 +1,9 @@
+services:
+  authentik:
+    volumes:
+      - ./authentik/blueprints:/blueprints/custom:ro
+      - ./authentik/blueprints-test:/blueprints/test-seed:ro
+  authentik-worker:
+    volumes:
+      - ./authentik/blueprints:/blueprints/custom:ro
+      - ./authentik/blueprints-test:/blueprints/test-seed:ro

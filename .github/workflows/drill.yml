@@ -15,13 +15,76 @@ jobs:
         with:
           enable-cache: true
       - name: Install keenyspace CLI
-        run: uv sync --all-packages --all-extras
+        run: |
+          uv sync --all-packages --all-extras
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Build image
         run: docker build -f deploy/Dockerfile -t keenyspace:drill .
-      - name: Set image in compose
+      - name: Start stack
+        env:
+          COMPOSE_PROJECT_NAME: ks-drill
+          KEENYSPACE_ADMIN_API_ENABLED: "1"
         run: |
-          export COMPOSE_FILE=deploy/docker-compose.yml
-          docker compose -f deploy/docker-compose.yml config -q
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml up -d
+          until curl -sf http://localhost:8000/healthz; do sleep 2; done
+      - name: Mint API key and write auth.json
+        env:
+          COMPOSE_PROJECT_NAME: ks-drill
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            TOKEN=$(curl -sf -X POST http://localhost:9000/application/o/token/ \
+              -d grant_type=client_credentials \
+              -d client_id=keenyspace-cli \
+              -d username=ks-test-svc \
+              -d password=ks-test-app-password-known-value-32chars \
+              -d 'scope=openid profile email' | jq -r '.access_token // empty') || true
+            [ -n "$TOKEN" ] && break
+            sleep 3
+          done
+          [ -n "$TOKEN" ] || { echo "FAIL: could not obtain OIDC token from Authentik" >&2; exit 1; }
+          KS_API_KEY=$(curl -sf -X POST http://localhost:8000/v1/api/auth/api-keys \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"drill-ci"}' | jq -r '.key // empty')
+          [ -n "$KS_API_KEY" ] || { echo "FAIL: could not mint ks_live_* key" >&2; exit 1; }
+          echo "::add-mask::$KS_API_KEY"
+          echo "KS_API_KEY=$KS_API_KEY" >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.config/keenyspace"
+          jq -n --arg k "$KS_API_KEY" --arg iss "http://localhost:9000/application/o/keenyspace/" \
+            '{api_key:$k, issuer:$iss}' > "$HOME/.config/keenyspace/auth.json"
+      - name: Seed workspace
+        run: |
+          curl -sf -X POST http://localhost:8000/v1/api/workspaces/ \
+            -H "Authorization: Bearer $KS_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"slug":"drill-seed"}'
+      - name: Write DRILL_REAUTH_CMD script
+        run: |
+          cat > /tmp/drill-reauth.sh << 'REAUTH_EOF'
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            TOKEN=$(curl -sf -X POST http://localhost:9000/application/o/token/ \
+              -d grant_type=client_credentials \
+              -d client_id=keenyspace-cli \
+              -d username=ks-test-svc \
+              -d password=ks-test-app-password-known-value-32chars \
+              -d 'scope=openid profile email' | jq -r '.access_token // empty') || true
+            [ -n "$TOKEN" ] && break
+            sleep 3
+          done
+          [ -n "$TOKEN" ] || { echo "FAIL: could not obtain OIDC token from Authentik" >&2; exit 1; }
+          KS_API_KEY=$(curl -sf -X POST http://localhost:8000/v1/api/auth/api-keys \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"drill-ci-reauth"}' | jq -r '.key // empty')
+          [ -n "$KS_API_KEY" ] || { echo "FAIL: could not re-mint ks_live_* key" >&2; exit 1; }
+          mkdir -p "$HOME/.config/keenyspace"
+          jq -n --arg k "$KS_API_KEY" --arg iss "http://localhost:9000/application/o/keenyspace/" \
+            '{api_key:$k, issuer:$iss}' > "$HOME/.config/keenyspace/auth.json"
+          REAUTH_EOF
+          chmod +x /tmp/drill-reauth.sh
+          echo "DRILL_REAUTH_CMD=/tmp/drill-reauth.sh" >> "$GITHUB_ENV"
       - name: Seed and backup-restore drill
         env:
           COMPOSE_PROJECT_NAME: ks-drill
@@ -32,6 +95,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
       - name: Build image
         run: docker build -f deploy/Dockerfile -t keenyspace:drill .
       - name: Start stack with Caddy
@@ -39,23 +105,48 @@ jobs:
           COMPOSE_PROJECT_NAME: ks-caddy
           KEENYSPACE_ADMIN_API_ENABLED: "1"
         run: |
-          docker compose -f deploy/docker-compose.yml up -d
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml up -d
           until curl -sf http://localhost:8000/healthz; do sleep 2; done
+      - name: Mint API key
+        env:
+          COMPOSE_PROJECT_NAME: ks-caddy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            TOKEN=$(curl -sf -X POST http://localhost:9000/application/o/token/ \
+              -d grant_type=client_credentials \
+              -d client_id=keenyspace-cli \
+              -d username=ks-test-svc \
+              -d password=ks-test-app-password-known-value-32chars \
+              -d 'scope=openid profile email' | jq -r '.access_token // empty') || true
+            [ -n "$TOKEN" ] && break
+            sleep 3
+          done
+          [ -n "$TOKEN" ] || { echo "FAIL: could not obtain OIDC token from Authentik" >&2; exit 1; }
+          KS_API_KEY=$(curl -sf -X POST http://localhost:8000/v1/api/auth/api-keys \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"drill-ci"}' | jq -r '.key // empty')
+          [ -n "$KS_API_KEY" ] || { echo "FAIL: could not mint ks_live_* key" >&2; exit 1; }
+          echo "::add-mask::$KS_API_KEY"
+          echo "KS_API_KEY=$KS_API_KEY" >> "$GITHUB_ENV"
       - name: SSE proxy test via Caddy
         env:
-          KS_API_KEY: ${{ secrets.KS_DRILL_API_KEY }}
           COMPOSE_PROJECT_NAME: ks-caddy
         run: bash deploy/scripts/sse-proxy-test.sh caddy
       - name: Teardown
         if: always()
         env:
           COMPOSE_PROJECT_NAME: ks-caddy
-        run: docker compose -f deploy/docker-compose.yml down -v
+        run: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml down -v
 
   proxy-test-nginx:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
       - name: Build image
         run: docker build -f deploy/Dockerfile -t keenyspace:drill .
       - name: Start stack with nginx
@@ -63,16 +154,38 @@ jobs:
           COMPOSE_PROJECT_NAME: ks-nginx
           KEENYSPACE_ADMIN_API_ENABLED: "1"
         run: |
-          docker compose -f deploy/docker-compose.yml up -d keenyspace postgres authentik authentik-worker authentik-postgresql authentik-redis
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml up -d keenyspace postgres authentik authentik-worker authentik-postgresql authentik-redis
           until curl -sf http://localhost:8000/healthz; do sleep 2; done
           docker run -d --name ks-nginx-proxy \
             --network ks-nginx_default \
             -p 80:80 \
             -v "$PWD/deploy/reverse-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
             nginx:stable-alpine
+      - name: Mint API key
+        env:
+          COMPOSE_PROJECT_NAME: ks-nginx
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            TOKEN=$(curl -sf -X POST http://localhost:9000/application/o/token/ \
+              -d grant_type=client_credentials \
+              -d client_id=keenyspace-cli \
+              -d username=ks-test-svc \
+              -d password=ks-test-app-password-known-value-32chars \
+              -d 'scope=openid profile email' | jq -r '.access_token // empty') || true
+            [ -n "$TOKEN" ] && break
+            sleep 3
+          done
+          [ -n "$TOKEN" ] || { echo "FAIL: could not obtain OIDC token from Authentik" >&2; exit 1; }
+          KS_API_KEY=$(curl -sf -X POST http://localhost:8000/v1/api/auth/api-keys \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"drill-ci"}' | jq -r '.key // empty')
+          [ -n "$KS_API_KEY" ] || { echo "FAIL: could not mint ks_live_* key" >&2; exit 1; }
+          echo "::add-mask::$KS_API_KEY"
+          echo "KS_API_KEY=$KS_API_KEY" >> "$GITHUB_ENV"
       - name: SSE proxy test via nginx
         env:
-          KS_API_KEY: ${{ secrets.KS_DRILL_API_KEY }}
           COMPOSE_PROJECT_NAME: ks-nginx
         run: bash deploy/scripts/sse-proxy-test.sh nginx
       - name: Teardown
@@ -81,4 +194,4 @@ jobs:
           COMPOSE_PROJECT_NAME: ks-nginx
         run: |
           docker rm -f ks-nginx-proxy || true
-          docker compose -f deploy/docker-compose.yml down -v
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml down -v

@@ -59,8 +59,11 @@ jobs:
             type=sha,prefix=sha-,format=short
       - name: Create multi-arch manifest
         run: |
-          docker buildx imagetools create \
-            $(echo "${{ steps.meta.outputs.tags }}" | tr '\n' ' ' | sed 's/ / -t /g' | sed 's/^/-t /') \
+          TAG_ARGS=""
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && TAG_ARGS="$TAG_ARGS -t $tag"
+          done <<< "${{ steps.meta.outputs.tags }}"
+          docker buildx imagetools create $TAG_ARGS \
             ghcr.io/uber910/keenyspace:${{ github.sha }}-amd64 \
             ghcr.io/uber910/keenyspace:${{ github.sha }}-arm64
 
@@ -81,12 +84,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           prerelease: true
-          body: |
-            Docker image: `ghcr.io/uber910/keenyspace:${{ steps.meta.outputs.version }}`
-
-            Pull and run:
-            ```
-            docker pull ghcr.io/uber910/keenyspace:${{ steps.meta.outputs.version }}
-            ```
-
-            See [install.md](docs/install.md) for full setup instructions.
+          body_path: docs/release-notes/v0.1.0-alpha.1.md
