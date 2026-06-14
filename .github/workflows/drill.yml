@@ -42,7 +42,17 @@ jobs:
             [ -n "$TOKEN" ] && break
             sleep 3
           done
-          [ -n "$TOKEN" ] || { echo "FAIL: could not obtain OIDC token from Authentik" >&2; exit 1; }
+          [ -n "$TOKEN" ] || {
+            echo "FAIL: could not obtain OIDC token from Authentik" >&2
+            echo "--- DIAGNOSTIC: raw token-endpoint response (status + body) ---" >&2
+            curl -s -w '\nHTTP_STATUS:%{http_code}\n' -X POST http://localhost:9000/application/o/token/ \
+              -d grant_type=client_credentials \
+              -d client_id=keenyspace-cli \
+              -d username=ks-test-svc \
+              -d password=ks-test-app-password-known-value-32chars \
+              -d 'scope=openid profile email' >&2 || true
+            exit 1
+          }
           KS_API_KEY=$(curl -sf -X POST http://localhost:8000/v1/api/auth/api-keys \
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
