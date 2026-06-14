@@ -91,6 +91,8 @@ jobs:
         env:
           COMPOSE_PROJECT_NAME: ks-drill
           KEENYSPACE_ADMIN_API_ENABLED: "1"
+          KEENYSPACE_SERVER_URL: http://localhost:8000
+          DRILL_COMPOSE_FILES: "-f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml"
         run: bash deploy/scripts/backup-restore-drill.sh
 
   proxy-test-caddy:

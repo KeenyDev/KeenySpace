@@ -27,7 +27,7 @@
 
 set -euo pipefail
 
-COMPOSE="docker compose -f deploy/docker-compose.yml"
+COMPOSE="docker compose ${DRILL_COMPOSE_FILES:--f deploy/docker-compose.yml}"
 KS_BASE_URL="${KS_BASE_URL:-http://localhost:8000}"
 BACKUP_PATH="${BACKUP_PATH:-/tmp/drill-backup.tar.gz}"
 DRILL_REAUTH_CMD="${DRILL_REAUTH_CMD:-}"
