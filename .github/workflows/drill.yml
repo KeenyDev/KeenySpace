@@ -51,6 +51,10 @@ jobs:
               -d username=ks-test-svc \
               -d password=ks-test-app-password-known-value-32chars \
               -d 'scope=openid profile email' >&2 || true
+            echo "--- DIAGNOSTIC: Authentik server logs (token/oauth/client) ---" >&2
+            docker logs ks-drill-authentik-1 --since 5m 2>&1 \
+              | grep -iE 'token|oauth|client|invalid|provider|app.?password|service.?account|grant' \
+              | tail -60 >&2 || true
             exit 1
           }
           KS_API_KEY=$(curl -sf -X POST http://localhost:8000/v1/api/auth/api-keys \
