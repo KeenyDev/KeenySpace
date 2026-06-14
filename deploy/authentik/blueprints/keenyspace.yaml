@@ -9,9 +9,8 @@
 #   - client_id keenyspace-cli  == KEENYSPACE_AUTH__OIDC_CLIENT_ID (token aud)
 #   - application slug keenyspace -> issuer .../application/o/keenyspace/
 #     == KEENYSPACE_AUTH__OIDC_ISSUER_URL (token iss)
-#   - confidential client: required for the M2M client_credentials drill path
-#     (service account + app-password). The CLI device-code flow also works with
-#     confidential clients; the client_secret is optional for the device flow.
+#   - public client: the CLI device-code flow (login.py CLIENT_ID=keenyspace-cli)
+#     sends no client_secret.
 version: 1
 metadata:
   name: keenyspace-dogfood-oidc
@@ -41,12 +40,10 @@ entries:
       name: keenyspace-cli
     attrs:
       name: keenyspace-cli
-      client_type: confidential
+      client_type: public
       client_id: keenyspace-cli
       authorization_flow:
         !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
-      authentication_flow:
-        !Find [authentik_flows.flow, [slug, default-authentication-flow]]
       invalidation_flow:
         !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       signing_key:
