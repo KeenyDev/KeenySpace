@@ -117,6 +117,8 @@ def _make_fastmcp_client(app, plaintext: str):
         headers: dict[str, str] | None = None,
         timeout: httpx.Timeout | None = None,
         auth: httpx.Auth | None = None,
+        follow_redirects: bool = True,
+        **kwargs: object,
     ) -> httpx.AsyncClient:
         merged_headers: dict[str, str] = {
             "Authorization": f"Bearer {plaintext}",
@@ -128,6 +130,7 @@ def _make_fastmcp_client(app, plaintext: str):
             base_url="http://test",
             headers=merged_headers,
             timeout=timeout or httpx.Timeout(30.0, read=60.0),
+            follow_redirects=follow_redirects,
         )
 
     transport = StreamableHttpTransport(
