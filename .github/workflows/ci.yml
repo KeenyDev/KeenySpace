@@ -57,7 +57,7 @@ jobs:
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
       - name: pytest server
         working-directory: packages/server
-        run: uv run --package keenyspace-server pytest tests/ -x -q -m "not real_idp"
+        run: uv run --package keenyspace-server pytest tests/ -q -m "not real_idp"
 
   test-client:
     runs-on: ubuntu-24.04
