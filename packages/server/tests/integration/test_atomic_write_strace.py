@@ -24,7 +24,7 @@ def test_atomic_write_strace_syscall_sequence(tmp_path: Path):
     subprocess.run(
         [
             "strace",
-            "-e", "trace=openat,write,fsync,rename,renameat,close",
+            "-e", "trace=openat,write,fsync,rename,renameat,renameat2,close",
             "-o", str(strace_log),
             sys.executable,
             "-c",
@@ -47,7 +47,7 @@ def test_atomic_write_strace_syscall_sequence(tmp_path: Path):
     assert re.search(r"fsync\(", strace_text), \
         f"fsync not found in strace:\n{strace_text[:2000]}"
 
-    assert re.search(r"renameat?\(", strace_text), \
+    assert re.search(r"rename(at2?)?\(", strace_text), \
         f"rename/renameat not found in strace:\n{strace_text[:2000]}"
 
     assert re.search(r"openat\(.*O_RDONLY.*O_DIRECTORY", strace_text), \
