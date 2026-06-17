@@ -10,8 +10,32 @@ PG_URL = os.environ.get("KEENYSPACE_DB__URL")
 SERVER_DIR = Path(__file__).parent.parent
 
 
+def _reset_schema() -> None:
+    """Start from an empty public schema.
+
+    These tests drive alembic against the shared CI database. Other tests seed
+    rows (e.g. api_keys, which migration 0003 guards against being non-empty)
+    and leave partial schema state, so a bare upgrade/downgrade cycle is not
+    reproducible without first wiping the schema.
+    """
+    import asyncio
+
+    import sqlalchemy as sa
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    async def _drop() -> None:
+        eng = create_async_engine(PG_URL or "", isolation_level="AUTOCOMMIT")
+        async with eng.connect() as conn:
+            await conn.execute(sa.text("DROP SCHEMA public CASCADE"))
+            await conn.execute(sa.text("CREATE SCHEMA public"))
+        await eng.dispose()
+
+    asyncio.run(_drop())
+
+
 @pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set")
 def test_alembic_upgrade_creates_compile_runs_and_workspace_columns() -> None:
+    _reset_schema()
     env = {**os.environ, "KEENYSPACE_DB__URL": PG_URL}
     up = subprocess.run(
         ["uv", "run", "alembic", "upgrade", "head"],
@@ -42,6 +66,7 @@ def test_alembic_upgrade_creates_compile_runs_and_workspace_columns() -> None:
 
 @pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set")
 def test_alembic_downgrade_reverts_phase2() -> None:
+    _reset_schema()
     env = {**os.environ, "KEENYSPACE_DB__URL": PG_URL}
     subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=SERVER_DIR, env=env, check=True)
     # Revert to the pre-phase-2 baseline (0001). A relative "-1" would only

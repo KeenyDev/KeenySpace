@@ -67,9 +67,28 @@ def _reset_structlog():
     booted the app. Resetting clears the cache and config so each test starts
     clean; app-booting tests reconfigure during their lifespan.
     """
+    import contextlib
+    import sys
+
     import structlog
 
     structlog.reset_defaults()
+    # reset_defaults() restores config but does NOT clear loggers already cached
+    # on module-level lazy proxies (the app boots with
+    # cache_logger_on_first_use=True). On first use the proxy caches both the
+    # bound logger (_logger) and its bound methods (warning/info/... as public
+    # instance attributes), bypassing later reconfiguration — so capture_logs()
+    # can no longer intercept it. Drop both caches on every loaded keenyspace
+    # module logger.
+    for module in list(sys.modules.values()):
+        candidate = getattr(module, "log", None)
+        if candidate is None or not hasattr(candidate, "_cache_logger_on_first_use"):
+            continue
+        for attr in [a for a in vars(candidate) if not a.startswith("_")]:
+            with contextlib.suppress(AttributeError):
+                delattr(candidate, attr)
+        with contextlib.suppress(AttributeError, TypeError):
+            candidate._logger = None
     yield
 
 
