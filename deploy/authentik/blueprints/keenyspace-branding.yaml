@@ -1,4 +1,5 @@
-# Authentik blueprint — KeenySpace visual branding (logo / favicon / background).
+# Authentik blueprint — KeenySpace visual branding (logo / favicon / background)
+# plus the authentication-flow title shown above the login form.
 #
 # Deliberately SEPARATE from keenyspace.yaml: blueprint apply is atomic, so an
 # invalid asset path here can only roll back this file — never the OIDC provider
@@ -25,6 +26,13 @@ entries:
     identifiers:
       domain: authentik-default
     attrs:
-      branding_logo: keeny/keeny-white.svg
+      branding_logo: keeny/keenyspace-white.svg
       branding_favicon: keeny/favicon.svg
-      branding_default_flow_background: keeny/logo-full-red-bg.svg
+      branding_default_flow_background: keeny/bg-red.svg
+  # Replace the stock "Welcome to authentik!" heading on the login screen.
+  - model: authentik_flows.flow
+    state: present
+    identifiers:
+      slug: default-authentication-flow
+    attrs:
+      title: Welcome to KeenySpace!
