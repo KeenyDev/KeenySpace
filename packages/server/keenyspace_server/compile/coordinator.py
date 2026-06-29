@@ -50,6 +50,7 @@ class CompileCoordinator:
         self._dirty: set[UUID] = set()
         self._inflight: dict[UUID, str] = {}
         self._daily_tokens: dict[UUID, int] = defaultdict(int)
+        self._output_tokens_per_space: dict[UUID, int] = defaultdict(int)
         self._pending_debounce: dict[UUID, asyncio.TimerHandle] = {}
         self._debounce_tasks: set[asyncio.Task[None]] = set()
 
@@ -179,12 +180,13 @@ class CompileCoordinator:
     async def reset_daily_ceiling(self) -> None:
         """APScheduler 00:00 UTC cron entry point (Plan 05 + D-14)."""
         async with get_db_session() as session:
-            # SPECIFICITY GUARD: WHERE clause MUST remain `compile_paused_reason == "daily_ceiling"`.
-            # Broadening this filter to include 'archived' would erroneously resume archived
-            # workspaces on the 00:00 UTC cron tick (Phase 4 D-01, RESEARCH.md Pitfall 6).
+            # SPECIFICITY GUARD: WHERE clause MUST stay restricted to the daily-budget pause
+            # reasons ('daily_ceiling', 'space_budget_exceeded'). NEVER broaden to include
+            # 'archived' — that would erroneously resume archived workspaces on the 00:00 UTC
+            # cron tick (Phase 4 D-01, RESEARCH.md Pitfall 6).
             await session.execute(
                 update(Workspace)
-                .where(Workspace.compile_paused_reason == "daily_ceiling")
+                .where(Workspace.compile_paused_reason.in_(["daily_ceiling", "space_budget_exceeded"]))
                 .values(
                     compile_state="idle",
                     compile_paused_reason=None,
@@ -195,6 +197,7 @@ class CompileCoordinator:
         for ws in list(self._daily_tokens.keys()):
             COMPILE_DAILY_TOKENS.labels(workspace=str(ws)).set(0)
         self._daily_tokens.clear()
+        self._output_tokens_per_space.clear()
         log.info("compile.daily_ceiling_reset")
 
     async def _workspace_root(self, ws_uuid: UUID) -> Path | None:
@@ -277,6 +280,20 @@ class CompileCoordinator:
             COMPILE_RUNS_TOTAL.labels(workspace=str(ws_uuid), status="abort_ceiling").inc()
             return CompileRunResult(status="paused", pages_written=0)
 
+        if self._output_tokens_per_space.get(ws_uuid, 0) >= self.settings.max_output_tokens_per_space:
+            await self._pause(
+                ws_uuid, reason="space_budget_exceeded",
+                error="per-space daily output token budget reached",
+            )
+            await self._write_run_row(
+                ws_uuid, run_id, started_at, source,
+                status="abort_space_budget", pages_written=0,
+                wal_first_id=slice_.wal_first_id, wal_last_id=slice_.wal_last_id, plan_hash=None,
+            )
+            log.warning("compile.aborted", workspace=str(ws_uuid), reason="space_budget_exceeded")
+            COMPILE_RUNS_TOTAL.labels(workspace=str(ws_uuid), status="abort_space_budget").inc()
+            return CompileRunResult(status="paused", pages_written=0)
+
         await self._write_run_row(
             ws_uuid, run_id, started_at, source,
             status="running", pages_written=0,
@@ -286,14 +303,14 @@ class CompileCoordinator:
         deps = CompileDeps(ws_root=ws_root, wal_text=slice_.formatted_text)
         detector = LoopDetector(max_repeats=3)
         try:
-            plan, detector = await asyncio.wait_for(
+            plan, detector, output_tokens = await asyncio.wait_for(
                 run_compile_agent(
                     deps,
                     model_name=self.settings.model,
                     provider=self.settings.provider,
                     max_tool_calls=self.settings.max_tool_calls,
                     max_input_tokens=self.settings.max_input_tokens,
-                    max_output_tokens=self.settings.max_output_tokens,
+                    max_output_tokens_per_call=self.settings.max_output_tokens_per_call,
                     loop_detector=detector,
                 ),
                 timeout=self.settings.max_seconds,
@@ -356,6 +373,12 @@ class CompileCoordinator:
 
         await self._advance_cursor(ws_uuid, slice_.wal_last_id or "", plan_hash_value, last_wal_id)
 
+        # Per-space daily OUTPUT-token budget (real usage from result.usage()); replaces
+        # the former per-query output throttle. Reset at 00:00 UTC by reset_daily_ceiling.
+        self._output_tokens_per_space[ws_uuid] = (
+            self._output_tokens_per_space.get(ws_uuid, 0) + output_tokens
+        )
+
         # Conservative daily-token tracking; v1.1 will replace with result.usage() data
         estimated_tokens = max(1, len(deps.wal_text) // 4)
         self._daily_tokens[ws_uuid] = self._daily_tokens.get(ws_uuid, 0) + estimated_tokens
@@ -370,15 +393,23 @@ class CompileCoordinator:
             status="success",
             pages_written=pages_written,
             plan_hash=plan_hash_value,
+            tokens_output=output_tokens,
             completed_at=datetime.now(UTC),
         )
-        async with get_db_session() as session:
-            await session.execute(
-                update(Workspace)
-                .where(Workspace.uuid == ws_uuid)
-                .values(compile_state="idle")
+        # This run succeeded; pause future runs if it pushed the space over its daily budget.
+        if self._output_tokens_per_space[ws_uuid] >= self.settings.max_output_tokens_per_space:
+            await self._pause(
+                ws_uuid, reason="space_budget_exceeded",
+                error="per-space daily output token budget reached",
             )
-            await session.commit()
+        else:
+            async with get_db_session() as session:
+                await session.execute(
+                    update(Workspace)
+                    .where(Workspace.uuid == ws_uuid)
+                    .values(compile_state="idle")
+                )
+                await session.commit()
         log.info(
             "compile.finished",
             workspace=str(ws_uuid), run_id=run_id,
@@ -399,6 +430,7 @@ class CompileCoordinator:
                 )
             )
             await session.commit()
+        self._output_tokens_per_space.pop(ws_uuid, None)
         log.info("compile.resumed", workspace=str(ws_uuid))
 
     async def _read_cursor(self, ws_uuid: UUID) -> CompileCursor | None:
@@ -458,7 +490,7 @@ class CompileCoordinator:
         self, ws_uuid: UUID, run_id: str,
         *, status: str | None = None, pages_written: int | None = None,
         plan_hash: str | None = None, completed_at: datetime | None = None,
-        error_message: str | None = None,
+        error_message: str | None = None, tokens_output: int | None = None,
     ) -> None:
         async with get_db_session() as session:
             values: dict[str, object] = {}
@@ -472,6 +504,8 @@ class CompileCoordinator:
                 values["completed_at"] = completed_at
             if error_message is not None:
                 values["error_message"] = error_message
+            if tokens_output is not None:
+                values["tokens_output"] = tokens_output
             if values:
                 await session.execute(
                     update(CompileRun)

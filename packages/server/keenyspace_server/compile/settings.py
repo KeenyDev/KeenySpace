@@ -10,7 +10,14 @@ class CompileSettings(BaseModel):
     backstop_interval_minutes: int = 15
     max_tool_calls: int = 20
     max_input_tokens: int = 50_000
-    max_output_tokens: int = 20_000
+    # Cap on a single LLM generation (ModelSettings.max_tokens). MUST stay <= the
+    # chosen model's max output tokens (e.g. gpt-5.4-mini = 128_000).
+    max_output_tokens_per_call: int = 20_000
+    # Daily OUTPUT-token budget per workspace ("space"). Compile pauses with reason
+    # 'space_budget_exceeded' once a workspace's summed compile output for the current
+    # UTC day crosses this; the 00:00 UTC reset (reset_daily_ceiling) clears the tally
+    # and resumes, and manual resume() clears it too. NO per-compile-run output throttle.
+    max_output_tokens_per_space: int = 128_000
     max_seconds: int = 180
     daily_token_ceiling: int = 500_000
     # Provider is pydantic-ai's provider id (anthropic | openai | google-gla | ...).

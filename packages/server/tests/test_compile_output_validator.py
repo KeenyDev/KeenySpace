@@ -31,7 +31,7 @@ async def test_output_validator_rejects_denylist_paths(tmp_path: Path) -> None:
 
     deps = CompileDeps(ws_root=tmp_path, wal_text="<wal_entry id='X'>data</wal_entry>")
     with compile_agent.override(model=FunctionModel(_alternating)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
     assert plan.ops[0].path == "notes/ok.md"
     assert call_count["n"] >= 2
 
@@ -41,7 +41,7 @@ async def test_output_validator_passes_clean_plan(tmp_path: Path) -> None:
     clean = CompilePlan(ops=[PageOp(action="create", path="notes/ok.md", body="y")])
     deps = CompileDeps(ws_root=tmp_path, wal_text="<wal_entry id='X'>data</wal_entry>")
     with compile_agent.override(model=FunctionModel(_model_returns(clean))):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
     assert plan.ops[0].path == "notes/ok.md"
 
 

@@ -85,7 +85,7 @@ async def test_domain_01_frontmatter_preservation(tmp_path: Path) -> None:
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     plan_fm_keys = set(plan.ops[0].frontmatter.keys())
     assert existing_keys <= plan_fm_keys, (
@@ -132,7 +132,7 @@ async def test_domain_02_wikilink_hygiene(tmp_path: Path) -> None:
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     op_body = plan.ops[0].body
     for fragment in required_fragments:
@@ -199,7 +199,7 @@ async def test_domain_03_heading_structure_preservation(tmp_path: Path) -> None:
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     new_headings = set(_extract_headings(plan.ops[0].body))
     assert prior_headings <= new_headings, (
@@ -242,7 +242,7 @@ async def test_domain_04_page_targeting_deepest(tmp_path: Path) -> None:
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     assert plan.ops[0].path == expected_path, (
         f"Agent must target the deepest specific match ({expected_path!r}), "

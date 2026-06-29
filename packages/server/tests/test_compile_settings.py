@@ -13,7 +13,8 @@ def test_compile_settings_defaults_match_d09() -> None:
     assert cs.backstop_interval_minutes == 15
     assert cs.max_tool_calls == 20
     assert cs.max_input_tokens == 50_000
-    assert cs.max_output_tokens == 20_000
+    assert cs.max_output_tokens_per_call == 20_000
+    assert cs.max_output_tokens_per_space == 128_000
     assert cs.max_seconds == 180
     assert cs.daily_token_ceiling == 500_000
     assert cs.model == "claude-sonnet-4-6"

@@ -52,8 +52,8 @@ async def test_loop_detector_per_run_no_state_bleed(tmp_path: Path) -> None:
     deps = CompileDeps(ws_root=tmp_path, wal_text="<wal_entry id='X'>x</wal_entry>")
 
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan_1, detector_1 = await run_compile_agent(deps)
-        plan_2, detector_2 = await run_compile_agent(deps)
+        plan_1, detector_1, _ = await run_compile_agent(deps)
+        plan_2, detector_2, _ = await run_compile_agent(deps)
 
     assert detector_1 is not detector_2
     assert detector_1.triggered is False

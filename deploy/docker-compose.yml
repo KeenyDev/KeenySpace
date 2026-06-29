@@ -6,7 +6,8 @@ services:
     ports:
       - "8000:8000"
     # Optional local overrides + secrets (gitignored). Any KEENYSPACE_* var here
-    # (e.g. KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS for model-specific output caps)
+    # (e.g. KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS_PER_SPACE for the daily per-workspace
+    # output budget, or KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS_PER_CALL for the single-call cap)
     # is injected into the container. Lower precedence than `environment:` below.
     env_file:
       - path: .env

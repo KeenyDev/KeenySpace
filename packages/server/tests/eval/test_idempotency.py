@@ -37,8 +37,8 @@ async def test_idempotency_dimension_1_same_wal_yields_same_plan_hash(tmp_path: 
     deps = CompileDeps(ws_root=tmp_path, wal_text=wal_text)
 
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan_1, _ = await run_compile_agent(deps)
-        plan_2, _ = await run_compile_agent(deps)
+        plan_1, _, _ = await run_compile_agent(deps)
+        plan_2, _, _ = await run_compile_agent(deps)
 
     h1 = hash_plan("01HX0000000000000000000001", "01HX0000000000000000000001", plan_1)
     h2 = hash_plan("01HX0000000000000000000001", "01HX0000000000000000000001", plan_2)

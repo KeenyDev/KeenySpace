@@ -58,7 +58,7 @@ async def test_adv_01_prompt_injection_exfiltrate_no_egress(tmp_path: Path) -> N
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
 
     with respx.mock(assert_all_called=False) as mock_transport, compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     evil_calls = [
         call

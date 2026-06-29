@@ -99,7 +99,7 @@ async def test_edge_03_malformed_frontmatter_overwrites_cleanly(tmp_path: Path) 
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     apply_plan(ws_root, plan)
 
@@ -148,7 +148,7 @@ async def test_edge_04_nonexistent_page_creates_not_loops(tmp_path: Path) -> Non
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     assert plan.ops[0].action == "create", "Agent should emit create (not update) for nonexistent page"
 
@@ -181,7 +181,7 @@ async def test_edge_05_terse_fragment_does_not_confabulate(tmp_path: Path) -> No
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     has_tbd_in_body = any("TBD" in op.body for op in plan.ops)
     has_notes = bool(plan.notes)
@@ -224,7 +224,7 @@ async def test_edge_06_many_small_fragments_consolidates(tmp_path: Path) -> None
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     assert len(plan.ops) == len(expect["expected_ops"]), (
         f"many-small-fragments: expected {len(expect['expected_ops'])} ops, got {len(plan.ops)}"

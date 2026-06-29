@@ -143,15 +143,22 @@ async def run_compile_agent(
     provider: str = "anthropic",
     max_tool_calls: int = 20,
     max_input_tokens: int = 50_000,
-    max_output_tokens: int = 20_000,
+    max_output_tokens_per_call: int = 20_000,
     loop_detector: LoopDetector | None = None,
-) -> tuple[CompilePlan, LoopDetector]:
+) -> tuple[CompilePlan, LoopDetector, int]:
     """Run the compile agent with hard budgets + loop detection.
 
-    Returns (plan, loop_detector) so the coordinator can disambiguate a
-    UsageLimitExceeded raised because the LoopDetector exhausted retries (loop_abort)
-    from a UsageLimitExceeded raised because the model genuinely overran the budget
-    (budget_exceeded). loop_detector.triggered == True implies loop_abort.
+    Returns (plan, loop_detector, output_tokens). output_tokens is this run's
+    output-token usage; the coordinator accumulates it into a per-workspace ("space")
+    daily budget. There is no per-run output throttle: a single generation is capped
+    by max_output_tokens_per_call (ModelSettings.max_tokens), and the agent loop is
+    bounded by request_limit + input_tokens_limit, but cumulative output is governed
+    per space, not per query.
+
+    loop_detector lets the coordinator disambiguate a UsageLimitExceeded raised because
+    the LoopDetector exhausted retries (loop_abort) from one raised because the request
+    or input-token limit overran (budget_exceeded). loop_detector.triggered == True
+    implies loop_abort.
 
     Always `await` — never `agent.run_sync()` (would crash inside the async event loop).
     """
@@ -163,13 +170,13 @@ async def run_compile_agent(
         model=model,
         model_settings=ModelSettings(
             temperature=0,
-            max_tokens=max_output_tokens,
+            max_tokens=max_output_tokens_per_call,
         ),
         usage_limits=UsageLimits(
             request_limit=max_tool_calls + 1,
             input_tokens_limit=max_input_tokens,
-            output_tokens_limit=max_output_tokens,
         ),
         capabilities=[detector],
     )
-    return result.output, detector
+    output_tokens = getattr(result.usage(), "output_tokens", 0) or 0
+    return result.output, detector, output_tokens

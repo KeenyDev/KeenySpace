@@ -71,7 +71,7 @@ async def test_golden_fixture_roundtrip(fixture_name: str, tmp_path: Path) -> No
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
-        plan, _ = await run_compile_agent(deps)
+        plan, _, _ = await run_compile_agent(deps)
 
     assert [(op.action, op.path) for op in plan.ops] == [
         (o["action"], o["path"]) for o in expect["expected_ops"]
