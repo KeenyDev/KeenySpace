@@ -3,6 +3,9 @@ tool_whitelist:
   - read_page
   - append_log
   - search_workspace
+  - list_pages
+  - get_workspace_info
+  - get_recent_changes
 model: null
 steps:
   - "Load source from {{ context.source_path }}"

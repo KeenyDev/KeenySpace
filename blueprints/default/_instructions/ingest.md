@@ -1,5 +1,5 @@
 ---
-tool_whitelist: [read_page, append_log, search_workspace]
+tool_whitelist: [read_page, append_log, search_workspace, list_pages, get_workspace_info, get_recent_changes]
 model: null
 budgets:
   max_steps: 20
