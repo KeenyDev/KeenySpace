@@ -33,6 +33,10 @@ DEFAULT_INTERVAL_SECONDS = 600
 # Below this many extracted chars (~1k tokens at 4 chars/token) we wait for the
 # session to accumulate more rather than spend an ingest call on a tiny delta.
 MIN_DELTA_CHARS = 4_000
+# Wall-clock cap on a single ingest. Without it, one hung LLM/HTTP call would
+# block the whole poll loop indefinitely (a stuck ingest once wedged the reader
+# for hours). On timeout the buffer is kept and retried on the next tick.
+INGEST_TIMEOUT_SECONDS = 180
 # Hard cap on raw bytes consumed per file per tick. Bounds a single ingest's
 # input (cost + provider context budget) and drains a large backlog -- a long
 # session or an empty first-run cursor over a multi-MB transcript -- in bounded
@@ -198,6 +202,7 @@ async def _tick(
     resolve_fn: ResolveFn,
     min_delta_chars: int,
     max_delta_bytes: int = MAX_DELTA_BYTES,
+    ingest_timeout: float = INGEST_TIMEOUT_SECONDS,
 ) -> None:
     if not projects_dir.is_dir():
         return
@@ -247,11 +252,12 @@ async def _tick(
 
             text = buffers[key]
             try:
-                await ingest_fn(slug, text, key)
+                await asyncio.wait_for(ingest_fn(slug, text, key), timeout=ingest_timeout)
             except Exception as exc:  # one bad session must not stall the loop
                 # Keep the buffer (cursor already advanced) so the text is retried,
                 # not lost, on the next tick.
-                log.warning("session_reader.ingest_failed", file=key, error=str(exc))
+                reason = "timeout" if isinstance(exc, TimeoutError) else str(exc)
+                log.warning("session_reader.ingest_failed", file=key, error=reason)
                 continue
             buffers[key] = ""
             log.info("session_reader.ingested", workspace=slug, file=key, chars=len(text))

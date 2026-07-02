@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -135,6 +136,35 @@ async def test_tick_below_threshold_buffers_and_advances(tmp_path: Path) -> None
     assert calls == []  # below threshold: not ingested yet
     assert cursors[str(f)] == f.stat().st_size  # cursor advanced (no wedge)
     assert "tiny" in buffers[str(f)]  # signal retained in the buffer
+
+
+@pytest.mark.asyncio
+async def test_tick_ingest_timeout_does_not_wedge(tmp_path: Path) -> None:
+    projects = tmp_path / "projects"
+    body = _transcript("/Users/dmitrydankov/BSW", [("user", "x" * 5000)])
+    f = _write_session(projects, "s1.jsonl", body)
+
+    async def hung_ingest(slug: str, text: str, src: str) -> None:
+        await asyncio.sleep(3600)  # never returns within the tick's budget
+
+    cursors: dict[str, int] = {}
+    buffers: dict[str, str] = {}
+    # A tiny timeout must make the tick return promptly instead of blocking.
+    await asyncio.wait_for(
+        _tick(
+            cursors,
+            buffers,
+            projects_dir=projects,
+            ingest_fn=hung_ingest,
+            resolve_fn=_registered,
+            min_delta_chars=4_000,
+            ingest_timeout=0.05,
+        ),
+        timeout=5.0,
+    )
+    # Cursor advanced (window consumed) but buffer retained for retry.
+    assert cursors[str(f)] == f.stat().st_size
+    assert buffers[str(f)]
 
 
 @pytest.mark.asyncio
