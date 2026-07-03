@@ -22,6 +22,9 @@ dist/
 # IDE
 .idea/
 
+# Local agent instructions (per-user, not part of the repo)
+CLAUDE.md
+
 
 # Local secrets / env overrides (compose interpolation) — never commit
 .env
