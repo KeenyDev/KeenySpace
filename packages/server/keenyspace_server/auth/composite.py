@@ -24,6 +24,7 @@ PUBLIC_PREFIXES = (
     "/healthz",
     "/readyz",
     "/metrics",
+    "/.well-known/oauth-protected-resource",
     "/v1/api/auth/discovery",
     "/v1/api/auth/login",
     "/v1/api/auth/callback",

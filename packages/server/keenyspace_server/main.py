@@ -16,6 +16,7 @@ from .api import (
     health,
     logs,
     pages,
+    well_known,
     workspace_archive,
     workspace_export,
     workspace_import,
@@ -144,6 +145,7 @@ def build_app() -> FastAPI:
     )
 
     app.include_router(health.router)
+    app.include_router(well_known.router)
     # D-03 inline auto-refresh: cookie-path browser sessions get inline rotate
     # via FastAPI dependency when ks_at exp is within refresh_threshold_seconds.
     # NOT applied to auth router (login/callback public; refresh/logout self-manage

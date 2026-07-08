@@ -24,6 +24,7 @@ WHITELIST = {
     "/healthz",
     "/readyz",
     "/metrics",
+    "/.well-known/oauth-protected-resource",
     "/docs",
     "/openapi.json",
     "/redoc",
