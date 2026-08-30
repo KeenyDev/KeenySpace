@@ -31,7 +31,7 @@ async def run_pull(
     from rich.console import Console
     from rich.table import Table
 
-    from keenyspace.clients.http import build_http_client
+    from keenyspace.clients.http import build_authed_http_client
     from keenyspace.fs.atomic import write_atomic, write_atomic_secret
     from keenyspace.paths import DEFAULT_PULL_ROOT, STATE_DIR
     from keenyspace.pull.manifest import diff_manifests, hash_local_tree
@@ -43,7 +43,7 @@ async def run_pull(
     state_dir.mkdir(parents=True, exist_ok=True)
     local_state_path = state_dir / "local-state.json"
 
-    async with build_http_client() as client:
+    async with await build_authed_http_client() as client:
         resp = await client.get(f"/v1/api/workspaces/{slug}/manifest")
         resp.raise_for_status()
         server_doc: dict[str, Any] = resp.json()

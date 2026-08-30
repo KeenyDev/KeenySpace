@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from keenyspace.auth import read_auth
+from keenyspace.cli.login import ensure_token
 from keenyspace.clients.mcp import call_compile, call_compile_status
 from keenyspace.config import get_client_settings
 from keenyspace.workspace_inference import resolve_workspace_slug
@@ -35,8 +35,7 @@ async def run_compile_cmd(
     if slug is None:
         err.print("[red]No workspace resolved.[/red]")
         sys.exit(EXIT_CONFIG)
-    auth = read_auth()
-    api_key = auth.get("api_key") or auth.get("access_token")
+    api_key = await ensure_token()
     if not api_key:
         err.print("[red]Not logged in. Run `keenyspace login`.[/red]")
         sys.exit(EXIT_CONFIG)

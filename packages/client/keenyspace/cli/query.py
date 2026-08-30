@@ -14,7 +14,7 @@ import sys
 import structlog
 
 from keenyspace.agent.budgets import BudgetAbort, log_aborted
-from keenyspace.auth import read_auth
+from keenyspace.cli.login import ensure_token
 from keenyspace.clients.llm import run_server_driven_command
 from keenyspace.clients.mcp import get_instructions
 from keenyspace.config import get_client_settings
@@ -36,8 +36,7 @@ async def run_query(question: str, workspace: str | None = None) -> None:
     if slug is None:
         err.print("[red]No workspace resolved.[/red]")
         sys.exit(EXIT_CONFIG)
-    auth = read_auth()
-    api_key = auth.get("api_key") or auth.get("access_token")
+    api_key = await ensure_token()
     if not api_key:
         err.print("[red]Not logged in. Run `keenyspace login`.[/red]")
         sys.exit(EXIT_CONFIG)

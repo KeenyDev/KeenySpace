@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 from rich.console import Console
 
-from keenyspace.auth import read_auth
+from keenyspace.cli.login import ensure_token
 from keenyspace.config import get_client_settings
 
 EXIT_CONFIG = 2
@@ -25,8 +25,7 @@ EXIT_REFUSED = 6  # restore refused (422 / 409) per CONTEXT Claude's Discretion
 async def run_restore(archive: Path, force: bool) -> None:
     console = Console()
     settings = get_client_settings()
-    auth = read_auth()
-    token = auth.get("api_key") or auth.get("access_token")
+    token = await ensure_token()
     if not token:
         console.print("[red]Not logged in.[/red] Run `keenyspace login` first.")
         sys.exit(EXIT_CONFIG)
