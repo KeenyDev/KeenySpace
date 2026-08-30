@@ -76,6 +76,7 @@ PG_TABLES_FK_ORDER = [
 ]
 
 UPLOAD_CHUNK_BYTES = 65536
+PSQL_LOCK_TIMEOUT_MS = 30_000
 
 
 def _pg_dump_argv(db_url: str) -> list[str]:
@@ -124,11 +125,13 @@ def _psql_argv(db_url: str) -> list[str]:
     return argv
 
 
-def _pg_env(db_url: str) -> dict[str, str]:
+def _pg_env(db_url: str, *, lock_timeout_ms: int | None = None) -> dict[str, str]:
     parsed = urlparse(db_url)
     env = dict(os.environ)
     if parsed.password:
         env["PGPASSWORD"] = parsed.password
+    if lock_timeout_ms is not None:
+        env["PGOPTIONS"] = f"-c lock_timeout={lock_timeout_ms}"
     return env
 
 
@@ -476,12 +479,22 @@ async def admin_restore(
         # chunks rather than loading the entire dump into a single bytes
         # buffer before piping. For a multi-GB dump the buffered variant
         # holds two copies (file bytes + subprocess input) in RSS.
+        # This request's own session still holds the ACCESS SHARE locks taken by
+        # the reads above (alembic_version, workspaces). The dump replays with
+        # --clean, whose DROP TABLE needs ACCESS EXCLUSIVE, so psql would wait
+        # on our transaction forever — silently, with the connection healthy.
+        # The force branch happens to commit; the non-force path did not, which
+        # is why an unforced restore hung until the client timed out.
+        await session.commit()
+
+        # Belt and braces: if some *other* session holds a conflicting lock,
+        # fail with psql_restore_failed instead of hanging the request.
         psql = await asyncio.create_subprocess_exec(
             *_psql_argv(db_url),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=_pg_env(db_url),
+            env=_pg_env(db_url, lock_timeout_ms=PSQL_LOCK_TIMEOUT_MS),
         )
         assert psql.stdin is not None
         assert psql.stderr is not None
