@@ -18,3 +18,17 @@ def build_http_client(timeout: float = 30.0) -> httpx.AsyncClient:
         headers=headers,
         timeout=timeout,
     )
+
+
+async def build_authed_http_client(timeout: float = 30.0) -> httpx.AsyncClient:
+    """Like build_http_client, but first ensures a valid bearer.
+
+    Silently refreshes a stale OIDC access token (or runs device login when no
+    refresh is possible) so an action command never 401s on an expired token.
+    ks_live_ API keys pass through untouched. Use build_http_client directly for
+    read-only/diagnostic paths (e.g. status) that must not trigger a login.
+    """
+    from keenyspace.cli.login import ensure_token
+
+    await ensure_token()
+    return build_http_client(timeout=timeout)

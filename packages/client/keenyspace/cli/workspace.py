@@ -110,10 +110,10 @@ def _console() -> Any:
 async def _run_list(archived: bool) -> None:
     from rich.table import Table
 
-    from keenyspace.clients.http import build_http_client
+    from keenyspace.clients.http import build_authed_http_client
 
     status = "all" if archived else "active"
-    async with build_http_client() as client:
+    async with await build_authed_http_client() as client:
         resp = await client.get(
             "/v1/api/workspaces/", params={"status": status}
         )
@@ -138,12 +138,12 @@ async def _run_list(archived: bool) -> None:
 async def _run_use(slug: str) -> None:
     import yaml
 
-    from keenyspace.clients.http import build_http_client
+    from keenyspace.clients.http import build_authed_http_client
     from keenyspace.config import load_config_yaml
     from keenyspace.fs.atomic import write_atomic
     from keenyspace.paths import CONFIG_DIR, CONFIG_YAML
 
-    async with build_http_client() as client:
+    async with await build_authed_http_client() as client:
         resp = await client.get(f"/v1/api/workspaces/{slug}")
     console = _console()
     if resp.status_code == 404:
@@ -186,7 +186,7 @@ async def _run_register(
 
     import yaml
 
-    from keenyspace.clients.http import build_http_client
+    from keenyspace.clients.http import build_authed_http_client
     from keenyspace.fs.atomic import write_atomic
     from keenyspace.paths import CONFIG_DIR, WORKSPACE_MAP_YAML
 
@@ -196,7 +196,7 @@ async def _run_register(
     try:
         import httpx
 
-        async with build_http_client() as client:
+        async with await build_authed_http_client() as client:
             resp = await client.get(f"/v1/api/workspaces/{slug}")
         if resp.status_code == 404:
             console.print(f"[red]workspace not found:[/red] {slug}")
@@ -298,9 +298,9 @@ def _run_registrations() -> None:
 
 
 async def _run_archive(slug: str) -> None:
-    from keenyspace.clients.http import build_http_client
+    from keenyspace.clients.http import build_authed_http_client
 
-    async with build_http_client() as client:
+    async with await build_authed_http_client() as client:
         resp = await client.post(f"/v1/api/workspaces/{slug}/archive")
     console = _console()
     if resp.status_code == 200:

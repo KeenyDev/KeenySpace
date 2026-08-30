@@ -19,9 +19,12 @@ from typing import Any
 import httpx
 from rich.console import Console
 
-from keenyspace.auth import clear_auth, is_api_key, read_auth, write_auth
-from keenyspace.config import get_client_settings
-from keenyspace.paths import AUTH_JSON
+# Module-attribute access (not from-imports): tests reload keenyspace.paths /
+# keenyspace.auth / keenyspace.config per case, and a from-import here would
+# freeze pre-reload path constants for every caller that goes through login.
+from keenyspace import auth as auth_file
+from keenyspace import config as client_config
+from keenyspace import paths
 
 CLIENT_ID = "keenyspace-cli"
 SCOPES = "openid profile email groups"
@@ -32,9 +35,7 @@ REFRESH_GRANT = "refresh_token"
 REFRESH_THRESHOLD_SECONDS = 60
 
 
-async def _discover_authentik_issuer(
-    client: httpx.AsyncClient, server_url: str
-) -> str:
+async def _discover_authentik_issuer(client: httpx.AsyncClient, server_url: str) -> str:
     # 1. Try a server-side discovery shim (Phase 3 may add /v1/api/auth/discovery).
     try:
         resp = await client.get(f"{server_url}/v1/api/auth/discovery")
@@ -66,9 +67,7 @@ async def _discover_authentik_issuer(
     )
 
 
-async def _discover_device_endpoints(
-    client: httpx.AsyncClient, issuer: str
-) -> tuple[str, str]:
+async def _discover_device_endpoints(client: httpx.AsyncClient, issuer: str) -> tuple[str, str]:
     """Return (device_authorization_endpoint, token_endpoint) from the IdP's
     OIDC discovery document.
 
@@ -103,7 +102,7 @@ def _decode_sub(access_token: str) -> str:
         payload = json.loads(base64.urlsafe_b64decode(padded.encode()))
         sub = payload.get("sub")
         return str(sub) if sub else "(unknown)"
-    except (ValueError, KeyError, json.JSONDecodeError):
+    except ValueError, KeyError, json.JSONDecodeError:
         return "(unknown)"
 
 
@@ -116,7 +115,7 @@ def _access_token_exp(access_token: str) -> int | None:
         payload = json.loads(base64.urlsafe_b64decode(padded.encode()))
         exp = payload.get("exp")
         return int(exp) if exp is not None else None
-    except (ValueError, KeyError, json.JSONDecodeError):
+    except ValueError, KeyError, json.JSONDecodeError:
         return None
 
 
@@ -140,9 +139,7 @@ async def _refresh_tokens(payload: dict[str, Any]) -> dict[str, Any] | None:
         return None
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            disco = await client.get(
-                f"{issuer.rstrip('/')}/.well-known/openid-configuration"
-            )
+            disco = await client.get(f"{issuer.rstrip('/')}/.well-known/openid-configuration")
             disco.raise_for_status()
             token_endpoint = disco.json().get("token_endpoint")
             if not isinstance(token_endpoint, str):
@@ -170,30 +167,35 @@ async def ensure_token(*, interactive: bool = True) -> str | None:
 
     - ``ks_live_*`` API keys never expire -> returned as-is.
     - A fresh OIDC access token -> returned as-is.
-    - A stale/missing access token -> silent refresh via refresh_token; if that
-      is unavailable or rejected, fall back to interactive device login.
+    - A stale access token -> silent refresh via refresh_token; if that is
+      unavailable or rejected, fall back to interactive device login.
+    - No stored credentials at all -> None (callers direct the user to
+      `keenyspace login`).
 
     ``interactive=False`` (headless contexts, e.g. the daemon) stops before the
     device-flow fallback and returns None instead of blocking on a browser login.
     """
-    payload = read_auth()
+    payload = auth_file.read_auth()
     api_key = payload.get("api_key")
     if isinstance(api_key, str) and api_key:
         return api_key
 
     access = payload.get("access_token")
-    if isinstance(access, str) and _access_token_fresh(access):
+    if not isinstance(access, str) or not access:
+        # Never logged in: don't spring a device flow on an arbitrary command;
+        # the explicit first step is `keenyspace login`. The interactive
+        # fallback below is only for an expired session that failed to refresh.
+        return None
+    if _access_token_fresh(access):
         return access
 
     refreshed = await _refresh_tokens(payload)
     if refreshed is not None:
         issuer = payload.get("issuer")
-        write_auth(
+        auth_file.write_auth(
             {
                 "access_token": refreshed["access_token"],
-                "refresh_token": (
-                    refreshed.get("refresh_token") or payload.get("refresh_token")
-                ),
+                "refresh_token": (refreshed.get("refresh_token") or payload.get("refresh_token")),
                 "expires_in": refreshed.get("expires_in"),
                 "obtained_at": datetime.now(UTC).isoformat(),
                 "issuer": issuer,
@@ -206,19 +208,17 @@ async def ensure_token(*, interactive: bool = True) -> str | None:
         return None
 
     await run_login(server_url=None)
-    new_token = read_auth().get("access_token")
+    new_token = auth_file.read_auth().get("access_token")
     return new_token if isinstance(new_token, str) else None
 
 
 async def run_login(server_url: str | None) -> None:
     console = Console()
-    effective_url = (server_url or get_client_settings().server_url).rstrip("/")
+    effective_url = (server_url or client_config.get_client_settings().server_url).rstrip("/")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         authentik_base = await _discover_authentik_issuer(client, effective_url)
-        device_endpoint, token_endpoint = await _discover_device_endpoints(
-            client, authentik_base
-        )
+        device_endpoint, token_endpoint = await _discover_device_endpoints(client, authentik_base)
 
         device_resp = await client.post(
             device_endpoint,
@@ -270,7 +270,7 @@ async def run_login(server_url: str | None) -> None:
     # Pitfall #4: we persist the access_token bytes verbatim. Audience (aud)
     # invariant is enforced by the KeenySpace server's AuthMiddleware on every
     # API call (Phase 3 D-14, Phase 7 docs). Client does NOT validate aud.
-    write_auth(
+    auth_file.write_auth(
         {
             "access_token": access_token,
             "refresh_token": token_payload.get("refresh_token"),
@@ -299,7 +299,7 @@ async def run_login_pat(token: str, server_url: str | None) -> None:
     if not token:
         err.print("[red]Empty token.[/red]")
         raise SystemExit(2)
-    effective_url = (server_url or get_client_settings().server_url).rstrip("/")
+    effective_url = (server_url or client_config.get_client_settings().server_url).rstrip("/")
     # Listing api-keys requires authentication, so a 2xx proves the token is
     # accepted; 401 means rejected/revoked.
     try:
@@ -317,8 +317,8 @@ async def run_login_pat(token: str, server_url: str | None) -> None:
     if resp.status_code >= 400:
         err.print(f"[red]Token validation failed (HTTP {resp.status_code}).[/red]")
         raise SystemExit(2)
-    write_auth({"api_key": token, "obtained_at": datetime.now(UTC).isoformat()})
-    if not is_api_key(token):
+    auth_file.write_auth({"api_key": token, "obtained_at": datetime.now(UTC).isoformat()})
+    if not auth_file.is_api_key(token):
         console.print(
             "[yellow]Note: token does not start with ks_live_; stored as a bearer anyway.[/yellow]"
         )
@@ -329,7 +329,7 @@ async def run_token_create(name: str, server_url: str | None) -> None:
     """Mint a personal access token via the current (device-flow) login."""
     console = Console()
     err = Console(stderr=True)
-    effective_url = (server_url or get_client_settings().server_url).rstrip("/")
+    effective_url = (server_url or client_config.get_client_settings().server_url).rstrip("/")
     api_key = await ensure_token()
     if not api_key:
         err.print("[red]Not logged in. Run `keenyspace login` first.[/red]")
@@ -355,12 +355,12 @@ async def run_token_create(name: str, server_url: str | None) -> None:
 
 async def run_logout() -> None:
     console = Console()
-    if not AUTH_JSON.exists():
+    if not paths.AUTH_JSON.exists():
         console.print("Already logged out")
         return
-    payload = read_auth()
+    payload = auth_file.read_auth()
     token = payload.get("access_token") or payload.get("api_key")
-    server_url = get_client_settings().server_url.rstrip("/")
+    server_url = client_config.get_client_settings().server_url.rstrip("/")
     if token:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -370,7 +370,7 @@ async def run_logout() -> None:
                 )
         except httpx.RequestError:
             pass
-    clear_auth()
+    auth_file.clear_auth()
     console.print("[green]Logged out[/green]")
 
 

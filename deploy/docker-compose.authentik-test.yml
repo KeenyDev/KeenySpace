@@ -32,6 +32,10 @@ services:
       - authentik-templates:/templates
       - ./authentik/blueprints:/blueprints/custom:ro
       - ./authentik/blueprints-test:/blueprints/test-seed:ro
+      # Same branding assets as production (keenyspace-branding.yaml resolves them
+      # under MEDIA_ROOT). Declared explicitly so this lane never depends on
+      # compose volume-merge semantics from the base file.
+      - ./authentik/blueprints/branding:/data/media/public/keeny:ro
 
   authentik-worker:
     volumes:
@@ -40,3 +44,4 @@ services:
       - authentik-certs:/certs
       - ./authentik/blueprints:/blueprints/custom:ro
       - ./authentik/blueprints-test:/blueprints/test-seed:ro
+      - ./authentik/blueprints/branding:/data/media/public/keeny:ro

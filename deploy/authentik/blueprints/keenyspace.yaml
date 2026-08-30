@@ -54,6 +54,12 @@ entries:
       redirect_uris:
         - matching_mode: strict
           url: http://localhost:8000/v1/api/auth/callback
+        # Claude Code MCP OAuth (and any RFC 8252 native client) spins up an
+        # ephemeral loopback listener; Authentik has no built-in loopback
+        # wildcard, so allow any localhost port + the common callback paths.
+        # Anchored to loopback only — never a remote host.
+        - matching_mode: regex
+          url: ^http://(127\.0\.0\.1|localhost):[0-9]{1,5}/(callback|oauth/callback|auth/callback)$
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
@@ -72,10 +78,10 @@ entries:
   - model: authentik_brands.brand
     identifiers:
       domain: authentik-default
-    # branding_logo/branding_favicon intentionally omitted: Authentik 2026.2 rejects
-    # absolute paths ("Absolute paths are not allowed"), and blueprint apply is atomic
-    # — an invalid brand entry rolls back the ENTIRE blueprint, including the
-    # keenyspace-cli OAuth2 provider. Omitting them keeps the provider creation intact.
+    # Logo/favicon/background live in the separate keenyspace-branding.yaml
+    # blueprint, NOT here. Blueprint apply is atomic — a bad brand attr rolls
+    # back the ENTIRE file. Keeping visual branding out of this file means an
+    # asset/path mistake can never take down the keenyspace-cli OAuth2 provider.
     attrs:
       branding_title: KeenySpace
       flow_device_code:
