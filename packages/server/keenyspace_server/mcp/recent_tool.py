@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
-from keenyspace_server.mcp.auth_bridge import current_user_from_mcp
+from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.ws.cursor import decode_mtime_cursor, encode_mtime_cursor
 from keenyspace_server.ws.recent import scan_recent_changes
@@ -27,7 +27,7 @@ def _validated_limit(limit: int | None) -> int:
 
 
 async def get_recent_changes_tool(
-    workspace: str,
+    workspace: str | None = None,
     since: str | None = None,
     cursor: str | None = None,
     limit: int | None = None,
@@ -39,6 +39,7 @@ async def get_recent_changes_tool(
     """
     with MCP_TOOL_CALL_DURATION.labels(tool="get_recent_changes_tool").time():
         _ = current_user_from_mcp()
+        workspace = resolve_workspace(workspace)
 
         req = get_http_request()
         app = req.app

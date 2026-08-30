@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
-from keenyspace_server.mcp.auth_bridge import current_user_from_mcp
+from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.ws.search import list_md_paths, search_workspace_files
 
@@ -50,7 +50,7 @@ def _validate_prefix(prefix: str) -> str:
 
 
 async def list_pages_tool(
-    workspace: str,
+    workspace: str | None = None,
     prefix: str | None = None,
     cursor: str | None = None,
     limit: int | None = None,
@@ -58,6 +58,7 @@ async def list_pages_tool(
     """List .md pages in a workspace (MCP-04). Cursor-paginated."""
     with MCP_TOOL_CALL_DURATION.labels(tool="list_pages_tool").time():
         _ = current_user_from_mcp()
+        workspace = resolve_workspace(workspace)
 
         req = get_http_request()
         app = req.app
@@ -92,14 +93,15 @@ async def list_pages_tool(
 
 
 async def search_workspace_tool(
-    workspace: str,
     query: str,
     cursor: str | None = None,
     limit: int | None = None,
+    workspace: str | None = None,
 ) -> SearchResponse:
     """Search workspace pages by filename + content (MCP-05). Cursor-paginated."""
     with MCP_TOOL_CALL_DURATION.labels(tool="search_workspace_tool").time():
         _ = current_user_from_mcp()
+        workspace = resolve_workspace(workspace)
 
         req = get_http_request()
         app = req.app

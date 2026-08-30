@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
-from keenyspace_server.mcp.auth_bridge import current_user_from_mcp
+from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.ws.blueprints import list_blueprints_from_fs
 from keenyspace_server.ws.instructions import (
@@ -37,13 +37,14 @@ async def list_blueprints_tool() -> ListBlueprintsResponse:
 
 
 async def get_instructions_tool(
-    workspace: str,
     command: str,
     context: dict[str, Any],
+    workspace: str | None = None,
 ) -> Instructions:
     with MCP_TOOL_CALL_DURATION.labels(tool="get_instructions").time():
         user = current_user_from_mcp()
         _ = user
+        workspace = resolve_workspace(workspace)
 
         if not _COMMAND_RE.match(command):
             raise ToolError(

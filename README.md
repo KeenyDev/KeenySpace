@@ -77,8 +77,10 @@ exactly.
   fragments to the log; the server-side compile assembles pages from them.
 - **compile is a separate step.** Pages do NOT appear immediately after `append_log`.
   `compile` materializes them; check progress with `compile_status`.
-- **Every tool requires a `workspace` parameter** (a slug, e.g. `keenyspace`). Pick the
-  workspace first, then work.
+- **Every tool is scoped to one workspace.** Pass `workspace` (a slug, e.g.
+  `keenyspace`) explicitly, unless the MCP connection URL pins one as
+  `?workspace=<slug>` — then the argument is optional and the pin is the default.
+  An explicit argument always wins. Pick the workspace first, then work.
 - **A locally pulled vault (`keenyspace pull`) is ephemeral** — local edits are
   overwritten by the next pull. Do not treat it as source of truth or edit it by hand.
 

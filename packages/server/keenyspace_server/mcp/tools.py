@@ -16,7 +16,7 @@ from keenyspace_server.compile.models import CompileStatusResponse, CompileTrigg
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
 from keenyspace_server.fs.path_safety import UnsafePath, open_workspace_page
-from keenyspace_server.mcp.auth_bridge import current_user_from_mcp
+from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.wal import writer as wal_writer
 
@@ -25,10 +25,11 @@ async def ping(message: str) -> str:
     return f"pong: {message}"
 
 
-async def read_page(workspace: str, path: str) -> ReadPageResponse:
+async def read_page(path: str, workspace: str | None = None) -> ReadPageResponse:
     with MCP_TOOL_CALL_DURATION.labels(tool="read_page").time():
         user = current_user_from_mcp()
         _ = user
+        workspace = resolve_workspace(workspace)
 
         req = get_http_request()
         app = req.app
@@ -66,12 +67,13 @@ async def read_page(workspace: str, path: str) -> ReadPageResponse:
 
 
 async def append_log(
-    workspace: str,
     content: str,
     parent_id: str | None = None,
+    workspace: str | None = None,
 ) -> AppendLogResponse:
     with MCP_TOOL_CALL_DURATION.labels(tool="append_log").time():
         user = current_user_from_mcp()
+        workspace = resolve_workspace(workspace)
 
         req = get_http_request()
         app = req.app
@@ -124,11 +126,12 @@ async def append_log(
         )
 
 
-async def compile_tool(workspace: str) -> CompileTriggerResponse:
+async def compile_tool(workspace: str | None = None) -> CompileTriggerResponse:
     """Trigger a compile pass for the workspace. Fire-and-forget; poll compile_status for state."""
     with MCP_TOOL_CALL_DURATION.labels(tool="compile").time():
         user = current_user_from_mcp()
         _ = user
+        workspace = resolve_workspace(workspace)
 
         async with get_db_session() as session:
             result = await session.execute(select(Workspace).where(Workspace.slug == workspace))
@@ -158,11 +161,12 @@ async def compile_tool(workspace: str) -> CompileTriggerResponse:
         return trigger_result
 
 
-async def compile_status_tool(workspace: str) -> CompileStatusResponse:
+async def compile_status_tool(workspace: str | None = None) -> CompileStatusResponse:
     """Return current compile state for a workspace."""
     with MCP_TOOL_CALL_DURATION.labels(tool="compile_status").time():
         user = current_user_from_mcp()
         _ = user
+        workspace = resolve_workspace(workspace)
 
         async with get_db_session() as session:
             result = await session.execute(select(Workspace).where(Workspace.slug == workspace))

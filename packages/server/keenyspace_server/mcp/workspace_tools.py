@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.db.models import CompileRun, Workspace
 from keenyspace_server.db.session import get_db_session
-from keenyspace_server.mcp.auth_bridge import current_user_from_mcp
+from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.ws.scan import iter_md_files
 
@@ -129,10 +129,11 @@ async def list_workspaces_tool(include_archived: bool = False) -> ListWorkspaces
         return ListWorkspacesResponse(workspaces=infos, next_cursor=None)
 
 
-async def get_workspace_info_tool(workspace: str) -> WorkspaceInfo:
+async def get_workspace_info_tool(workspace: str | None = None) -> WorkspaceInfo:
     """Return metadata for a workspace (MCP-02)."""
     with MCP_TOOL_CALL_DURATION.labels(tool="get_workspace_info_tool").time():
         _ = current_user_from_mcp()
+        workspace = resolve_workspace(workspace)
 
         req = get_http_request()
         app = req.app

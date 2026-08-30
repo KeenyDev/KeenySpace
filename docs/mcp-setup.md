@@ -84,6 +84,21 @@ Replace the URL with `https://<your-domain>/v1/mcp/` for a production server. Do
 commit a `.mcp.json` containing a real key — prefer the `claude mcp add` form (stores
 config per-user) or an environment-variable expansion if your client supports it.
 
+### Pinning a workspace to the connection
+
+Every workspace-scoped tool takes a `workspace` argument. Append `?workspace=<slug>` to
+the endpoint URL to pin one for the whole connection, and the argument becomes optional —
+calls that omit it hit the pinned workspace:
+
+```bash
+claude mcp add --transport http keenyspace-notes "http://localhost/v1/mcp/?workspace=notes" \
+  --header "Authorization: Bearer ks_live_..."
+```
+
+An explicit `workspace` argument always overrides the pin. Register one server entry per
+workspace when an agent works in several. With no argument and no pin, tools fail with
+`no workspace specified`.
+
 ### Other MCP clients
 
 Any client that supports StreamableHTTP transport works the same way: point it at
