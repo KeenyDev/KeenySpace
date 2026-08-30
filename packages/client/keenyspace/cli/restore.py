@@ -22,6 +22,14 @@ EXIT_CONFIG = 2
 EXIT_REFUSED = 6  # restore refused (422 / 409) per CONTEXT Claude's Discretion
 
 
+def _error_payload(response: httpx.Response) -> dict[str, object]:
+    try:
+        payload = response.json()
+    except json.JSONDecodeError:
+        return {"error": "unknown", "raw": response.text[:2000]}
+    return payload if isinstance(payload, dict) else {"detail": payload}
+
+
 async def run_restore(archive: Path, force: bool) -> None:
     console = Console()
     settings = get_client_settings()
@@ -45,17 +53,18 @@ async def run_restore(archive: Path, force: bool) -> None:
                 files={"file": (archive.name, fp, "application/gzip")},
             )
     if response.status_code in (422, 409):
-        try:
-            err = response.json()
-        except json.JSONDecodeError:
-            err = {"error": "unknown", "raw": response.text}
         console.print("[red]Restore refused:[/red]")
-        console.print(json.dumps(err, indent=2))
+        console.print(json.dumps(_error_payload(response), indent=2))
         if not force:
             console.print(
                 "\nUse [yellow]--force[/yellow] to override "
                 "(irreversible — wipes existing data)."
             )
         sys.exit(EXIT_REFUSED)
-    response.raise_for_status()
+    if response.status_code >= 400:
+        # The server puts the actual cause (e.g. psql stderr) in the body;
+        # raise_for_status alone would drop it and leave only a status code.
+        console.print(f"[red]Restore failed (HTTP {response.status_code}):[/red]")
+        console.print(json.dumps(_error_payload(response), indent=2))
+        sys.exit(1)
     console.print(f"[green]Restore complete:[/green] {response.json()}")
