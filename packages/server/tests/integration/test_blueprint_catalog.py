@@ -259,7 +259,14 @@ async def test_get_instructions_renders_with_context(app, pg_url) -> None:
     assert "/data/src.md" in data["prompt"]
     assert "ingest-ws" in data["prompt"]
     assert any("/data/src.md" in step for step in data["steps"])
-    assert data["tool_whitelist"] == ["read_page", "append_log", "search_workspace"]
+    assert data["tool_whitelist"] == [
+        "read_page",
+        "append_log",
+        "search_workspace",
+        "list_pages",
+        "get_workspace_info",
+        "get_recent_changes",
+    ]
     assert data["model"] is None
 
 
