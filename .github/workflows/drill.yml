@@ -88,12 +88,25 @@ jobs:
           chmod +x /tmp/drill-reauth.sh
           echo "DRILL_REAUTH_CMD=/tmp/drill-reauth.sh" >> "$GITHUB_ENV"
       - name: Seed and backup-restore drill
+        timeout-minutes: 12
         env:
           COMPOSE_PROJECT_NAME: ks-drill
           KEENYSPACE_ADMIN_API_ENABLED: "1"
           KEENYSPACE_SERVER_URL: http://localhost:8000
           DRILL_COMPOSE_FILES: "-f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml"
-        run: bash deploy/scripts/backup-restore-drill.sh
+        run: bash -x deploy/scripts/backup-restore-drill.sh
+      - name: Dump stack state on failure
+        if: failure()
+        env:
+          COMPOSE_PROJECT_NAME: ks-drill
+        run: |
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml ps || true
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml \
+            logs --tail=200 keenyspace postgres || true
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml \
+            exec -T keenyspace ps -eo pid,etime,stat,args || true
+          curl -sS -m 10 -o /dev/null -w 'healthz: %{http_code} in %{time_total}s\n' \
+            http://localhost:8000/healthz || true
 
   proxy-test-caddy:
     runs-on: ubuntu-24.04
