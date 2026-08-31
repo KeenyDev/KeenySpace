@@ -100,9 +100,12 @@ jobs:
         env:
           COMPOSE_PROJECT_NAME: ks-drill
         run: |
+          # Give uvicorn a moment to flush a traceback for whatever just failed;
+          # the dump otherwise races the exception handler and shows only boot logs.
+          sleep 5
           docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml ps || true
           docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml \
-            logs --tail=200 keenyspace postgres || true
+            logs --tail=300 --no-color keenyspace postgres || true
           docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml \
             exec -T keenyspace ps -eo pid,etime,stat,args || true
           curl -sS -m 10 -o /dev/null -w 'healthz: %{http_code} in %{time_total}s\n' \
