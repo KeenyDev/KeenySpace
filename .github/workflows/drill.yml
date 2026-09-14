@@ -88,12 +88,38 @@ jobs:
           chmod +x /tmp/drill-reauth.sh
           echo "DRILL_REAUTH_CMD=/tmp/drill-reauth.sh" >> "$GITHUB_ENV"
       - name: Seed and backup-restore drill
+        timeout-minutes: 12
         env:
           COMPOSE_PROJECT_NAME: ks-drill
           KEENYSPACE_ADMIN_API_ENABLED: "1"
           KEENYSPACE_SERVER_URL: http://localhost:8000
           DRILL_COMPOSE_FILES: "-f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml"
-        run: bash deploy/scripts/backup-restore-drill.sh
+        run: bash -x deploy/scripts/backup-restore-drill.sh
+      - name: Dump stack state on failure
+        if: failure()
+        env:
+          COMPOSE_PROJECT_NAME: ks-drill
+        run: |
+          # Give uvicorn a moment to flush a traceback for whatever just failed;
+          # the dump otherwise races the exception handler and shows only boot logs.
+          sleep 5
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml ps || true
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml \
+            logs --tail=300 --no-color keenyspace postgres || true
+          docker inspect ks-drill-keenyspace-1 \
+            --format 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' || true
+          curl -sS -m 10 -o /dev/null -w 'healthz: %{http_code} in %{time_total}s\n' \
+            http://localhost:8000/healthz || true
+          # Replay the failing call so the error and the logs that explain it are
+          # captured in the same window.
+          TOKEN=$(jq -r '.api_key // .access_token // empty' "$HOME/.config/keenyspace/auth.json")
+          curl -sS -i -m 120 -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -F "file=@/tmp/drill-backup.tar.gz;type=application/gzip" \
+            'http://localhost:8000/v1/admin/restore?force=false' | head -40 || true
+          sleep 3
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml \
+            logs --timestamps --no-color --tail=120 keenyspace || true
 
   proxy-test-caddy:
     runs-on: ubuntu-24.04

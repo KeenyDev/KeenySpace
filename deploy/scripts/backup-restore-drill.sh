@@ -22,8 +22,10 @@
 #
 # Note: `down -v` also wipes server-side auth state (api keys live in
 # Postgres). If the CLI token will not survive the wipe, set DRILL_REAUTH_CMD
-# to a command that re-establishes CLI auth; it runs after the second `up`
-# and before `restore`.
+# to a command that re-establishes CLI auth. It runs twice: after the second
+# `up` (so `restore` can authenticate) and again after `restore`, because
+# replaying the dump swaps api_keys back to the backup's contents and revokes
+# whatever was minted in between.
 
 set -euo pipefail
 
@@ -75,6 +77,13 @@ if [ -n "$DRILL_REAUTH_CMD" ]; then
 fi
 
 keenyspace restore "$BACKUP_PATH"
+
+# The restore replayed the backup's api_keys table, so the credential minted
+# after the wipe no longer exists — it was valid only in the state the restore
+# just overwrote. Re-establish auth before asserting anything.
+if [ -n "$DRILL_REAUTH_CMD" ]; then
+  bash -c "$DRILL_REAUTH_CMD"
+fi
 
 WORKSPACES=$(workspace_count)
 if [ "$WORKSPACES" -gt 0 ]; then

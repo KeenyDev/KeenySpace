@@ -40,7 +40,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.auth.audit import write_audit
-from keenyspace_server.db.session import get_db
+from keenyspace_server.db.session import get_db, get_engine
 from keenyspace_server.observability.metrics import (
     ADMIN_BACKUP_BYTES,
     ADMIN_BACKUP_TOTAL,
@@ -76,6 +76,7 @@ PG_TABLES_FK_ORDER = [
 ]
 
 UPLOAD_CHUNK_BYTES = 65536
+PSQL_LOCK_TIMEOUT_MS = 30_000
 
 
 def _pg_dump_argv(db_url: str) -> list[str]:
@@ -124,12 +125,31 @@ def _psql_argv(db_url: str) -> list[str]:
     return argv
 
 
-def _pg_env(db_url: str) -> dict[str, str]:
+def _pg_env(db_url: str, *, lock_timeout_ms: int | None = None) -> dict[str, str]:
     parsed = urlparse(db_url)
     env = dict(os.environ)
     if parsed.password:
         env["PGPASSWORD"] = parsed.password
+    if lock_timeout_ms is not None:
+        env["PGOPTIONS"] = f"-c lock_timeout={lock_timeout_ms}"
     return env
+
+
+def _replace_with(src: Path, target: Path) -> None:
+    """Move ``src`` onto ``target``, clearing whatever is already there.
+
+    Both trees hold plain files as well as directories — ``blueprints/`` also
+    carries the image-sync manifest — so the existing target is removed by type
+    rather than assumed to be a directory.
+
+    Pitfall #8: same-volume rename keeps the move atomic; tmp lives under
+    fs_root by construction.
+    """
+    if target.is_symlink() or (target.exists() and not target.is_dir()):
+        target.unlink()
+    elif target.is_dir():
+        shutil.rmtree(target)
+    os.rename(src, target)
 
 
 async def _current_alembic_head(session: AsyncSession) -> str:
@@ -476,12 +496,22 @@ async def admin_restore(
         # chunks rather than loading the entire dump into a single bytes
         # buffer before piping. For a multi-GB dump the buffered variant
         # holds two copies (file bytes + subprocess input) in RSS.
+        # This request's own session still holds the ACCESS SHARE locks taken by
+        # the reads above (alembic_version, workspaces). The dump replays with
+        # --clean, whose DROP TABLE needs ACCESS EXCLUSIVE, so psql would wait
+        # on our transaction forever — silently, with the connection healthy.
+        # The force branch happens to commit; the non-force path did not, which
+        # is why an unforced restore hung until the client timed out.
+        await session.commit()
+
+        # Belt and braces: if some *other* session holds a conflicting lock,
+        # fail with psql_restore_failed instead of hanging the request.
         psql = await asyncio.create_subprocess_exec(
             *_psql_argv(db_url),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=_pg_env(db_url),
+            env=_pg_env(db_url, lock_timeout_ms=PSQL_LOCK_TIMEOUT_MS),
         )
         assert psql.stdin is not None
         assert psql.stderr is not None
@@ -509,6 +539,14 @@ async def admin_restore(
                 },
             )
 
+        # psql replayed a --clean dump: every table the pool's connections have
+        # touched was dropped and recreated underneath them, invalidating the
+        # cached statements asyncpg holds per connection. Drop the pool so the
+        # writes below run on connections that have seen the restored schema.
+        engine = get_engine()
+        if engine is not None:
+            await engine.dispose()
+
         src_workspaces = tmp_dir / "fs_root" / "workspaces"
         src_blueprints = tmp_dir / "fs_root" / "blueprints"
         (fs_root / "workspaces").mkdir(parents=True, exist_ok=True)
@@ -522,19 +560,11 @@ async def admin_restore(
         # failure rather than ignore_errors-papering over it.
         if src_workspaces.exists():
             for item in src_workspaces.iterdir():
-                target = fs_root / "workspaces" / item.name
-                if target.exists():
-                    shutil.rmtree(target)
-                # Pitfall #8: same-volume rename so the move stays atomic;
-                # tmp lives under fs_root by construction.
-                os.rename(item, target)
+                _replace_with(item, fs_root / "workspaces" / item.name)
         (fs_root / "blueprints").mkdir(parents=True, exist_ok=True)
         if src_blueprints.exists():
             for item in src_blueprints.iterdir():
-                target = fs_root / "blueprints" / item.name
-                if target.exists():
-                    shutil.rmtree(target)
-                os.rename(item, target)
+                _replace_with(item, fs_root / "blueprints" / item.name)
 
         await write_audit(
             session,
@@ -554,6 +584,17 @@ async def admin_restore(
             "workspaces_restored": int(manifest.workspaces.get("count", 0)),
             "wiped": force,
         }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Without this the failure surfaced as Starlette's bare "Internal Server
+        # Error" with nothing in the logs, which is how the REL-07 drill failure
+        # stayed undiagnosable across four CI runs.
+        ADMIN_RESTORE_TOTAL.labels(outcome="unexpected_error").inc()
+        log.exception("admin.restore.unexpected_error", error=str(exc))
+        raise HTTPException(
+            500, {"error": "restore_failed", "detail": str(exc)[:500]}
+        ) from exc
     finally:
         with contextlib.suppress(OSError):
             archive_path.unlink(missing_ok=True)
