@@ -190,6 +190,10 @@ async def _wipe_target_state(pg_url: str, fs_root: Path) -> None:
     eng = create_async_engine(pg_url)
     async with eng.begin() as conn:
         for table in PG_TABLES_FK_ORDER:
+            # alembic_version survives: a fresh boot re-runs the migrations, so
+            # the restore target always reports a head, never "unknown".
+            if table == "alembic_version":
+                continue
             await conn.execute(sa.text(f"DELETE FROM {table}"))
     await eng.dispose()
     shutil.rmtree(fs_root / "workspaces", ignore_errors=True)
