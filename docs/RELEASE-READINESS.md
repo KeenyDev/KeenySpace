@@ -11,7 +11,7 @@ IMPORTANT: This document was produced by automated GSD plan execution (07-07). T
 
 ### Deployment v1
 
-- [x] **Docker image** — Multi-arch (amd64 + arm64) Dockerfile at `deploy/Dockerfile` based on `python:3.14.1-slim-bookworm`; `postgresql-client-17` (PGDG) installed for `pg_dump` support; uv 0.10.8 pinned. Build is triggered by `publish.yml` (commit dd77a3c/45e9140) on every `v*` tag via native-runner matrix (ubuntu-24.04 + ubuntu-24.04-arm) and pushes to `ghcr.io/uber910/keenyspace`. Evidence: 07-06 SUMMARY.
+- [x] **Docker image** — Multi-arch (amd64 + arm64) Dockerfile at `deploy/Dockerfile` based on `python:3.14.1-slim-bookworm`; `postgresql-client-17` (PGDG) installed for `pg_dump` support; uv 0.10.8 pinned. Build is triggered by `publish.yml` (commit dd77a3c/45e9140) on every `v*` tag via native-runner matrix (ubuntu-24.04 + ubuntu-24.04-arm) and pushes to `ghcr.io/keenydev/keenyspace`. Evidence: 07-06 SUMMARY.
 
 - [x] **docker-compose recipe** — `deploy/docker-compose.yml` ships KeenySpace + Postgres 17 + Authentik 2026.2 + Caddy reverse proxy, with `${VAR:-replace-me-default}` secret substitution, `keenyspace-fs` volume, `KEENYSPACE_AUTH__REQUIRED_GROUP` env, split-horizon OIDC issuer vars, `KEENYSPACE_ADMIN_API_ENABLED` passthrough (default 0), and a `test` compose profile for CI. Opt-in observability addon at `deploy/observability.yml` (Loki 3.4 + Promtail 3.4 + Grafana 12.4.4 with auto-provisioned datasources and a 5-panel KeenySpace metrics dashboard). Evidence: 07-02 SUMMARY (commits 0e5795f/b17a817/24f5e4c), 07-04 SUMMARY (commits 9221b54/5cb04db/899cc7b/d2f8711).
 
@@ -99,43 +99,43 @@ Before flipping the repository public, verify each item:
 - [ ] **Remove concepts/ before flip** — `concepts/` directory is currently untracked (not committed). Verify with `git status -- concepts/` (must show untracked, not committed). If untracked, no action needed; if somehow committed, run: `git rm -r concepts/ && git commit -s -m "chore: remove concepts/ (migrated to docs/design/)"`. The canonical public design docs are `docs/design/`.
 - [ ] **Server test suite green** — 374 tests passed / 0 failed (last verified run from `packages/server` with Postgres at 55432, 2026-06-11).
 
-### Flip repo public (D-01)
+### Flip repo public (D-01) — DONE
 
-Run as the repo owner (uber910):
+The repository now lives at `KeenyDev/KeenySpace` and is already public, so the flip
+documented here has happened. The pre-flip checklist below is kept as the record of what
+was verified. For reference, the command was:
 
 ```
-gh repo edit uber910/KeenySpace --visibility public --accept-visibility-change-consequences
+gh repo edit KeenyDev/KeenySpace --visibility public --accept-visibility-change-consequences
 ```
-
-GitHub will warn that this exposes the full commit history. Verify pre-flip checklist is complete before running.
 
 ### Tag and push (REL-05)
 
 After the repo is public, from the branch you want to release (ensure it is merged to main or tag the current tip):
 
 ```
-git tag -s v0.1.0-alpha.1 -m "v0.1.0-alpha.1"
+git tag -a v0.1.0-alpha.1 -m "v0.1.0-alpha.1"
 git push origin v0.1.0-alpha.1
 ```
 
 This triggers two GitHub Actions workflows:
-- `publish.yml`: builds multi-arch amd64+arm64 Docker image via TAG_ARGS loop (both per-arch source images referenced), pushes to `ghcr.io/uber910/keenyspace:0.1.0-alpha.1`, creates a GitHub prerelease using `body_path: docs/release-notes/v0.1.0-alpha.1.md` as the release body (softprops/action-gh-release@v2 `body_path` input).
+- `publish.yml`: builds multi-arch amd64+arm64 Docker image via TAG_ARGS loop (both per-arch source images referenced), pushes to `ghcr.io/keenydev/keenyspace:0.1.0-alpha.1`, creates a GitHub prerelease using `body_path: docs/release-notes/v0.1.0-alpha.1.md` as the release body (softprops/action-gh-release@v2 `body_path` input).
 - `drill.yml`: runs the backup-restore drill and both SSE proxy tests (Caddy + nginx) on throwaway CI runners. `drill.yml` mints a throwaway `ks_live_*` key against the fresh stack via `client_credentials` — no repo secret required.
 
-Note: the tag commit uses git identity `Dmitry Dankov <12ddankov12@gmail.com>`. Confirm with `git config user.name` and `git config user.email` before tagging.
+Note: the tag uses git identity `Dmitry Dankov <12ddankov12@gmail.com>`. Confirm with `git config user.name` and `git config user.email` before tagging. `-a` (annotated), not `-s` — no signing key is configured on this machine; switch back to `-s` once one is.
 
 ### Verify the released image
 
 After `publish.yml` completes (check the Actions tab):
 
 ```
-docker pull ghcr.io/uber910/keenyspace:0.1.0-alpha.1
-docker run --rm ghcr.io/uber910/keenyspace:0.1.0-alpha.1 python -c "import keenyspace_server; print('ok')"
+docker pull ghcr.io/keenydev/keenyspace:0.1.0-alpha.1
+docker run --rm ghcr.io/keenydev/keenyspace:0.1.0-alpha.1 python -c "import keenyspace_server; print('ok')"
 ```
 
 For arm64 verification on an amd64 host (requires QEMU or an arm64 machine):
 ```
-docker run --rm --platform linux/arm64 ghcr.io/uber910/keenyspace:0.1.0-alpha.1 python -c "import keenyspace_server; print('ok')"
+docker run --rm --platform linux/arm64 ghcr.io/keenydev/keenyspace:0.1.0-alpha.1 python -c "import keenyspace_server; print('ok')"
 ```
 
 ---
