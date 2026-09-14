@@ -40,7 +40,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.auth.audit import write_audit
-from keenyspace_server.db.session import get_db
+from keenyspace_server.db.session import get_db, get_engine
 from keenyspace_server.observability.metrics import (
     ADMIN_BACKUP_BYTES,
     ADMIN_BACKUP_TOTAL,
@@ -522,6 +522,14 @@ async def admin_restore(
                 },
             )
 
+        # psql replayed a --clean dump: every table the pool's connections have
+        # touched was dropped and recreated underneath them, invalidating the
+        # cached statements asyncpg holds per connection. Drop the pool so the
+        # writes below run on connections that have seen the restored schema.
+        engine = get_engine()
+        if engine is not None:
+            await engine.dispose()
+
         src_workspaces = tmp_dir / "fs_root" / "workspaces"
         src_blueprints = tmp_dir / "fs_root" / "blueprints"
         (fs_root / "workspaces").mkdir(parents=True, exist_ok=True)
@@ -567,6 +575,17 @@ async def admin_restore(
             "workspaces_restored": int(manifest.workspaces.get("count", 0)),
             "wiped": force,
         }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Without this the failure surfaced as Starlette's bare "Internal Server
+        # Error" with nothing in the logs, which is how the REL-07 drill failure
+        # stayed undiagnosable across four CI runs.
+        ADMIN_RESTORE_TOTAL.labels(outcome="unexpected_error").inc()
+        log.exception("admin.restore.unexpected_error", error=str(exc))
+        raise HTTPException(
+            500, {"error": "restore_failed", "detail": str(exc)[:500]}
+        ) from exc
     finally:
         with contextlib.suppress(OSError):
             archive_path.unlink(missing_ok=True)
