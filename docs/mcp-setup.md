@@ -84,6 +84,41 @@ Replace the URL with `https://<your-domain>/v1/mcp/` for a production server. Do
 commit a `.mcp.json` containing a real key — prefer the `claude mcp add` form (stores
 config per-user) or an environment-variable expansion if your client supports it.
 
+### Signing in with OAuth instead of an API key
+
+A client that speaks the MCP OAuth bootstrap (Claude Code's `/mcp` -> Authorize) can log
+the user in interactively, with no `ks_live_*` key to mint, paste, or rotate. Add the
+server without an `Authorization` header:
+
+```bash
+claude mcp add --transport http keenyspace http://localhost/v1/mcp/
+```
+
+Then run `/mcp`, pick `keenyspace`, and choose Authorize. The browser opens Authentik, and
+the tokens live in the client rather than in a config file.
+
+How the discovery chain works, in case it needs debugging:
+
+1. The unauthenticated request to `/v1/mcp` gets a 401 carrying
+   `WWW-Authenticate: Bearer resource_metadata="<public-url>/.well-known/oauth-protected-resource"`.
+   Only the MCP mount emits this header — `/v1/api` keeps a plain 401.
+2. That URL serves RFC 9728 protected-resource metadata naming the Authentik issuer as the
+   authorization server. Both the bare path and the RFC 9728 path-suffix form
+   (`/.well-known/oauth-protected-resource/v1/mcp`) return the same document, since clients
+   differ on which they request.
+3. The client authorizes against Authentik as the existing `keenyspace-cli` provider.
+   There is no dynamic client registration; the provider allows RFC 8252 loopback redirect
+   URIs (any `127.0.0.1`/`localhost` port with a `/callback`, `/oauth/callback` or
+   `/auth/callback` path), which is what a native client's ephemeral listener needs.
+
+**`KEENYSPACE_SERVER__PUBLIC_URL` must be the URL clients actually reach** (default
+`http://localhost:8000`; behind a reverse proxy, your real origin). The challenge header
+and the metadata document are both built from it, so a wrong value sends clients to an
+address they cannot resolve and the Authorize button never completes.
+
+Access tokens expire, so an API key remains the better fit for unattended agents and long
+running sessions; OAuth is the better fit for a person at a keyboard.
+
 ### Pinning a workspace to the connection
 
 Every workspace-scoped tool takes a `workspace` argument. Append `?workspace=<slug>` to
