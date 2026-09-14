@@ -234,6 +234,16 @@ async def test_restore_without_force_into_empty_target(
             backup_bytes = backup_resp.content
 
         await _wipe_target_state(pg_url, Path(fs_root))
+        # A fresh boot re-runs bootstrap, which leaves the image-sync manifest —
+        # a plain file — in blueprints/. The restore has to replace it with the
+        # one from the archive without assuming every entry is a directory.
+        from keenyspace_server.fs.bootstrap import BLUEPRINT_SYNC_MANIFEST
+
+        blueprints_dir = Path(fs_root) / "blueprints"
+        blueprints_dir.mkdir(parents=True, exist_ok=True)
+        (blueprints_dir / BLUEPRINT_SYNC_MANIFEST).write_text(
+            '{"schema_version": 1, "blueprints": {}}'
+        )
         # api_keys went with the wipe, exactly as they do after `down -v`.
         _, replaint = await _seed_api_key_post_lifespan()
         async with AsyncClient(

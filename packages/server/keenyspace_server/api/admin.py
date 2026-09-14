@@ -135,6 +135,23 @@ def _pg_env(db_url: str, *, lock_timeout_ms: int | None = None) -> dict[str, str
     return env
 
 
+def _replace_with(src: Path, target: Path) -> None:
+    """Move ``src`` onto ``target``, clearing whatever is already there.
+
+    Both trees hold plain files as well as directories — ``blueprints/`` also
+    carries the image-sync manifest — so the existing target is removed by type
+    rather than assumed to be a directory.
+
+    Pitfall #8: same-volume rename keeps the move atomic; tmp lives under
+    fs_root by construction.
+    """
+    if target.is_symlink() or (target.exists() and not target.is_dir()):
+        target.unlink()
+    elif target.is_dir():
+        shutil.rmtree(target)
+    os.rename(src, target)
+
+
 async def _current_alembic_head(session: AsyncSession) -> str:
     row = await session.execute(text("SELECT version_num FROM alembic_version"))
     value = row.scalar_one_or_none()
@@ -543,19 +560,11 @@ async def admin_restore(
         # failure rather than ignore_errors-papering over it.
         if src_workspaces.exists():
             for item in src_workspaces.iterdir():
-                target = fs_root / "workspaces" / item.name
-                if target.exists():
-                    shutil.rmtree(target)
-                # Pitfall #8: same-volume rename so the move stays atomic;
-                # tmp lives under fs_root by construction.
-                os.rename(item, target)
+                _replace_with(item, fs_root / "workspaces" / item.name)
         (fs_root / "blueprints").mkdir(parents=True, exist_ok=True)
         if src_blueprints.exists():
             for item in src_blueprints.iterdir():
-                target = fs_root / "blueprints" / item.name
-                if target.exists():
-                    shutil.rmtree(target)
-                os.rename(item, target)
+                _replace_with(item, fs_root / "blueprints" / item.name)
 
         await write_audit(
             session,
