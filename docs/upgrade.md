@@ -12,7 +12,7 @@ Three rules govern every upgrade:
 
 | Component | Pin | Notes |
 |-----------|-----|-------|
-| KeenySpace | SemVer release tag (`ghcr.io/uber910/keenyspace:0.1.0-alpha.1`, or built from a tagged source checkout) | Pre-release tags are never published as `latest` |
+| KeenySpace | SemVer release tag (`ghcr.io/keenydev/keenyspace:0.1.0-alpha.1`, or built from a tagged source checkout) | Pre-release tags are never published as `latest` |
 | Authentik | `ghcr.io/goauthentik/server:2026.2` | Server and worker must always run the same tag |
 | Postgres (KeenySpace) | `postgres:17.2-alpine` | Major Postgres upgrades require a dump/restore cycle, not just a tag bump |
 | Postgres (Authentik) | `postgres:16-alpine` | Same caveat |

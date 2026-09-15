@@ -15,7 +15,7 @@ Target time from clone to first login: under 60 minutes on a fresh machine.
 ## 2. Clone and generate secrets
 
 ```bash
-git clone https://github.com/uber910/KeenySpace.git
+git clone https://github.com/KeenyDev/KeenySpace.git
 cd KeenySpace
 ./deploy/gen-secrets.sh
 ```
