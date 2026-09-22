@@ -83,6 +83,22 @@ async def test_backward_clock_step_does_not_mint_lower_id(tmp_path: Path) -> Non
     assert second.ts == earlier
 
 
+async def test_multi_day_backward_step_writes_to_file_of_id_date(tmp_path: Path) -> None:
+    ws_uuid, locks = uuid4(), WorkspaceLockRegistry()
+    later = datetime(2026, 5, 9, 12, 0, 0, tzinfo=UTC)
+    earlier = later - timedelta(days=3)
+
+    with patch.object(writer_module, "datetime", _clock(later, earlier)):
+        first = await _append(ws_uuid, tmp_path, locks, "before step")
+        second = await _append(ws_uuid, tmp_path, locks, "after step")
+
+    assert sorted(p.name for p in (tmp_path / "logs").glob("*.md")) == ["2026-05-09.md"]
+    entries = parse_wal((tmp_path / "logs" / "2026-05-09.md").read_text())
+    assert [e.id for e in entries] == [first.entry_id, second.entry_id]
+    assert second.entry_id.datetime.date() == later.date()
+    assert entries[1].ts == earlier
+
+
 async def test_id_sequence_is_seeded_from_newest_log_after_restart(tmp_path: Path) -> None:
     ws_uuid = uuid4()
     future = datetime(2030, 1, 1, tzinfo=UTC)

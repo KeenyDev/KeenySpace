@@ -126,11 +126,13 @@ async def append_log(
     async with ws_lock:
         ts = datetime.now(UTC)
         logs_dir = ws_root / "logs"
-        wal_path = logs_dir / f"{ts.date().isoformat()}.md"
         last_id = locks.last_id(ws_uuid)
         if last_id is None:
             last_id = await asyncio.to_thread(_newest_logged_id, logs_dir)
         entry_id = _next_entry_id(ts, last_id)
+        # Named by the id's date, not the wall clock: after a backward clock step
+        # the id runs ahead of `ts`, and compile prunes files by cursor-id date.
+        wal_path = logs_dir / f"{entry_id.datetime.date().isoformat()}.md"
         content_hash = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
 
         payload = format_entry(
