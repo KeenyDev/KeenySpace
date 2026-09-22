@@ -17,6 +17,7 @@ Acceptable gaps (by design):
 from __future__ import annotations
 
 import os
+import socket
 import time
 from collections.abc import Generator
 from pathlib import Path
@@ -94,9 +95,29 @@ def get_ks_access_token(base_url: str) -> str:
 
 
 @pytest.fixture(scope="session")
-def authentik_stack() -> Generator[str]:
+def authentik_stack(request: pytest.FixtureRequest) -> Generator[str]:
     from testcontainers.compose import DockerCompose
     from testcontainers.core.wait_strategies import HttpWaitStrategy
+
+    # The overlay pins host port 9000 (token iss depends on it); a running dev
+    # stack holding that port would make the lane fail or bind the wrong IdP.
+    with socket.socket() as probe:
+        if probe.connect_ex(("127.0.0.1", 9000)) == 0:
+            pytest.skip("127.0.0.1:9000 is in use (stop the dev stack to run this lane)")
+
+    # testcontainers DockerCompose has no project-name parameter; without an
+    # explicit project, compose defaults to the directory name ("deploy") and
+    # would reconfigure and tear down the developer's own stack.
+    previous_project = os.environ.get("COMPOSE_PROJECT_NAME")
+    os.environ["COMPOSE_PROJECT_NAME"] = "ks-real-idp"
+
+    def restore_project_name() -> None:
+        if previous_project is None:
+            os.environ.pop("COMPOSE_PROJECT_NAME", None)
+        else:
+            os.environ["COMPOSE_PROJECT_NAME"] = previous_project
+
+    request.addfinalizer(restore_project_name)
 
     deploy_dir = str(Path(__file__).parents[4] / "deploy")
     compose = DockerCompose(
