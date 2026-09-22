@@ -8,7 +8,9 @@ import json
 import stat
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
+import keenyspace.daemon.session_reader as session_reader
 import pytest
 from keenyspace.daemon.session_reader import (
     MAX_INGEST_ATTEMPTS,
@@ -16,6 +18,7 @@ from keenyspace.daemon.session_reader import (
     IngestRetry,
     IngestSkippedError,
     ReaderState,
+    _dead_letter,
     _default_ingest,
     _extract_text,
     _read_delta,
@@ -453,3 +456,161 @@ async def test_tick_keeps_buffer_when_dead_letter_unwritable(tmp_path: Path) -> 
 
     assert "x" * 5000 in state.buffers[str(f)]
     assert state.retries[str(f)].next_retry_at == clock.now + RETRY_MAX_SECONDS
+
+
+def test_dead_letter_rotates_when_over_cap_and_keeps_one_rotation(tmp_path: Path) -> None:
+    dead = tmp_path / "dead.jsonl"
+    rotated = tmp_path / "dead.jsonl.1"
+
+    def park(text: str) -> None:
+        assert _dead_letter(
+            dead, key="/s.jsonl", slug="bsw", text=text, attempts=5, now=1.0, max_bytes=100
+        )
+
+    park("a" * 200)
+    assert not rotated.exists()
+    park("b")
+    assert "a" * 200 in rotated.read_text()
+    assert [json.loads(line)["text"] for line in dead.read_text().splitlines()] == ["b"]
+
+    park("c" * 200)
+    park("d")
+    assert "a" * 200 not in rotated.read_text()
+    assert "c" * 200 in rotated.read_text()
+    assert [json.loads(line)["text"] for line in dead.read_text().splitlines()] == ["d"]
+    assert not (tmp_path / "dead.jsonl.2").exists()
+    assert stat.S_IMODE(dead.stat().st_mode) == 0o600
+    assert stat.S_IMODE(rotated.stat().st_mode) == 0o600
+
+
+def test_dead_letter_under_cap_appends_without_rotating(tmp_path: Path) -> None:
+    dead = tmp_path / "dead.jsonl"
+    for text in ("one", "two"):
+        assert _dead_letter(dead, key="/s.jsonl", slug="bsw", text=text, attempts=5, now=1.0)
+    assert len(dead.read_text().splitlines()) == 2
+    assert not (tmp_path / "dead.jsonl.1").exists()
+
+
+async def _idle_tick(state: ReaderState, tmp_path: Path, dead: Path) -> None:
+    async def never_ingest(slug: str, text: str, src: str) -> None:
+        raise AssertionError("no ingest expected")
+
+    projects = tmp_path / "projects"
+    projects.mkdir(exist_ok=True)
+    await _tick(state, dead_letter_path=dead, projects_dir=projects,
+                ingest_fn=never_ingest, resolve_fn=_registered, min_delta_chars=4_000,
+                clock=_FakeClock())
+
+
+@pytest.mark.asyncio
+async def test_tick_prunes_state_of_deleted_transcript(tmp_path: Path) -> None:
+    gone = str(tmp_path / "projects" / "p" / "gone.jsonl")
+    dead = tmp_path / "dead.jsonl"
+    state = ReaderState(
+        cursors={gone: 42},
+        buffers={gone: ""},
+        retries={gone: IngestRetry(2, 0.0)},
+    )
+
+    await _idle_tick(state, tmp_path, dead)
+
+    assert state == ReaderState()
+    assert not dead.exists()
+
+
+@pytest.mark.asyncio
+async def test_tick_dead_letters_unsent_buffer_of_deleted_transcript(tmp_path: Path) -> None:
+    gone = str(tmp_path / "projects" / "p" / "gone.jsonl")
+    dead = tmp_path / "dead.jsonl"
+    state = ReaderState(
+        cursors={gone: 42},
+        buffers={gone: "user: unsent"},
+        retries={gone: IngestRetry(3, 0.0)},
+    )
+
+    await _idle_tick(state, tmp_path, dead)
+
+    assert state == ReaderState()
+    records = [json.loads(line) for line in dead.read_text().splitlines()]
+    assert len(records) == 1
+    assert records[0]["file"] == gone
+    assert records[0]["text"] == "user: unsent"
+    assert records[0]["attempts"] == 3
+    assert records[0]["reason"] == "transcript_deleted"
+    assert records[0]["workspace"] is None
+
+
+@pytest.mark.asyncio
+async def test_tick_keeps_deleted_transcript_buffer_when_dead_letter_unwritable(
+    tmp_path: Path,
+) -> None:
+    gone = str(tmp_path / "projects" / "p" / "gone.jsonl")
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")
+    state = ReaderState(cursors={gone: 42}, buffers={gone: "user: unsent"})
+
+    await _idle_tick(state, tmp_path, blocker / "dead.jsonl")
+
+    assert state.buffers[gone] == "user: unsent"
+
+
+@pytest.mark.asyncio
+async def test_tick_does_not_prune_on_transient_stat_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unreadable = str(tmp_path / "projects" / "locked" / "s.jsonl")
+    state = ReaderState(cursors={unreadable: 42}, buffers={unreadable: "user: unsent"})
+    real_stat = Path.stat
+
+    def flaky_stat(self: Path, *args: object, **kwargs: object) -> object:
+        if str(self) == unreadable:
+            raise PermissionError(13, "denied")
+        return real_stat(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+    await _idle_tick(state, tmp_path, tmp_path / "dead.jsonl")
+
+    assert state == ReaderState(cursors={unreadable: 42}, buffers={unreadable: "user: unsent"})
+    assert not (tmp_path / "dead.jsonl").exists()
+
+
+@pytest.mark.asyncio
+async def test_tick_keeps_state_of_live_transcripts(tmp_path: Path) -> None:
+    projects = tmp_path / "projects"
+    f = _write_session(projects, "s1.jsonl", _transcript("/x", [("user", "hi")]))
+    size = f.stat().st_size
+    state = ReaderState(cursors={str(f): size}, buffers={str(f): "user: pending"})
+
+    await _idle_tick(state, tmp_path, tmp_path / "dead.jsonl")
+
+    assert state == ReaderState(cursors={str(f): size}, buffers={str(f): "user: pending"})
+
+
+@pytest.mark.asyncio
+async def test_tick_runs_blocking_file_io_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects = tmp_path / "projects"
+    _write_session(projects, "s1.jsonl",
+                   _transcript("/Users/dmitrydankov/BSW", [("user", "x" * 5000)]))
+    offloaded: list[str] = []
+    real_to_thread = asyncio.to_thread
+
+    async def recording_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        offloaded.append(func.__name__)
+        return await real_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(session_reader.asyncio, "to_thread", recording_to_thread)
+
+    async def failing_ingest(slug: str, text: str, src: str) -> None:
+        raise RuntimeError("server rejected")
+
+    state = ReaderState()
+    for _ in range(MAX_INGEST_ATTEMPTS):
+        state.retries = {k: IngestRetry(r.attempts, 0.0) for k, r in state.retries.items()}
+        await _tick(state, dead_letter_path=tmp_path / "dead.jsonl", projects_dir=projects,
+                    ingest_fn=failing_ingest, resolve_fn=_registered, min_delta_chars=4_000)
+
+    assert "_transcript_cwd" in offloaded
+    assert "_dead_letter" in offloaded
+    assert (tmp_path / "dead.jsonl").exists()

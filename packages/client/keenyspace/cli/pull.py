@@ -6,23 +6,36 @@ Workflow:
 2. Walk local vault, compute sha256 manifest (scope = .md + raw/).
 3. Diff. If dirty (modified | added | removed) and not --force: print summary, exit 4.
 4. If --force: stash dirty bytes under conflicts/<iso>/, print unified diff.
-5. Download every server file whose local hash differs via /pages-raw/,
-   atomic-write into vault.
+5. Download every server file whose local hash differs via /pages-raw/ (at most
+   FETCH_CONCURRENCY in flight), atomic-write into vault. The first failure
+   cancels the remaining fetches and aborts before local-state.json is written.
 6. Delete in-scope local files that vanished from server canon.
 7. Write slug-marker.json (D-13 option b) + local-state.json (atomic 0o600).
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sys
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 EXIT_DIRTY = 4
 EXIT_UNSAFE_MANIFEST = 7
+FETCH_CONCURRENCY = 8
+
+
+class PullFileError(Exception):
+    """Fetching or writing one pulled file failed; ``error`` is the original cause."""
+
+    def __init__(self, rel: str, error: Exception) -> None:
+        super().__init__(f"{rel}: {error}")
+        self.rel = rel
+        self.error = error
 
 
 async def run_pull(
@@ -95,6 +108,20 @@ async def run_pull(
             )
             sys.exit(EXIT_DIRTY)
 
+        async def fetch(rel: str) -> bytes:
+            return await _fetch_page_bytes(client, slug, rel)
+
+        async def map_or_abort[T](
+            fn: Callable[[str], Awaitable[T]], rels: Iterable[str]
+        ) -> dict[str, T]:
+            try:
+                return await _map_bounded(fn, rels)
+            except PullFileError as exc:
+                console.print(
+                    f"[red]Pull aborted on {escape(exc.rel)}: {escape(str(exc.error))}[/red]"
+                )
+                raise exc.error from None
+
         stash_root: Path | None = None
         preloaded_server: dict[str, bytes] = {}
         if diff.is_dirty:
@@ -102,28 +129,28 @@ async def run_pull(
             stash_root = state_dir / "conflicts" / iso
             stash_root.mkdir(parents=True, exist_ok=True)
             stash_dirty(diff, target_path, stash_root)
-            for rel in diff.modified:
-                preloaded_server[rel] = await _fetch_page_bytes(client, slug, rel)
+            preloaded_server = await map_or_abort(fetch, diff.modified)
             render_diff(diff, target_path, lambda rel: preloaded_server[rel])
 
         target_path.mkdir(parents=True, exist_ok=True)
+
+        async def pull_file(rel: str) -> str:
+            payload = preloaded_server[rel] if rel in preloaded_server else await fetch(rel)
+            await asyncio.to_thread(write_atomic, dest_paths[rel], payload)
+            return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+        changed = [rel for rel, h in server_files.items() if local_files.get(rel) != h]
+        written = await map_or_abort(pull_file, changed)
         # WR-03: record the sha256 of the bytes we actually wrote to disk,
         # not the manifest hash captured at the start of the pull. If
         # server canon mutates between manifest fetch and per-file fetch
         # (compile pass produces fresh content for one of the files), the
         # local-state.json must reflect the bytes actually on disk so the
-        # next `pull` is not falsely reported as dirty.
-        actual_hashes: dict[str, str] = {}
-        for rel, server_hash in server_files.items():
-            if local_files.get(rel) == server_hash:
-                actual_hashes[rel] = server_hash
-                continue
-            if rel in preloaded_server:
-                payload_bytes = preloaded_server[rel]
-            else:
-                payload_bytes = await _fetch_page_bytes(client, slug, rel)
-            write_atomic(dest_paths[rel], payload_bytes)
-            actual_hashes[rel] = "sha256:" + hashlib.sha256(payload_bytes).hexdigest()
+        # next `pull` is not falsely reported as dirty. Sorted so the file
+        # content does not depend on fetch completion order.
+        actual_hashes = {
+            rel: written.get(rel, server_files[rel]) for rel in sorted(server_files)
+        }
 
         for rel in set(local_files) - set(server_files):
             (target_path / rel).unlink(missing_ok=True)
@@ -150,6 +177,39 @@ async def run_pull(
     )
     if stash_root is not None:
         console.print(f"[yellow]Dirty files stashed to {stash_root}[/yellow]")
+
+
+async def _map_bounded[T](
+    fn: Callable[[str], Awaitable[T]],
+    rels: Iterable[str],
+    *,
+    limit: int = FETCH_CONCURRENCY,
+) -> dict[str, T]:
+    """Run ``fn`` over ``rels`` with at most ``limit`` in flight.
+
+    The first failure cancels everything still pending and is raised as
+    ``PullFileError`` naming the file.
+    """
+    semaphore = asyncio.Semaphore(limit)
+    results: dict[str, T] = {}
+
+    async def run(rel: str) -> None:
+        async with semaphore:
+            try:
+                results[rel] = await fn(rel)
+            except Exception as exc:
+                raise PullFileError(rel, exc) from exc
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            for rel in rels:
+                tg.create_task(run(rel))
+    except BaseExceptionGroup as group:
+        first = next((e for e in group.exceptions if isinstance(e, PullFileError)), None)
+        if first is None:
+            raise
+        raise first from None
+    return results
 
 
 async def _fetch_page_bytes(client: Any, slug: str, rel: str) -> bytes:

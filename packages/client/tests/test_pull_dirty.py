@@ -359,3 +359,125 @@ async def test_pull_skips_fetching_unchanged_files(
     assert (target / "concepts" / "foo.md").read_bytes() == server_foo
     state_path = temp_config_dir["state_dir"] / "demo" / "local-state.json"
     assert json.loads(state_path.read_text())["files"] == server_manifest
+
+
+async def test_map_bounded_caps_in_flight_calls() -> None:
+    import asyncio
+
+    from keenyspace.cli.pull import _map_bounded
+
+    in_flight = 0
+    peak = 0
+
+    async def slow(rel: str) -> str:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return rel.upper()
+
+    rels = [f"p{i}.md" for i in range(30)]
+    results = await _map_bounded(slow, rels, limit=8)
+
+    assert results == {rel: rel.upper() for rel in rels}
+    assert peak == 8
+
+
+async def test_map_bounded_aborts_on_first_error_and_cancels_the_rest() -> None:
+    import asyncio
+
+    from keenyspace.cli.pull import PullFileError, _map_bounded
+
+    started: list[str] = []
+    finished: list[str] = []
+    boom = RuntimeError("boom")
+
+    async def fetch(rel: str) -> bytes:
+        started.append(rel)
+        if rel == "bad.md":
+            raise boom
+        await asyncio.sleep(10)
+        finished.append(rel)
+        return b""
+
+    rels = ["a.md", "bad.md", *(f"p{i}.md" for i in range(20))]
+    with pytest.raises(PullFileError) as excinfo:
+        await asyncio.wait_for(_map_bounded(fetch, rels, limit=4), timeout=5)
+
+    assert excinfo.value.rel == "bad.md"
+    assert excinfo.value.error is boom
+    assert finished == []
+    # Only the first window (plus at most one slot freed by the failure) ever starts.
+    assert len(started) <= 5
+
+
+async def test_pull_aborts_on_failed_fetch_without_writing_state(
+    temp_config_dir: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    httpserver: HTTPServer,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import httpx
+
+    _seed_auth(temp_config_dir["config_dir"])
+    monkeypatch.setenv("KEENYSPACE_SERVER_URL", _ipv4(httpserver.url_for("")))
+
+    good = {f"p{i}.md": f"# p{i}\n".encode() for i in range(12)}
+    manifest = {rel: _sha256(b) for rel, b in good.items()}
+    manifest["broken.md"] = _sha256(b"# broken\n")
+    httpserver.expect_request(
+        "/v1/api/workspaces/demo/manifest"
+    ).respond_with_json({"files": manifest, "server_canon_at": "2026-05-24T00:00:00Z"})
+    for rel, payload in good.items():
+        httpserver.expect_request(
+            f"/v1/api/workspaces/demo/pages-raw/{rel}"
+        ).respond_with_data(payload, content_type="application/octet-stream")
+    httpserver.expect_request(
+        "/v1/api/workspaces/demo/pages-raw/broken.md"
+    ).respond_with_data("boom", status=500)
+
+    pull_mod = _reload()
+    target = tmp_path / "keenyspace" / "demo"
+    with pytest.raises(httpx.HTTPStatusError):
+        await pull_mod.run_pull("demo", force=False, target=target)  # type: ignore[attr-defined]
+
+    out = capsys.readouterr().out
+    assert "Pull aborted" in out
+    assert "broken.md" in out
+    assert not (temp_config_dir["state_dir"] / "demo" / "local-state.json").exists()
+    assert not (target / "broken.md").exists()
+    assert not (target / ".keenyspace" / "slug-marker.json").exists()
+
+
+async def test_pull_writes_local_state_in_sorted_order(
+    temp_config_dir: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    httpserver: HTTPServer,
+    tmp_path: Path,
+) -> None:
+    _seed_auth(temp_config_dir["config_dir"])
+    monkeypatch.setenv("KEENYSPACE_SERVER_URL", _ipv4(httpserver.url_for("")))
+
+    files = {f"n{i:02d}.md": f"# {i}\n".encode() for i in reversed(range(20))}
+    manifest = {rel: _sha256(b) for rel, b in files.items()}
+    httpserver.expect_request(
+        "/v1/api/workspaces/demo/manifest"
+    ).respond_with_json({"files": manifest, "server_canon_at": "2026-05-24T00:00:00Z"})
+    for rel, payload in files.items():
+        httpserver.expect_request(
+            f"/v1/api/workspaces/demo/pages-raw/{rel}"
+        ).respond_with_data(payload, content_type="application/octet-stream")
+
+    pull_mod = _reload()
+    target = tmp_path / "keenyspace" / "demo"
+    await pull_mod.run_pull("demo", force=False, target=target)  # type: ignore[attr-defined]
+
+    state = json.loads(
+        (temp_config_dir["state_dir"] / "demo" / "local-state.json").read_text()
+    )
+    assert list(state["files"]) == sorted(files)
+    assert state["files"] == manifest
+    for rel, payload in files.items():
+        assert (target / rel).read_bytes() == payload

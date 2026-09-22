@@ -19,7 +19,7 @@ import contextlib
 import json
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -70,6 +70,9 @@ MAX_INGEST_ATTEMPTS = 5
 _LEGACY_CURSORS_NAME = "ingest-cursors.json"
 _LEGACY_BUFFERS_NAME = "ingest-buffers.json"
 _DEAD_LETTER_NAME = "ingest-dead-letter.jsonl"
+# Once the dead-letter file passes this size it is rotated to ``<name>.1`` (one
+# rotation kept, the previous ``.1`` is replaced) so it cannot grow forever.
+DEAD_LETTER_MAX_BYTES = 5 * 1024 * 1024
 
 
 class IngestSkippedError(Exception):
@@ -166,10 +169,45 @@ def save_state(path: Path, state: ReaderState) -> None:
         log.warning("session_reader.state_persist_failed", error=str(exc))
 
 
-def _dead_letter(path: Path, *, key: str, slug: str, text: str, attempts: int, now: float) -> bool:
-    record = {"file": key, "workspace": slug, "attempts": attempts, "failed_at": now, "text": text}
+def _rotate_dead_letter(path: Path, max_bytes: int) -> None:
+    try:
+        if path.stat().st_size <= max_bytes:
+            return
+        os.replace(path, path.with_name(path.name + ".1"))
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        # Parking the text matters more than bounding the file; append anyway.
+        log.warning("session_reader.dead_letter_rotate_failed", error=str(exc))
+
+
+def _dead_letter(
+    path: Path,
+    *,
+    key: str,
+    slug: str | None,
+    text: str,
+    attempts: int,
+    now: float,
+    reason: str | None = None,
+    max_bytes: int = DEAD_LETTER_MAX_BYTES,
+) -> bool:
+    """Append one record to the owner-only dead-letter file; False if it failed.
+
+    Blocking file I/O: call it through ``asyncio.to_thread`` from the event loop.
+    """
+    record: dict[str, Any] = {
+        "file": key,
+        "workspace": slug,
+        "attempts": attempts,
+        "failed_at": now,
+        "text": text,
+    }
+    if reason is not None:
+        record["reason"] = reason
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_dead_letter(path, max_bytes)
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             os.write(fd, (json.dumps(record) + "\n").encode("utf-8"))
@@ -183,9 +221,56 @@ def _dead_letter(path: Path, *, key: str, slug: str, text: str, attempts: int, n
         file=key,
         workspace=slug,
         attempts=attempts,
+        reason=reason,
         dead_letter=str(path),
     )
     return True
+
+
+def _confirmed_missing(keys: Iterable[str]) -> list[str]:
+    """Keys whose transcript is definitely gone; transient stat errors are not proof."""
+    missing: list[str] = []
+    for key in keys:
+        try:
+            Path(key).stat()
+        except FileNotFoundError:
+            missing.append(key)
+        except OSError:
+            continue
+    return missing
+
+
+async def _prune_deleted_transcripts(
+    state: ReaderState,
+    *,
+    seen: set[str],
+    dead_letter_path: Path,
+    clock: Callable[[], float],
+) -> None:
+    """Drop state for deleted transcripts, parking any unsent buffer first."""
+    tracked = (state.cursors.keys() | state.buffers.keys() | state.retries.keys()) - seen
+    if not tracked:
+        return
+    for key in await asyncio.to_thread(_confirmed_missing, sorted(tracked)):
+        text = state.buffers.get(key, "")
+        if text:
+            retry = state.retries.get(key)
+            parked = await asyncio.to_thread(
+                _dead_letter,
+                dead_letter_path,
+                key=key,
+                slug=None,
+                text=text,
+                attempts=retry.attempts if retry is not None else 0,
+                now=clock(),
+                reason="transcript_deleted",
+            )
+            if not parked:
+                continue
+        state.cursors.pop(key, None)
+        state.buffers.pop(key, None)
+        state.retries.pop(key, None)
+        log.info("session_reader.pruned_deleted_transcript", file=key)
 
 
 def _backoff_seconds(attempts: int) -> float:
@@ -335,11 +420,13 @@ async def _tick(
     if not projects_dir.is_dir():
         return
     cursors, buffers, retries = state.cursors, state.buffers, state.retries
+    seen: set[str] = set()
     for proj in sorted(projects_dir.iterdir()):
         if not proj.is_dir():
             continue
         for transcript in sorted(proj.glob("*.jsonl")):
             key = str(transcript)
+            seen.add(key)
             offset = cursors.get(key, 0)
             try:
                 size = transcript.stat().st_size
@@ -350,7 +437,7 @@ async def _tick(
             # text whose ingest was skipped/failed would be stranded until new bytes.
             if not has_new_bytes and len(buffers.get(key, "")) < min_delta_chars:
                 continue
-            cwd = _transcript_cwd(transcript)
+            cwd = await asyncio.to_thread(_transcript_cwd, transcript)
             if not cwd:
                 continue
             slug, source = resolve_fn(cwd)
@@ -405,8 +492,8 @@ async def _tick(
                 attempts = (retry.attempts if retry is not None else 0) + 1
                 now = clock()
                 if attempts >= MAX_INGEST_ATTEMPTS:
-                    if _dead_letter(
-                        dead_letter_path, key=key, slug=slug, text=text,
+                    if await asyncio.to_thread(
+                        _dead_letter, dead_letter_path, key=key, slug=slug, text=text,
                         attempts=attempts, now=now,
                     ):
                         buffers[key] = ""
@@ -428,6 +515,9 @@ async def _tick(
             buffers[key] = ""
             retries.pop(key, None)
             log.info("session_reader.ingested", workspace=slug, file=key, chars=len(text))
+    await _prune_deleted_transcripts(
+        state, seen=seen, dead_letter_path=dead_letter_path, clock=clock
+    )
 
 
 async def run_transcript_reader(
