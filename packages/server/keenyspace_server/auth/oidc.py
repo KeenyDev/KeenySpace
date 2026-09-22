@@ -30,7 +30,7 @@ def build_oauth(settings: Settings) -> OAuth:
     oauth.register(
         name="authentik",
         client_id=settings.auth.oidc_client_id,
-        client_secret=settings.auth.oidc_client_secret,
+        client_secret=settings.auth.oidc_client_secret.get_secret_value(),
         server_metadata_url=(
             f"{settings.auth.metadata_issuer_url.rstrip('/')}/.well-known/openid-configuration"
         ),
@@ -143,7 +143,9 @@ class OidcClient:
             log.warning("auth.token.refresh.metadata_failed")
             return None
         try:
-            async with AsyncOAuth2Client(self._client_id, self._auth.oidc_client_secret) as client:
+            async with AsyncOAuth2Client(
+                self._client_id, self._auth.oidc_client_secret.get_secret_value()
+            ) as client:
                 token = await client.refresh_token(token_endpoint, refresh_token=refresh_token)
                 if isinstance(token, dict):
                     return token

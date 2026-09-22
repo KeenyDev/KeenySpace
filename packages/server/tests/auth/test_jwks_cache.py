@@ -91,8 +91,37 @@ async def test_force_refresh_on_unknown_kid() -> None:
     with patch("keenyspace_server.auth.jwks_cache.httpx.AsyncClient") as mock_cli:
         mock_cli.return_value.__aenter__.return_value.get = AsyncMock(return_value=fake_resp)
         await cache.get()
+        cache._last_attempt_at -= 31
         await cache.force_refresh()
         assert mock_cli.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_force_refresh_throttled_within_min_retry_interval() -> None:
+    provider = AsyncMock(return_value="https://idp/jwks")
+    cache = JwksCache(provider, ttl_seconds=3600, min_retry_interval_seconds=30)
+    fake_resp = MagicMock()
+    fake_resp.json.return_value = SAMPLE_JWKS
+    fake_resp.raise_for_status = MagicMock()
+    with patch("keenyspace_server.auth.jwks_cache.httpx.AsyncClient") as mock_cli:
+        mock_cli.return_value.__aenter__.return_value.get = AsyncMock(return_value=fake_resp)
+        first = await cache.get()
+        results = [await cache.force_refresh() for _ in range(20)]
+        assert mock_cli.call_count == 1
+    assert all(r is first for r in results)
+
+
+@pytest.mark.asyncio
+async def test_force_refresh_throttled_after_failure() -> None:
+    provider = AsyncMock(return_value="https://idp/jwks")
+    cache = JwksCache(provider, ttl_seconds=3600, min_retry_interval_seconds=30)
+    with patch("keenyspace_server.auth.jwks_cache.httpx.AsyncClient") as mock_cli:
+        mock_cli.return_value.__aenter__.return_value.get = AsyncMock(
+            side_effect=Exception("idp down")
+        )
+        assert await cache.force_refresh() is None
+        assert await cache.force_refresh() is None
+        assert mock_cli.call_count == 1
 
 
 @pytest.mark.asyncio

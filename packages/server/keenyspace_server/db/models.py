@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, String
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncAttrs
@@ -58,7 +58,7 @@ class ApiKey(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     user_sub: Mapped[str] = mapped_column(String(256))
     name: Mapped[str] = mapped_column(String(128))
-    prefix: Mapped[str] = mapped_column(String(16), default="ks_live_")
+    prefix: Mapped[str] = mapped_column(String(16), default="ks_live_", server_default="ks_live_")
     hash: Mapped[str] = mapped_column(String(256))
     lookup_hash: Mapped[str] = mapped_column(String(64), unique=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -110,11 +110,11 @@ class CompileRun(Base):
     wal_first_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     wal_last_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     plan_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    pages_written: Mapped[int] = mapped_column(default=0)
-    tokens_input: Mapped[int] = mapped_column(default=0)
-    tokens_output: Mapped[int] = mapped_column(default=0)
+    pages_written: Mapped[int] = mapped_column(default=0, server_default="0")
+    tokens_input: Mapped[int] = mapped_column(default=0, server_default="0")
+    tokens_output: Mapped[int] = mapped_column(default=0, server_default="0")
     duration_ms: Mapped[int | None]
     model: Mapped[str] = mapped_column(String(128))
-    error_message: Mapped[str | None]
+    error_message: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (Index("ix_compile_runs_workspace_started", "workspace_uuid", "started_at"),)

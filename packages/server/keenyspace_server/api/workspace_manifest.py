@@ -9,7 +9,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,7 +37,8 @@ def _scan_workspace(ws_root: Path) -> dict[str, str]:
             continue
         if not (rel.endswith(".md") or parts[0] == "raw"):
             continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        with path.open("rb") as f:
+            digest = hashlib.file_digest(f, "sha256").hexdigest()
         files[rel] = f"sha256:{digest}"
     return files
 
@@ -93,13 +94,20 @@ def _safe_workspace_relative(ws_root: Path, rel: str) -> Path | None:
     return candidate
 
 
+def _resolve_raw_file(ws_root: Path, rel: str) -> Path | None:
+    target = _safe_workspace_relative(ws_root, rel)
+    if target is None:
+        raise HTTPException(status_code=400, detail={"error": "invalid_path"})
+    return target if target.is_file() else None
+
+
 @router.get("/{slug}/pages-raw/{path:path}")
 async def workspace_page_raw(
     slug: str,
     path: str,
     request: Request,
     session: AsyncSession = Depends(get_db),  # noqa: B008
-) -> Response:
+) -> FileResponse:
     """Raw bytes for a single file inside the pull-scope (.md or raw/*).
 
     Added in Phase 5 Plan 03 Task 3 — the existing /pages/{path} endpoint
@@ -119,12 +127,7 @@ async def workspace_page_raw(
 
     settings = request.app.state.settings
     ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
-    target = _safe_workspace_relative(ws_root, path)
+    target = await asyncio.to_thread(_resolve_raw_file, ws_root, path)
     if target is None:
-        raise HTTPException(status_code=400, detail={"error": "invalid_path"})
-    if not target.is_file():
         raise HTTPException(status_code=404, detail=f"path {path!r} not found")
-    return Response(
-        content=target.read_bytes(),
-        media_type="application/octet-stream",
-    )
+    return FileResponse(target, media_type="application/octet-stream")

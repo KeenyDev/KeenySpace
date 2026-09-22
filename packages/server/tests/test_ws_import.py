@@ -202,3 +202,34 @@ def test_validate_still_rejects_symlink_after_relax(tmp_path: Path) -> None:
     with pytest.raises(WorkspaceImportError) as exc:
         _validate_zip_sync(zp)
     assert exc.value.code == "symlink"
+
+
+def test_validate_rejects_size_cap_without_decompressing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "keenyspace_server.ws.import_.MAX_IMPORT_UNCOMPRESSED_BYTES", 4
+    )
+
+    def _fail_testzip(self: zipfile.ZipFile) -> str | None:
+        raise AssertionError("testzip must not run before the size cap check")
+
+    monkeypatch.setattr(zipfile.ZipFile, "testzip", _fail_testzip)
+    zp = _make_zip(tmp_path, [("index.md", b"hello, world\n")])
+    with pytest.raises(WorkspaceImportError) as exc:
+        _validate_zip_sync(zp)
+    assert exc.value.code == "size_cap"
+
+
+def test_validate_rejects_crc_mismatch(tmp_path: Path) -> None:
+    payload = b"# index\n" + b"x" * 64
+    zp = tmp_path / "crc.zip"
+    with zipfile.ZipFile(zp, "w", compression=zipfile.ZIP_STORED) as zf:
+        zf.writestr("index.md", payload)
+    raw = bytearray(zp.read_bytes())
+    offset = raw.find(payload)
+    raw[offset + len(payload) - 1] ^= 0xFF
+    zp.write_bytes(bytes(raw))
+    with pytest.raises(WorkspaceImportError) as exc:
+        _validate_zip_sync(zp)
+    assert exc.value.code == "bad_zip"

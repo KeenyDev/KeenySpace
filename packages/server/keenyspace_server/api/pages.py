@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import io
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -32,12 +34,15 @@ async def get_page(
     ws_root = settings.fs.root / "workspaces" / str(ws.uuid)
 
     try:
-        fd, resolved = open_workspace_page(ws_root, path)
+        return await asyncio.to_thread(_read_page_sync, ws_root, path)
     except UnsafePath as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"page {path!r} not found") from exc
 
+
+def _read_page_sync(ws_root: Path, path: str) -> ReadPageResponse:
+    fd, resolved = open_workspace_page(ws_root, path)
     with io.FileIO(fd) as f:
         raw_content = f.read()
 

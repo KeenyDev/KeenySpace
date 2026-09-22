@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import (
@@ -11,8 +13,10 @@ from fastapi import (
     Form,
     HTTPException,
     Request,
+    Response,
     UploadFile,
 )
+from fastapi.routing import APIRoute
 from keenyspace_shared.mcp_contracts import WorkspaceImportResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +29,6 @@ from keenyspace_server.ws.import_ import (
 )
 
 log = structlog.get_logger(__name__)
-router = APIRouter()
 
 _UPLOAD_CHUNK_BYTES = 64 * 1024
 # WR-12: cap the COMPRESSED upload size before _validate_zip_sync runs. The
@@ -44,6 +47,44 @@ _UPLOAD_CHUNK_BYTES = 64 * 1024
 # enforced post-upload in _validate_zip_sync (sum of info.file_size across
 # entries) — raising the compressed cap does not reopen that hole.
 _MAX_COMPRESSED_UPLOAD_BYTES = MAX_EXPORT_UNCOMPRESSED_BYTES
+_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+
+
+def _upload_too_large() -> HTTPException:
+    return HTTPException(
+        status_code=413,
+        detail={
+            "code": "upload_too_large",
+            "message": f"compressed upload exceeds {_MAX_COMPRESSED_UPLOAD_BYTES} bytes",
+        },
+    )
+
+
+class _UploadCapRoute(APIRoute):
+    """Reject oversized uploads from Content-Length before FastAPI parses the body.
+
+    Endpoint dependencies run only after the multipart body has been spooled
+    to disk, so the check has to sit in the route handler itself. Requests
+    without Content-Length (chunked) fall through to the streaming cap below.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def _handler(request: Request) -> Response:
+            declared = request.headers.get("content-length")
+            if (
+                declared is not None
+                and declared.isdigit()
+                and int(declared) > _MAX_COMPRESSED_UPLOAD_BYTES + _MULTIPART_OVERHEAD_BYTES
+            ):
+                raise _upload_too_large()
+            return await handler(request)
+
+        return _handler
+
+
+router = APIRouter(route_class=_UploadCapRoute)
 
 
 @router.post("/import", response_model=WorkspaceImportResponse, status_code=201)
@@ -83,16 +124,7 @@ async def import_endpoint(
                     # Abort BEFORE writing the chunk that would push past the
                     # cap. The finally block unlinks upload_tmp so the partial
                     # file is reaped immediately.
-                    raise HTTPException(
-                        status_code=413,
-                        detail={
-                            "code": "upload_too_large",
-                            "message": (
-                                f"compressed upload exceeds "
-                                f"{_MAX_COMPRESSED_UPLOAD_BYTES} bytes"
-                            ),
-                        },
-                    )
+                    raise _upload_too_large()
                 f.write(chunk)
 
         try:

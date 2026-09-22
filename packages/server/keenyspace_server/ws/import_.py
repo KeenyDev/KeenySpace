@@ -96,12 +96,6 @@ def _validate_zip_sync(zip_path: Path) -> _ZipValidation:
         raise WorkspaceImportError("bad_zip", f"zip is corrupt: {exc}") from exc
 
     try:
-        broken = zf.testzip()
-        if broken is not None:
-            raise WorkspaceImportError(
-                "bad_zip",
-                f"zip CRC check failed for entry: {broken!r}",
-            )
         infolist = zf.infolist()
         total = 0
         has_md = False
@@ -165,6 +159,15 @@ def _validate_zip_sync(zip_path: Path) -> _ZipValidation:
             raise WorkspaceImportError(
                 "empty_workspace",
                 "zip contains no .md files",
+            )
+
+        # testzip decompresses every entry, so it runs only after the declared
+        # sizes passed the cap; zipfile bounds each read to the declared size.
+        broken = zf.testzip()
+        if broken is not None:
+            raise WorkspaceImportError(
+                "bad_zip",
+                f"zip CRC check failed for entry: {broken!r}",
             )
 
         preserved: str | None = None
@@ -350,7 +353,7 @@ async def import_workspace(
             await session.commit()
         except IntegrityError as exc:
             await session.rollback()
-            shutil.rmtree(final_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, final_dir, ignore_errors=True)
             outcome = "conflict"
             # Persist a conflict audit row in a SEPARATE session: the rollback
             # above wiped the workspace.imported audit entry we staged earlier,
@@ -391,7 +394,7 @@ async def import_workspace(
             # collapsing this handler back to the original CR-01 failure mode.
             # Set outcome before rollback too so the metric label is correct
             # even if rollback throws.
-            shutil.rmtree(final_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, final_dir, ignore_errors=True)
             outcome = "fs_orphan_reaped"
             log.warning(
                 "workspace.import.fs_orphan_reaped",
@@ -422,5 +425,5 @@ async def import_workspace(
         return WorkspaceImportResponse(uuid=str(new_uuid), slug=slug)
     finally:
         if cleanup_tmp:
-            shutil.rmtree(import_tmp, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, import_tmp, ignore_errors=True)
         WORKSPACE_IMPORT_TOTAL.labels(outcome=outcome).inc()

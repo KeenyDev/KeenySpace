@@ -3,10 +3,16 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+import structlog
+from pydantic import BaseModel, ConfigDict, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from keenyspace_server.compile.settings import CompileSettings
+
+log = structlog.get_logger(__name__)
+
+_MIN_SECRET_BYTES = 32
+_PLACEHOLDER_MARKER = "replace-me"
 
 
 class ServerSettings(BaseModel):
@@ -45,7 +51,7 @@ class AuthSettings(BaseModel):
     # internally-fetched keys is sound.
     oidc_internal_issuer_url: str | None = None
     oidc_client_id: str
-    oidc_client_secret: str
+    oidc_client_secret: SecretStr
     oidc_redirect_uri: str
     oidc_post_logout_redirect_uri: str
 
@@ -53,7 +59,7 @@ class AuthSettings(BaseModel):
     def metadata_issuer_url(self) -> str:
         return self.oidc_internal_issuer_url or self.oidc_issuer_url
 
-    session_secret_key: str
+    session_secret_key: SecretStr
     cookie_path_ks_at: str = "/v1"
     cookie_path_ks_rt: str = "/v1/api/auth"
     cookie_samesite_ks_at: str = "lax"
@@ -61,7 +67,7 @@ class AuthSettings(BaseModel):
     cookie_secure: bool = True
 
     # pepper защищает от offline rainbow-table при DB dump
-    api_key_pepper: str
+    api_key_pepper: SecretStr
 
     jwks_ttl_seconds: int = 3600
     jwks_min_retry_interval_seconds: int = 30
@@ -73,6 +79,23 @@ class AuthSettings(BaseModel):
 
     multi_worker: bool = False
     required_group: str = ""
+
+    # Warn instead of refusing to start: the dev compose stack ships
+    # "replace-me" fallbacks and must keep booting.
+    @model_validator(mode="after")
+    def _warn_on_weak_secrets(self) -> AuthSettings:
+        secrets = {
+            "oidc_client_secret": self.oidc_client_secret,
+            "session_secret_key": self.session_secret_key,
+            "api_key_pepper": self.api_key_pepper,
+        }
+        for name, secret in secrets.items():
+            value = secret.get_secret_value()
+            if _PLACEHOLDER_MARKER in value:
+                log.warning("config.secret.placeholder", setting=name)
+            elif len(value.encode()) < _MIN_SECRET_BYTES:
+                log.warning("config.secret.too_short", setting=name, min_bytes=_MIN_SECRET_BYTES)
+        return self
 
 
 class Settings(BaseSettings):

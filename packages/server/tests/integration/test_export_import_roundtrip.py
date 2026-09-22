@@ -45,7 +45,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
 
-    pepper = get_settings().auth.api_key_pepper
+    pepper = get_settings().auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
@@ -421,3 +421,44 @@ async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> No
                 }
             assert "workspace.exported" in actions
             assert "workspace.imported" in actions
+
+
+async def test_import_rejects_oversized_content_length_before_reading_body(  # type: ignore[no-untyped-def]
+    app, pg_url, monkeypatch
+) -> None:
+    from starlette.requests import Request
+
+    async def _form_must_not_run(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("multipart body parsed despite oversized Content-Length")
+
+    await _reset_schema(pg_url)
+    async with app.router.lifespan_context(app):
+        _, plaintext = await _seed_api_key_post_lifespan()
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
+            health = await client.get("/healthz")
+            if health.status_code in (500, 503):
+                pytest.skip("server not ready")
+
+            from keenyspace_server.api import workspace_import
+
+            declared = (
+                workspace_import._MAX_COMPRESSED_UPLOAD_BYTES
+                + workspace_import._MULTIPART_OVERHEAD_BYTES
+                + 1
+            )
+            monkeypatch.setattr(Request, "form", _form_must_not_run)
+            resp = await client.post(
+                "/v1/api/workspaces/import",
+                content=b"--x--\r\n",
+                headers={
+                    "content-type": "multipart/form-data; boundary=x",
+                    "content-length": str(declared),
+                },
+            )
+            assert resp.status_code == 413, resp.text
+            assert resp.json()["detail"]["code"] == "upload_too_large"

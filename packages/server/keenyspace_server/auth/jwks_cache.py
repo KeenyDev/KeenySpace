@@ -1,4 +1,4 @@
-"""JwksCache — 1h TTL + serve-stale-on-error + force-refresh on unknown kid.
+"""JwksCache — 1h TTL + serve-stale-on-error + throttled force-refresh on unknown kid.
 
 D-11 + Pitfall G + Pitfall J. Используется для access_token JWT validation
 (cookie ks_at, OIDC Bearer); id_token validation в OIDC callback использует
@@ -32,12 +32,18 @@ class JwksCache:
         self._keyset: KeySet | None = None
         self._fetched_at: float = 0.0
         self._last_failed_at: float = 0.0
+        self._last_attempt_at: float | None = None
         self._lock = asyncio.Lock()
 
+    def _is_fresh(self, now: float) -> bool:
+        return self._keyset is not None and (now - self._fetched_at) < self._ttl
+
     async def get(self) -> KeySet | None:
+        if self._is_fresh(time.monotonic()):
+            return self._keyset
         async with self._lock:
             now = time.monotonic()
-            if self._keyset is not None and (now - self._fetched_at) < self._ttl:
+            if self._is_fresh(now):
                 return self._keyset
             if (now - self._last_failed_at) < self._min_retry:
                 if self._keyset is not None:
@@ -48,11 +54,18 @@ class JwksCache:
             return self._keyset
 
     async def force_refresh(self) -> KeySet | None:
+        # Unknown-kid refreshes are attacker-triggerable (any unauthenticated
+        # request can carry a random kid), so they share the min-retry throttle.
         async with self._lock:
-            await self._fetch(time.monotonic())
+            now = time.monotonic()
+            if self._last_attempt_at is not None and (now - self._last_attempt_at) < self._min_retry:
+                log.debug("auth.jwks.force_refresh_throttled")
+                return self._keyset
+            await self._fetch(now)
             return self._keyset
 
     async def _fetch(self, now: float) -> None:
+        self._last_attempt_at = now
         try:
             uri = await self._jwks_uri_provider()
             async with httpx.AsyncClient(timeout=10.0) as client:

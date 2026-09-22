@@ -47,7 +47,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
 
-    pepper = get_settings().auth.api_key_pepper
+    pepper = get_settings().auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = _h.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
@@ -271,3 +271,37 @@ async def test_pages_raw_rejects_dotfiles(app, pg_url) -> None:
                 assert resp.status_code in (400, 404), (
                     f"{forbidden!r} should be rejected, got {resp.status_code}"
                 )
+
+
+async def test_pages_raw_streams_binary_and_guards_paths(app, pg_url, tmp_path) -> None:
+    await _reset_schema(pg_url)
+    async with app.router.lifespan_context(app):
+        _, plaintext = await _seed_api_key_post_lifespan()
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
+            health = await client.get("/healthz")
+            if health.status_code in (500, 503):
+                pytest.skip("server not ready")
+            slug = await _seed_workspace(client)
+            ws_dir = _workspace_dir(app, slug)
+            payload = os.urandom(300 * 1024)
+            (ws_dir / "raw").mkdir(parents=True, exist_ok=True)
+            (ws_dir / "raw" / "blob.bin").write_bytes(payload)
+            outside = tmp_path / "secret.md"
+            outside.write_text("secret\n")
+            (ws_dir / "raw" / "escape.md").symlink_to(outside)
+
+            resp = await client.get(f"/v1/api/workspaces/{slug}/pages-raw/raw/blob.bin")
+            assert resp.status_code == 200
+            assert resp.content == payload
+            assert resp.headers["content-type"].startswith("application/octet-stream")
+
+            missing = await client.get(f"/v1/api/workspaces/{slug}/pages-raw/raw/nope.bin")
+            assert missing.status_code == 404
+
+            escaped = await client.get(f"/v1/api/workspaces/{slug}/pages-raw/raw/escape.md")
+            assert escaped.status_code == 400

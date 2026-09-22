@@ -257,7 +257,7 @@ async def api_key_user(app, _engine_lifespan_ctx):
     from sqlalchemy import text
 
     settings = get_settings()
-    pepper = settings.auth.api_key_pepper
+    pepper = settings.auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)

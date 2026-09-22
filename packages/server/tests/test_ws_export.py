@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import zipfile
 from pathlib import Path
 
@@ -68,7 +69,7 @@ async def test_build_workspace_zip_yields_bytes_and_reconstructs(tmp_path):
     (ws / ".keenyspace" / "instructions").mkdir()
     (ws / ".keenyspace" / "instructions" / "ingest.md").write_text("body\n")
 
-    gen = await build_workspace_zip(ws)
+    gen = await build_workspace_zip(ws, tmp_root=tmp_path / ".tmp")
     chunks = [c async for c in gen]
     assert chunks, "expected at least one chunk"
     blob = b"".join(chunks)
@@ -92,7 +93,7 @@ async def test_build_workspace_zip_excludes_obsidian_and_logs(tmp_path):
     (ws / "logs").mkdir()
     (ws / "logs" / "2026-05-21.md").write_text("entry\n")
 
-    gen = await build_workspace_zip(ws)
+    gen = await build_workspace_zip(ws, tmp_root=tmp_path / ".tmp")
     blob = b"".join([c async for c in gen])
     with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         names = set(zf.namelist())
@@ -107,12 +108,93 @@ async def test_build_workspace_zip_raises_when_over_cap(monkeypatch, tmp_path):
         "keenyspace_server.ws.export.MAX_EXPORT_UNCOMPRESSED_BYTES", 1
     )
     with pytest.raises(ExportTooLargeError):
-        await build_workspace_zip(ws, enforce_size_cap=True)
+        await build_workspace_zip(ws, enforce_size_cap=True, tmp_root=tmp_path / ".tmp")
 
 
 @pytest.mark.asyncio
 async def test_build_workspace_zip_completes_within_timeout(tmp_path):
     ws = _seed_ws(tmp_path)
-    gen = await asyncio.wait_for(build_workspace_zip(ws), timeout=10.0)
+    gen = await asyncio.wait_for(
+        build_workspace_zip(ws, tmp_root=tmp_path / ".tmp"), timeout=10.0
+    )
     blob = b"".join([c async for c in gen])
     assert len(blob) > 0
+
+
+@pytest.mark.asyncio
+async def test_build_workspace_zip_leaves_no_temp_file_on_disk(tmp_path):
+    ws = _seed_ws(tmp_path)
+    tmp_root = tmp_path / ".tmp"
+    gen = await build_workspace_zip(ws, tmp_root=tmp_root)
+    assert list(tmp_root.iterdir()) == []
+    blob = b"".join([c async for c in gen])
+    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+        assert zf.read("index.md") == b"# index\n"
+    assert list(tmp_root.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_build_workspace_zip_default_tmp_root_is_fs_root_dot_tmp(tmp_path):
+    ws_dir = tmp_path / "workspaces" / "some-uuid"
+    ws_dir.mkdir(parents=True)
+    (ws_dir / "index.md").write_text("# index\n")
+    gen = await build_workspace_zip(ws_dir)
+    assert (tmp_path / ".tmp").is_dir()
+    assert b"".join([c async for c in gen])
+
+
+@pytest.mark.asyncio
+async def test_build_workspace_zip_closes_handle_on_early_disconnect(monkeypatch, tmp_path):
+    import keenyspace_server.ws.export as export_mod
+
+    real_build = export_mod._build_zip_sync
+    handles = []
+
+    def _capture(ws_dir, tmp_root):
+        fh, size = real_build(ws_dir, tmp_root)
+        handles.append(fh)
+        return fh, size
+
+    monkeypatch.setattr(export_mod, "_build_zip_sync", _capture)
+    ws = _seed_ws(tmp_path)
+    (ws / "raw" / "big.bin").write_bytes(os.urandom(512 * 1024))
+    gen = await build_workspace_zip(ws, tmp_root=tmp_path / ".tmp")
+    assert await anext(gen)
+    assert not handles[0].closed
+    await gen.aclose()
+    assert handles[0].closed
+
+
+@pytest.mark.asyncio
+async def test_export_builds_are_limited_to_two_concurrent(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    import keenyspace_server.ws.export as export_mod
+
+    real_build = export_mod._build_zip_sync
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+
+    def _slow_build(ws_dir, tmp_root):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.05)
+        try:
+            return real_build(ws_dir, tmp_root)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(export_mod, "_build_zip_sync", _slow_build)
+    monkeypatch.setattr(export_mod, "_EXPORT_BUILD_SLOTS", asyncio.Semaphore(2))
+    ws = _seed_ws(tmp_path)
+    gens = await asyncio.gather(
+        *(build_workspace_zip(ws, tmp_root=tmp_path / ".tmp") for _ in range(6))
+    )
+    for gen in gens:
+        await gen.aclose()
+    assert peak == 2
