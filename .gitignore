@@ -31,3 +31,4 @@ CLAUDE.md
 deploy/.env
 deploy/keenyspace.env
 *.local.env
+.env.bak*
