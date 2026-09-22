@@ -15,7 +15,7 @@ on every startup so you can run `keenyspace login` immediately after `docker com
 docker compose -f deploy/docker-compose.yml up
 ```
 
-This starts: KeenySpace, Postgres, Authentik (server + worker), Authentik Postgres, Redis.
+This starts: KeenySpace, Postgres, Authentik (server + worker), Authentik Postgres, Caddy.
 Wait until all services pass their healthchecks (typically 60-90 seconds for Authentik).
 
 **Step 2: Secrets are required**

@@ -82,8 +82,19 @@ reachable from a network, and rotate them deliberately once the upgrade is stabl
 ## 3. Configure
 
 `deploy/docker-compose.yml` is the source of truth for every environment variable.
-Operator-facing settings go into `deploy/.env` (the compose file reads it via `env_file`
-and `${VAR:-default}` substitution). The ones you will most likely set:
+Configuration lives in two gitignored files next to it:
+
+- `deploy/.env`: secrets plus the variables the compose file references as `${VAR}`
+  (the table below). Compose only uses it for substitution; it is **not** loaded into
+  any container as a whole, so the KeenySpace container never sees the Postgres or
+  Authentik secrets it does not need.
+- `deploy/keenyspace.env` (optional): app-only `KEENYSPACE_*` overrides such as compile
+  budgets, the backstop interval or the log level, loaded into the KeenySpace container
+  only. Start from `deploy/keenyspace.env.example`. Variables set explicitly under
+  `environment:` in the compose file cannot be overridden from here; set those in
+  `deploy/.env`.
+
+The `deploy/.env` settings you will most likely set:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
@@ -104,6 +115,22 @@ ANTHROPIC_API_KEY=sk-ant-...
 EOF
 ```
 
+For app tuning, create the override file:
+
+```bash
+cp deploy/keenyspace.env.example deploy/keenyspace.env
+chmod 600 deploy/keenyspace.env
+# uncomment e.g. KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS_PER_SPACE=...
+```
+
+**Existing installs:** earlier versions loaded all of `deploy/.env` into the KeenySpace
+container. Move every `KEENYSPACE_*` override line from `deploy/.env` to
+`deploy/keenyspace.env`, except the ones listed in the table above
+(`KEENYSPACE_AUTH__REQUIRED_GROUP`, `KEENYSPACE_AUTH__ADMIN_GROUP`,
+`KEENYSPACE_METRICS_PORT`, `KEENYSPACE_COMPILE__PROVIDER`, `KEENYSPACE_COMPILE__MODEL`,
+`KEENYSPACE_ADMIN_API_ENABLED`) and the secrets, which stay in `deploy/.env`. Overrides
+left behind in `deploy/.env` are silently ignored.
+
 The group gate is on by default: OIDC users who are not members of `keenyspace-users`
 are rejected at login. Add your users to that group in Authentik after first boot (see
 the production hardening section of [docs/oidc-authentik-setup.md](oidc-authentik-setup.md)).
@@ -121,7 +148,7 @@ docker compose -f deploy/docker-compose.yml up -d
 ```
 
 The first run builds the KeenySpace image from source and pulls the pinned images for
-Postgres 17, Authentik 2026.2, Redis, and Caddy. Authentik takes 60-90 seconds to become
+Postgres 17, Authentik 2026.2 (with its own Postgres 16), and Caddy. Authentik takes 60-90 seconds to become
 healthy on first boot; the KeenySpace server waits for it (`depends_on` healthchecks).
 
 ### Network exposure
@@ -152,8 +179,14 @@ All persistent state lives in named Docker volumes:
 | `postgres-data` | KeenySpace Postgres: workspace registry, users, hashed API keys, audit log, compile cursors | Yes — covered by `keenyspace backup` |
 | `authentik-postgresql` | Authentik database: users, groups, providers | Yes — IdP state, not covered by `keenyspace backup` |
 | `authentik-media`, `authentik-templates`, `authentik-certs` | Authentik media, templates, certificates | Recommended |
-| `authentik-redis` | Authentik task queue cache | No (rebuildable) |
 | `caddy-data`, `caddy-config` | Let's Encrypt certificates and Caddy state | Recommended (avoids re-issuing certificates) |
+
+Authentik 2025.10 and later no longer use Redis, so the stack has no Redis service.
+Installs upgraded from an older compose file still have an orphaned `authentik-redis`
+container and volume. Remove the container with
+`docker compose -f deploy/docker-compose.yml up -d --remove-orphans`. The leftover
+volume holds only disposable cache data; delete it with `docker volume rm` once the
+upgraded stack is healthy.
 
 `docker compose down -v` destroys all of these. See [docs/backup-restore.md](backup-restore.md)
 before doing anything destructive.

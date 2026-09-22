@@ -21,8 +21,8 @@ blueprint on every boot and needs no backup.
 
 **Step 1: Enable the admin API.** The backup endpoint (`POST /v1/admin/backup`) is only
 mounted when `KEENYSPACE_ADMIN_API_ENABLED=1` is set in the server environment —
-without it the CLI gets a 404. Add the flag to `deploy/.env` (the compose file injects
-it via `env_file`) and restart the server:
+without it the CLI gets a 404. Add the flag to `deploy/.env` (the compose file substitutes
+it into the server's `environment:`) and restart the server:
 
 ```bash
 echo 'KEENYSPACE_ADMIN_API_ENABLED=1' >> deploy/.env

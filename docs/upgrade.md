@@ -16,7 +16,6 @@ Three rules govern every upgrade:
 | Authentik | `ghcr.io/goauthentik/server:2026.2.7` | Server and worker must always run the same tag |
 | Postgres (KeenySpace) | `postgres:17.2-alpine` | Major Postgres upgrades require a dump/restore cycle, not just a tag bump |
 | Postgres (Authentik) | `postgres:16.15-alpine` | Same caveat |
-| Redis (Authentik) | `redis:8.10.2-alpine` | Not used by Authentik 2025.10+; kept until removed from the stack |
 | Caddy | `caddy:2.11.4-alpine` | |
 
 Never switch any of these to `:latest`. An unattended `docker compose pull` against

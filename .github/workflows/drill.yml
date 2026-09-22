@@ -10,6 +10,9 @@ permissions:
 jobs:
   backup-restore-drill:
     runs-on: ubuntu-24.04
+    env:
+      # Compose (and the drill script's re-up) reuse the image built below.
+      KEENYSPACE_IMAGE: keenyspace:drill
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -127,6 +130,9 @@ jobs:
 
   proxy-test-caddy:
     runs-on: ubuntu-24.04
+    env:
+      # Compose (and the drill script's re-up) reuse the image built below.
+      KEENYSPACE_IMAGE: keenyspace:drill
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -179,6 +185,9 @@ jobs:
 
   proxy-test-nginx:
     runs-on: ubuntu-24.04
+    env:
+      # Compose (and the drill script's re-up) reuse the image built below.
+      KEENYSPACE_IMAGE: keenyspace:drill
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -194,7 +203,7 @@ jobs:
           COMPOSE_PROJECT_NAME: ks-nginx
           KEENYSPACE_ADMIN_API_ENABLED: "1"
         run: |
-          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml up -d keenyspace postgres authentik authentik-worker authentik-postgresql authentik-redis
+          docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.drill.yml up -d keenyspace postgres authentik authentik-worker authentik-postgresql
           until curl -sf http://localhost:8000/healthz; do sleep 2; done
           docker run -d --name ks-nginx-proxy \
             --network ks-nginx_default \

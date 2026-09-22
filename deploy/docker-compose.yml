@@ -1,16 +1,19 @@
 services:
   keenyspace:
+    # `build:` builds from source when the image is missing; KEENYSPACE_IMAGE lets CI
+    # (or an operator) run a prebuilt image instead of rebuilding.
+    image: ${KEENYSPACE_IMAGE:-keenyspace:local}
     build:
       context: ..
       dockerfile: deploy/Dockerfile
     ports:
       - "127.0.0.1:8000:8000"
-    # Optional local overrides + secrets (gitignored). Any KEENYSPACE_* var here
-    # (e.g. KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS_PER_SPACE for the daily per-workspace
-    # output budget, or KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS_PER_CALL for the single-call cap)
-    # is injected into the container. Lower precedence than `environment:` below.
+    # Optional app-only overrides (gitignored, see keenyspace.env.example), e.g.
+    # KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS_PER_SPACE. Lower precedence than
+    # `environment:` below. deploy/.env is NOT loaded into the container: it holds
+    # the Postgres and Authentik secrets and is only used for ${...} interpolation.
     env_file:
-      - path: .env
+      - path: keenyspace.env
         required: false
     environment:
       KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:${POSTGRES_PASSWORD:?run deploy/gen-secrets.sh}@postgres/keenyspace
@@ -80,24 +83,10 @@ services:
       start_period: 20s
     restart: unless-stopped
 
-  authentik-redis:
-    image: redis:8.10.2-alpine
-    command: --save 60 1 --loglevel warning
-    volumes:
-      - authentik-redis:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
-    restart: unless-stopped
-
   authentik:
     image: ghcr.io/goauthentik/server:2026.2.7
     command: server
     environment:
-      AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__NAME: authentik
@@ -132,15 +121,12 @@ services:
     depends_on:
       authentik-postgresql:
         condition: service_healthy
-      authentik-redis:
-        condition: service_healthy
     restart: unless-stopped
 
   authentik-worker:
     image: ghcr.io/goauthentik/server:2026.2.7
     command: worker
     environment:
-      AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__NAME: authentik
@@ -156,8 +142,6 @@ services:
       - ./authentik/blueprints/branding:/data/media/public/keeny:ro
     depends_on:
       authentik-postgresql:
-        condition: service_healthy
-      authentik-redis:
         condition: service_healthy
     restart: unless-stopped
 
@@ -222,7 +206,6 @@ volumes:
   keenyspace-fs:
   postgres-data:
   authentik-postgresql:
-  authentik-redis:
   authentik-media:
   authentik-templates:
   authentik-certs:
