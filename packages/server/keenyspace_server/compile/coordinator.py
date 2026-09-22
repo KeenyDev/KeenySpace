@@ -143,7 +143,7 @@ class CompileCoordinator:
             )
 
         ws_state = await self._workspace_state(ws_uuid)
-        if ws_state == "paused":
+        if ws_state in ("paused", "archived"):
             return CompileTriggerResponse(job_id=str(uuid4()), status="paused")
 
         lock = self._locks[ws_uuid]
@@ -263,7 +263,7 @@ class CompileCoordinator:
         """APScheduler entry point (Plan 05). Triggers a compile pass against every active workspace."""
         async with get_db_session() as session:
             rows = (await session.execute(
-                select(Workspace.uuid).where(Workspace.archived_at.is_(None))
+                select(Workspace.uuid).where(Workspace.status == "active")
             )).scalars().all()
         for ws_uuid in rows:
             try:
@@ -304,11 +304,14 @@ class CompileCoordinator:
         return root if root.is_dir() else None
 
     async def _workspace_state(self, ws_uuid: UUID) -> str:
+        """compile_state, except 'archived' for an archived workspace whatever its compile_state."""
         async with get_db_session() as session:
             row = (await session.execute(
-                select(Workspace.compile_state).where(Workspace.uuid == ws_uuid)
-            )).scalar_one_or_none()
-        return row or "idle"
+                select(Workspace.status, Workspace.compile_state).where(Workspace.uuid == ws_uuid)
+            )).one_or_none()
+        if row is None:
+            return "idle"
+        return "archived" if row.status == "archived" else row.compile_state
 
     async def _run_compile_pass(
         self,
@@ -518,6 +521,16 @@ class CompileCoordinator:
         plan_hash_value = cursor_row.pending_plan_hash
         if pending_last is None or plan_hash_value is None:
             raise CompileCursorConflictError(f"compile cursor for {ws_uuid} holds an incomplete intent")
+        if await self._workspace_state(ws_uuid) == "archived":
+            # Archive landed after the claim. The intent stays pending: unarchive restores
+            # the exact pages and WAL the plan was compiled from, so replaying it then is
+            # correct and free, whereas discarding it would re-buy the same slice from the LLM.
+            await self._release_running(ws_uuid)
+            log.info(
+                "compile.intent_deferred", workspace=str(ws_uuid), run_id=run_id,
+                reason="archived", wal_last_id=pending_last,
+            )
+            return CompileRunResult(status="paused", pages_written=0, plan_hash=plan_hash_value)
         await self._write_run_row(
             ws_uuid, run_id, started_at, source,
             status="running", pages_written=0,
@@ -626,7 +639,11 @@ class CompileCoordinator:
         async with get_db_session() as session:
             claimed = (await session.execute(
                 update(Workspace)
-                .where(Workspace.uuid == ws_uuid, Workspace.compile_state != "paused")
+                .where(
+                    Workspace.uuid == ws_uuid,
+                    Workspace.status == "active",
+                    Workspace.compile_state != "paused",
+                )
                 .values(compile_state="running")
                 .returning(Workspace.uuid)
             )).scalar_one_or_none()

@@ -48,6 +48,24 @@ async def test_trigger_returns_paused_when_workspace_state_is_paused(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_trigger_refuses_archived_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = CompileCoordinator(CompileSettings())
+
+    async def _fake_root(self: CompileCoordinator, ws_uuid: UUID) -> Path:
+        return Path("/tmp")
+
+    async def _fake_state(self: CompileCoordinator, ws_uuid: UUID) -> str:
+        return "archived"
+
+    monkeypatch.setattr(CompileCoordinator, "_workspace_root", _fake_root)
+    monkeypatch.setattr(CompileCoordinator, "_workspace_state", _fake_state)
+
+    resp = await c.trigger(uuid4(), source="backstop")
+    assert resp.status == "paused"
+    assert c._tasks == set()
+
+
+@pytest.mark.asyncio
 async def test_trigger_raises_when_workspace_root_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     c = CompileCoordinator(CompileSettings())
 

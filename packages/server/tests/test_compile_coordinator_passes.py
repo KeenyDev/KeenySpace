@@ -591,3 +591,86 @@ async def test_backstop_caps_concurrent_agent_runs(
         assert calls == 4
         for ws_uuid, entry_id in entry_ids.items():
             assert await _cursor(ws_uuid) == entry_id
+
+
+async def _archive_keeping_compile_idle(ws_uuid: UUID) -> None:
+    # An archived row that is not compile-paused: the state a lost pause or a manual
+    # edit leaves behind, and the one the status gate exists for.
+    async with get_db_session() as session:
+        await session.execute(
+            update(Workspace).where(Workspace.uuid == ws_uuid)
+            .values(status="archived", archived_at=datetime.now(UTC), compile_state="idle")
+        )
+        await session.commit()
+
+
+async def test_archived_workspace_is_never_claimed(
+    app: Any, pg_url: str, fs_root: Path, fake_agent: FakeCompileAgent,
+) -> None:
+    async with _serving(app, pg_url) as (client, coordinator):
+        slug, ws_uuid = await _create_workspace(client)
+        await _append(client, slug, "fact")
+        await _archive_keeping_compile_idle(ws_uuid)
+        ws_root = fs_root / "workspaces" / str(ws_uuid)
+
+        assert (await coordinator.trigger(ws_uuid, source="http_api")).status == "paused"
+        await coordinator.backstop_all_workspaces()
+        await _settle(coordinator)
+        result = await coordinator._run_compile_pass(ws_uuid, ws_root, str(uuid4()), "append")
+
+        assert result.status == "paused"
+        assert fake_agent.wal_texts == []
+        assert await _runs(ws_uuid) == []
+        assert not (ws_root / "notes").exists()
+        assert (await _workspace(ws_uuid)).compile_state == "idle"
+
+
+async def test_pending_intent_is_kept_while_archived_and_replayed_after_unarchive(
+    app: Any, pg_url: str, fs_root: Path, fake_agent: FakeCompileAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with _serving(app, pg_url) as (client, coordinator):
+        slug, ws_uuid = await _create_workspace(client)
+        ws_root = fs_root / "workspaces" / str(ws_uuid)
+        entry_id = await _append(client, slug, "fact")
+
+        async def _crash(*_: Any, **__: Any) -> None:
+            raise _SimulatedCrash
+
+        real_advance, real_claim = coordinator._advance_cursor, coordinator._claim_running
+        monkeypatch.setattr(coordinator, "_advance_cursor", _crash)
+        with pytest.raises(_SimulatedCrash):
+            await coordinator._run_compile_pass(ws_uuid, ws_root, str(uuid4()), "test")
+        monkeypatch.setattr(coordinator, "_advance_cursor", real_advance)
+        page = ws_root / "notes" / "pass-1.md"
+        written = page.read_bytes()
+        page.unlink()
+        archive = await client.post(f"/v1/api/workspaces/{slug}/archive")
+        assert archive.status_code == 200, archive.text
+
+        async def _claim_before_archive(ws: UUID) -> bool:
+            # The archive commits between the claim and the replay.
+            return True
+
+        monkeypatch.setattr(coordinator, "_claim_running", _claim_before_archive)
+        result = await coordinator._run_compile_pass(ws_uuid, ws_root, str(uuid4()), "backstop")
+        monkeypatch.setattr(coordinator, "_claim_running", real_claim)
+
+        assert result.status == "paused"
+        assert not page.exists()
+        assert (await _pending_intent(ws_uuid))[0] == entry_id
+        assert await _cursor(ws_uuid) is None
+        assert [r.status for r in await _runs(ws_uuid)] == ["abort_interrupted"]
+        ws = await _workspace(ws_uuid)
+        assert (ws.status, ws.compile_state, ws.compile_paused_reason) == ("archived", "paused", "archived")
+
+        unarchive = await client.post(f"/v1/api/workspaces/{slug}/unarchive")
+        assert unarchive.status_code == 200, unarchive.text
+        await coordinator.trigger(ws_uuid, source="backstop")
+        await _settle(coordinator)
+
+        assert len(fake_agent.wal_texts) == 1
+        assert page.read_bytes() == written
+        assert await _cursor(ws_uuid) == entry_id
+        assert await _pending_intent(ws_uuid) == (None, None)
+        assert [r.status for r in await _runs(ws_uuid)] == ["abort_interrupted", "success"]
