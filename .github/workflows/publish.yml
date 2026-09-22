@@ -6,11 +6,17 @@ on:
       - 'v*'
 
 permissions:
-  packages: write
   contents: read
 
 jobs:
+  drill:
+    uses: ./.github/workflows/drill.yml
+
   build:
+    needs: drill
+    permissions:
+      packages: write
+      contents: read
     strategy:
       matrix:
         include:
@@ -40,6 +46,9 @@ jobs:
   merge:
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v4
@@ -74,14 +83,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/keenydev/keenyspace
-          tags: |
-            type=semver,pattern={{version}}
       - uses: softprops/action-gh-release@v2
         with:
-          prerelease: true
-          body_path: docs/release-notes/v0.1.0-alpha.1.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body_path: docs/release-notes/${{ github.ref_name }}.md

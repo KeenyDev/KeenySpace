@@ -2,7 +2,15 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -13,14 +21,15 @@ jobs:
         with:
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --all-packages --all-extras
+        run: uv sync --locked --all-packages --all-extras
       - name: ruff check
         run: uv run ruff check .
       - name: mypy
         run: |
           uv run mypy --strict \
             packages/server/keenyspace_server \
-            packages/client/keenyspace
+            packages/client/keenyspace \
+            packages/shared/keenyspace_shared
 
   test-server:
     runs-on: ubuntu-24.04
@@ -46,7 +55,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --all-packages --all-extras
+        run: uv sync --locked --all-packages --all-extras
       - name: Install PostgreSQL 17 client
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -67,6 +76,6 @@ jobs:
         with:
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --all-packages --all-extras
+        run: uv sync --locked --all-packages --all-extras
       - name: pytest client
         run: uv run --package keenyspace pytest packages/client/tests/ -x -q

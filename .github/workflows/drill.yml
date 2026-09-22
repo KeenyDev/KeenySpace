@@ -1,10 +1,11 @@
 name: Release Drill
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   backup-restore-drill:
@@ -16,7 +17,7 @@ jobs:
           enable-cache: true
       - name: Install keenyspace CLI
         run: |
-          uv sync --all-packages --all-extras
+          uv sync --locked --all-packages --all-extras
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Build image
         run: docker build -f deploy/Dockerfile -t keenyspace:drill .

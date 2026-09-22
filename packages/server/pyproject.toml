@@ -62,10 +62,6 @@ module = ["apscheduler.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["keenyspace_shared.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = ["joserfc.*"]
 ignore_missing_imports = true
 
