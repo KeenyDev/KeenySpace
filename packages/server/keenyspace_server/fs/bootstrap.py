@@ -48,7 +48,10 @@ def ensure_fs_root_layout(
             manifest["default"] = shipped
             _save_manifest(blueprints_root, manifest)
 
-    _sweep_stale_tmp(fs_root / ".tmp")
+    _sweep_stale_tmp(fs_root / ".tmp", ("import_", "upload_"))
+    # Admin backup scratch only; restore-*.aside dirs are recovery copies of a
+    # failed restore and must survive a restart.
+    _sweep_stale_tmp(fs_root / "tmp", ("backup-",))
 
 
 def _digest_file(path: Path) -> str:
@@ -215,8 +218,8 @@ def _merge_blueprint_tree(
                 )
 
 
-def _sweep_stale_tmp(tmp_root: Path) -> None:
-    """Reap stale ``import_*`` / ``upload_*`` entries left by killed requests.
+def _sweep_stale_tmp(tmp_root: Path, prefixes: tuple[str, ...]) -> None:
+    """Reap stale scratch entries named ``<prefix>*`` left by killed requests.
 
     WR-14: the in-request ``finally`` blocks in ``api/workspace_import.py``
     and ``ws/import_.py`` only run if the worker survives long enough to
@@ -231,7 +234,7 @@ def _sweep_stale_tmp(tmp_root: Path) -> None:
     if not tmp_root.is_dir():
         return
     for entry in tmp_root.iterdir():
-        if not entry.name.startswith(("import_", "upload_")):
+        if not entry.name.startswith(prefixes):
             continue
         try:
             if entry.is_dir() and not entry.is_symlink():

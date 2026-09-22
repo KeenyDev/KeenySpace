@@ -243,6 +243,11 @@ _COPY_END_LINES = (b"\\.\n", b"\\.\r\n")
 class _PsqlScriptScanner:
     """Conservative model of how psql splits a plain-format dump.
 
+    Keep in step with the schema: the scanner accepts today's dumps only
+    because no table DDL contains backslashes, ``$`` or ``BEGIN``. A migration
+    that adds e.g. a regex CHECK constraint or a function makes every backup
+    unrestorable (422 ``unsafe_pg_dump``) until the scanner models that syntax.
+
     psql treats a backslash outside quotes as the start of a meta-command
     anywhere on a line (``SELECT 1; \\! id`` runs a shell), while COPY data
     lines are passed through untouched and legitimately full of backslash
@@ -457,11 +462,14 @@ def _swap_in_restored_trees(
             swap.replace(item, target / item.name)
 
 
-async def _rollback_fs_swap(swap: _FsSwap, aside_dir: Path) -> None:
+async def _rollback_fs_swap(swap: _FsSwap, aside_dir: Path) -> bool:
+    """Undo ``swap``; return False (after logging) if the old trees could not be put back."""
     try:
         await asyncio.to_thread(swap.rollback)
     except Exception:
         log.exception("admin.restore.fs_rollback_failed", aside_dir=str(aside_dir))
+        return False
+    return True
 
 
 def _wipe_statements() -> bytes:
@@ -538,7 +546,7 @@ async def _run_pg_dump(db_url: str, out_path: Path) -> None:
     async def _drain(stdout: asyncio.StreamReader) -> None:
         with out_path.open("wb") as pg_fp:
             while pg_chunk := await stdout.read(UPLOAD_CHUNK_BYTES):
-                pg_fp.write(pg_chunk)
+                await asyncio.to_thread(pg_fp.write, pg_chunk)
 
     try:
         returncode, pg_err = await _run_pg_client(
@@ -666,18 +674,22 @@ async def admin_backup(
             alembic_head=alembic_head,
             created_by=user.sub,
         )
-        archive_size = archive_path.stat().st_size
-    except BaseException:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
+        archive_fp = archive_path.open("rb")
+    finally:
+        # Starlette never closes a body iterator it has not started, so cleanup
+        # cannot live in the generator: a client gone before the first chunk
+        # would leave a full-size archive on the vault volume. The open handle
+        # keeps the unlinked archive readable until the stream finishes or the
+        # handle is garbage-collected.
+        await asyncio.to_thread(shutil.rmtree, tmp_dir, True)
+    archive_size = os.fstat(archive_fp.fileno()).st_size
 
     async def _stream() -> AsyncIterator[bytes]:
         total_bytes = 0
         try:
-            with archive_path.open("rb") as fp:
-                while chunk := await asyncio.to_thread(fp.read, UPLOAD_CHUNK_BYTES):
-                    total_bytes += len(chunk)
-                    yield chunk
+            while chunk := await asyncio.to_thread(archive_fp.read, UPLOAD_CHUNK_BYTES):
+                total_bytes += len(chunk)
+                yield chunk
             ADMIN_BACKUP_BYTES.inc(total_bytes)
             ADMIN_BACKUP_TOTAL.inc()
             log.info(
@@ -687,7 +699,7 @@ async def admin_backup(
                 workspace_count=workspace_count,
             )
         finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+            archive_fp.close()
 
     iso = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     return StreamingResponse(
@@ -726,7 +738,7 @@ async def admin_restore(
                 chunk = await file.read(UPLOAD_CHUNK_BYTES)
                 if not chunk:
                     break
-                fp.write(chunk)
+                await asyncio.to_thread(fp.write, chunk)
 
         # WR-07: tar.extractall walks the entire archive synchronously
         # (file IO + writes). Offload to a worker thread so the event
@@ -864,8 +876,20 @@ async def admin_restore(
                 replace_trees=wipe,
             )
             await _replay_dump(db_url, pg_dump_path, wipe=wipe)
-        except BaseException:
-            await _rollback_fs_swap(swap, aside_dir)
+        except BaseException as exc:
+            rolled_back = await _rollback_fs_swap(swap, aside_dir)
+            if not rolled_back and isinstance(exc, Exception):
+                ADMIN_RESTORE_TOTAL.labels(outcome="rollback_failed").inc()
+                raise HTTPException(
+                    500,
+                    {
+                        "error": "restore_rollback_failed",
+                        "detail": (
+                            "restore failed and the previous fs trees could not "
+                            f"be moved back; they are preserved in {aside_dir}"
+                        ),
+                    },
+                ) from exc
             raise
 
         # psql replayed a --clean dump: every table the pool's connections have

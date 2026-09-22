@@ -229,3 +229,28 @@ async def test_force_restore_psql_timeout_rolls_back_fs(
     assert await _workspace_slugs() == ["keep-me"]
     assert (ws_dir / "index.md").is_file()
     _assert_no_restore_scratch(fs_root)
+
+
+async def test_force_restore_reports_failed_fs_rollback(
+    client: AsyncClient, fs_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import keenyspace_server.api.admin as admin_mod
+
+    ws_dir = await _seed_workspace(client, fs_root)
+
+    def _broken_rollback(self: Any) -> None:
+        raise OSError("device busy")
+
+    monkeypatch.setattr(admin_mod._FsSwap, "rollback", _broken_rollback)
+    dump = b"SELECT * FROM table_that_does_not_exist;\n"
+
+    resp = await _force_restore(client, _archive(await _alembic_head(), pg_dump=dump))
+
+    assert resp.status_code == 500, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error"] == "restore_rollback_failed"
+    asides = [p for p in (fs_root / "tmp").iterdir() if p.name.endswith(".aside")]
+    assert len(asides) == 1
+    assert str(asides[0]) in detail["detail"]
+    assert (asides[0] / "0" / ws_dir.name / "index.md").is_file()
+    assert await _workspace_slugs() == ["keep-me"]
