@@ -15,12 +15,20 @@ from uuid import UUID
 import pytest
 import structlog.testing
 from keenyspace_server.auth import api_keys as api_keys_module
-from keenyspace_server.auth.api_keys import ApiKeyService, _compute_lookup_hash
+from keenyspace_server.auth.api_keys import (
+    ApiKeyService,
+    StaleCredentialError,
+    _compute_lookup_hash,
+)
 from keenyspace_server.db.session import get_db_session
 from sqlalchemy import text
 
 PEPPER = "test-pepper-32chars-padded-here!"
 ADMIN_GROUPS = ["keenyspace-users", "keenyspace-admins"]
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
 
 
 def _service(**kwargs: Any) -> ApiKeyService:
@@ -246,7 +254,7 @@ async def test_mint_and_audit_commit_together(
     monkeypatch.setattr(api_keys_module, "write_audit", _failing_audit)
 
     with pytest.raises(RuntimeError, match="audit store unavailable"):
-        await _service().mint(user_sub=sub, name="atomic")
+        await _service().mint(user_sub=sub, name="atomic", credential_issued_at=_now())
 
     assert len(await _key_rows(sub)) == 1, "the minted key must not persist without its audit row"
 
@@ -275,7 +283,9 @@ async def test_mint_writes_audit_row_with_expiry(seed_api_key) -> None:
     sub, _ = await seed_api_key(groups=None)
     expires_at = datetime.now(UTC) + timedelta(days=7)
 
-    minted = await _service().mint(user_sub=sub, name="exp", expires_at=expires_at)
+    minted = await _service().mint(
+        user_sub=sub, name="exp", credential_issued_at=_now(), expires_at=expires_at
+    )
 
     rows = await _audit_rows("auth.api_key.minted")
     assert [(r.actor_sub, r.payload) for r in rows] == [
@@ -285,7 +295,7 @@ async def test_mint_writes_audit_row_with_expiry(seed_api_key) -> None:
 
 async def test_revoke_all_is_audited_with_target_and_keys(seed_api_key) -> None:
     sub, _ = await seed_api_key(groups=None)
-    other = await _service().mint(user_sub=sub, name="second")
+    other = await _service().mint(user_sub=sub, name="second", credential_issued_at=_now())
 
     revoked = await _service().revoke_all_for_user(sub, actor_sub="admin-sub")
 
@@ -304,3 +314,65 @@ async def test_revoke_all_without_keys_is_still_audited(seed_api_key) -> None:
 
     (row,) = await _audit_rows("admin.api_keys.revoked_all")
     assert row.payload == {"target_sub": "nobody", "revoked_count": 0, "key_ids": []}
+
+
+async def test_revoke_all_writes_an_empty_snapshot(seed_api_key) -> None:
+    sub, _ = await seed_api_key(groups=ADMIN_GROUPS)
+    before = _now()
+
+    await _service().revoke_all_for_user(sub, actor_sub="admin-sub")
+
+    async with get_db_session() as session:
+        row = (
+            await session.execute(
+                text("SELECT groups, groups_seen_at FROM users WHERE sub = :s"), {"s": sub}
+            )
+        ).one()
+    assert row.groups == []
+    assert row.groups_seen_at >= before
+
+
+async def test_token_issued_before_revoke_all_cannot_mint(seed_api_key) -> None:
+    sub, _ = await seed_api_key(groups=ADMIN_GROUPS, groups_seen_at=_now() - timedelta(hours=1))
+    token_iat = _now() - timedelta(minutes=5)
+    await _service().revoke_all_for_user(sub, actor_sub="admin-sub")
+
+    with pytest.raises(StaleCredentialError):
+        await _service().mint(user_sub=sub, name="persist", credential_issued_at=token_iat)
+
+    assert all(revoked_at is not None for _, revoked_at in await _key_rows(sub))
+
+
+async def test_token_issued_after_revoke_all_can_mint(seed_api_key) -> None:
+    sub, _ = await seed_api_key(groups=ADMIN_GROUPS)
+    await _service().revoke_all_for_user(sub, actor_sub="admin-sub")
+
+    minted = await _service().mint(
+        user_sub=sub, name="fresh", credential_issued_at=_now() + timedelta(seconds=1)
+    )
+
+    user = await _service().verify(minted["key"])
+    assert user is not None
+    assert user.groups == [], "the new key inherits the empty snapshot until a newer login"
+
+
+async def test_mint_for_user_without_snapshot_is_allowed(seed_api_key) -> None:
+    sub, _ = await seed_api_key(groups=None)
+
+    minted = await _service().mint(user_sub=sub, name="k", credential_issued_at=_now())
+
+    assert minted["key"].startswith("ks_live_")
+
+
+async def test_last_used_tracking_is_bounded(
+    seed_api_key, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api_keys_module, "LAST_USED_TRACKED_MAX_ENTRIES", 1)
+    service = _service()
+    _, first = await seed_api_key(groups=None)
+    _, second = await seed_api_key(groups=None)
+
+    assert await service.verify(first) is not None
+    assert await service.verify(second) is not None
+
+    assert len(service._last_used_writes) == 1

@@ -135,18 +135,20 @@ class OidcClient:
         display_name = (
             decoded.claims.get("preferred_username") or decoded.claims.get("name") or sub_value
         )
+        issued_at = datetime.fromtimestamp(float(decoded.claims["iat"]), UTC)
         raw_groups = decoded.claims.get("groups")
         groups_seen_at: datetime | None = None
         groups: list[str] = []
         if isinstance(raw_groups, list):
             groups = [g for g in raw_groups if isinstance(g, str)]
-            groups_seen_at = datetime.now(UTC)
+            groups_seen_at = issued_at
         return User(
             sub=sub_value,
             _display_name=str(display_name),
             source="oidc",
             groups=groups,
             groups_seen_at=groups_seen_at,
+            issued_at=issued_at,
         )
 
     async def refresh(self, refresh_token: str) -> dict[str, Any] | None:

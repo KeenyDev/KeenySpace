@@ -967,4 +967,6 @@ async def admin_revoke_user_api_keys(
 ) -> ApiKeyRevokeAllResponse:
     service: ApiKeyService = request.app.state.api_key_service
     revoked = await service.revoke_all_for_user(body.sub, actor_sub=request.user.sub)
+    group_snapshots: GroupSnapshotStore = request.app.state.group_snapshots
+    group_snapshots.forget(body.sub)
     return ApiKeyRevokeAllResponse(sub=body.sub, revoked=revoked)

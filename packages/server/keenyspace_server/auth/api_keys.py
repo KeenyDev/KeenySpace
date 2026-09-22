@@ -10,6 +10,11 @@ last seen in an OIDC token, see auth/group_snapshot.py), so group gates apply
 to keys the same way they apply to OIDC tokens. Successful verifications are
 cached in-process for a short TTL because argon2 costs ~37 ms and 64 MiB per
 call; revocation drops the cached entries immediately.
+
+Minting and an admin revoke-all serialize on a per-user advisory lock. Revoke-all
+also writes an empty group snapshot stamped now, and minting refuses a token
+issued before the owner's snapshot, so a token that predates an offboarding can
+neither mint a key the revoke-all missed nor one that passes the group gates.
 """
 
 from __future__ import annotations
@@ -30,7 +35,8 @@ from uuid import UUID, uuid4
 import structlog
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import CursorResult, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.auth.audit import write_audit
@@ -43,6 +49,13 @@ _PH = PasswordHasher()
 
 VERIFIED_CACHE_TTL_SECONDS = 60.0
 VERIFIED_CACHE_MAX_ENTRIES = 1024
+LAST_USED_TRACKED_MAX_ENTRIES = 4096
+# First key of the two-int advisory lock taken per user by mint and revoke-all.
+_USER_KEYS_LOCK_NAMESPACE = 0x6B730001
+
+
+class StaleCredentialError(Exception):
+    """The token predates the owner's newest group snapshot, so it may not mint keys."""
 
 
 def _generate_key_body() -> str:
@@ -57,7 +70,8 @@ def _compute_lookup_hash(body: str, pepper: str) -> str:
     return hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
 
 
-def _snapshot_groups(raw: object) -> tuple[str, ...] | None:
+def snapshot_groups(raw: object) -> tuple[str, ...] | None:
+    """Stored users.groups as a tuple of names; None when no snapshot exists."""
     if not isinstance(raw, list):
         return None
     return tuple(g for g in raw if isinstance(g, str))
@@ -120,7 +134,7 @@ class ApiKeyService:
         self._db_factory = db_factory
         self._debounce = debounce_seconds
         self._snapshot_max_age = group_snapshot_max_age
-        self._last_used_writes: dict[UUID, datetime] = {}
+        self._last_used_writes: OrderedDict[UUID, datetime] = OrderedDict()
         self._verified = _VerifiedKeyCache(
             ttl_seconds=VERIFIED_CACHE_TTL_SECONDS,
             max_entries=VERIFIED_CACHE_MAX_ENTRIES,
@@ -130,8 +144,16 @@ class ApiKeyService:
         self._invalidation_epoch = 0
 
     async def mint(
-        self, *, user_sub: str, name: str, expires_at: datetime | None = None
+        self,
+        *,
+        user_sub: str,
+        name: str,
+        credential_issued_at: datetime,
+        expires_at: datetime | None = None,
     ) -> Mapping[str, Any]:
+        """Create a key for `user_sub` on the strength of an OIDC token issued at
+        `credential_issued_at`. Raises StaleCredentialError when the owner's group
+        snapshot is newer than that token."""
         body = _generate_key_body()
         plaintext = _full_key(body)
         lookup_hash = _compute_lookup_hash(body, self._pepper)
@@ -149,6 +171,17 @@ class ApiKeyService:
             expires_at=expires_at,
         )
         async with self._db_factory() as session:
+            await _lock_user_keys(session, user_sub)
+            seen_at = (
+                await session.execute(
+                    select(UserRow.groups_seen_at).where(UserRow.sub == user_sub)
+                )
+            ).scalar_one_or_none()
+            if seen_at is not None and seen_at > credential_issued_at:
+                log.warning(
+                    "auth.api_key.mint_refused", reason="token_predates_snapshot", user_sub=user_sub
+                )
+                raise StaleCredentialError(user_sub)
             session.add(row)
             await write_audit(
                 session,
@@ -235,7 +268,7 @@ class ApiKeyService:
             await asyncio.to_thread(_PH.verify, row.hash, body)
         except VerifyMismatchError, VerificationError, InvalidHashError:
             return None
-        groups = _snapshot_groups(row.groups)
+        groups = snapshot_groups(row.groups)
         entry = _VerifiedKey(
             key_id=row.id,
             user_sub=row.user_sub,
@@ -297,8 +330,25 @@ class ApiKeyService:
         return True
 
     async def revoke_all_for_user(self, user_sub: str, *, actor_sub: str) -> int:
+        """Revoke every key of `user_sub` and replace its group snapshot with an
+        empty one stamped now; returns the number of keys revoked."""
         now = datetime.now(UTC)
+        tombstone = pg_insert(UserRow).values(
+            sub=user_sub,
+            display_name=user_sub,
+            email=None,
+            source="oidc",
+            created_at=now,
+            groups=[],
+            groups_seen_at=now,
+        )
+        tombstone = tombstone.on_conflict_do_update(
+            index_elements=[UserRow.sub],
+            set_={"groups": tombstone.excluded.groups, "groups_seen_at": now},
+        )
         async with self._db_factory() as session:
+            await _lock_user_keys(session, user_sub)
+            await session.execute(tombstone)
             result = await session.execute(
                 update(ApiKey)
                 .where(ApiKey.user_sub == user_sub, ApiKey.revoked_at.is_(None))
@@ -341,8 +391,17 @@ class ApiKeyService:
         if last is not None and (now - last).total_seconds() < self._debounce:
             return
         self._last_used_writes[key_id] = now
+        self._last_used_writes.move_to_end(key_id)
+        while len(self._last_used_writes) > LAST_USED_TRACKED_MAX_ENTRIES:
+            self._last_used_writes.popitem(last=False)
         async with self._db_factory() as session:
             await session.execute(
                 update(ApiKey).where(ApiKey.id == key_id).values(last_used_at=now)
             )
             await session.commit()
+
+
+async def _lock_user_keys(session: AsyncSession, user_sub: str) -> None:
+    await session.execute(
+        select(func.pg_advisory_xact_lock(_USER_KEYS_LOCK_NAMESPACE, func.hashtext(user_sub)))
+    )

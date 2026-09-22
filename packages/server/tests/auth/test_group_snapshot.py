@@ -1,4 +1,8 @@
-"""GroupSnapshotStore: OIDC groups claim -> users.groups / users.groups_seen_at."""
+"""GroupSnapshotStore: OIDC groups claim -> users.groups / users.groups_seen_at.
+
+A snapshot is stamped with the asserting token's iat and only a strictly newer
+token may replace it.
+"""
 
 from __future__ import annotations
 
@@ -6,22 +10,30 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from keenyspace_server.auth.group_snapshot import GroupSnapshotStore
+from keenyspace_server.auth.api_keys import ApiKeyService
+from keenyspace_server.auth.group_snapshot import GroupSnapshot, GroupSnapshotStore
 from keenyspace_server.auth.user import User
 from keenyspace_server.db.session import get_db_session
 from sqlalchemy import text
 
 pytestmark = pytest.mark.usefixtures("_engine_lifespan_ctx")
 
+T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 
-def _oidc_user(sub: str, groups: list[str], seen_at: datetime | None = None) -> User:
+
+def _token_user(sub: str, groups: list[str], iat: datetime) -> User:
     return User(
         sub=sub,
         _display_name="Alice",
         source="oidc",
         groups=groups,
-        groups_seen_at=seen_at or datetime.now(UTC),
+        groups_seen_at=iat,
+        issued_at=iat,
     )
+
+
+def _store(**kwargs: Any) -> GroupSnapshotStore:
+    return GroupSnapshotStore(db_factory=get_db_session, **kwargs)
 
 
 async def _row(sub: str) -> Any:
@@ -37,20 +49,20 @@ async def _row(sub: str) -> Any:
         ).one()
 
 
-async def test_first_record_creates_user_with_snapshot() -> None:
-    seen = datetime.now(UTC)
-
-    wrote = await GroupSnapshotStore(db_factory=get_db_session).record(
-        _oidc_user("u-new", ["b", "a", "a"], seen)
-    )
+async def test_first_observation_creates_user_with_snapshot_stamped_with_iat() -> None:
+    snapshot, wrote = await _store().observe(_token_user("u-new", ["b", "a", "a"], T0))
 
     row = await _row("u-new")
-    assert wrote is True
-    assert (row.display_name, row.source, row.groups) == ("Alice", "oidc", ["a", "b"])
-    assert row.groups_seen_at == seen
+    assert (wrote, snapshot) == (True, GroupSnapshot(("a", "b"), T0))
+    assert (row.display_name, row.source, row.groups, row.groups_seen_at) == (
+        "Alice",
+        "oidc",
+        ["a", "b"],
+        T0,
+    )
 
 
-async def test_record_keeps_profile_fields_of_existing_user() -> None:
+async def test_observation_keeps_profile_fields_of_existing_user() -> None:
     async with get_db_session() as session:
         await session.execute(
             text(
@@ -60,37 +72,80 @@ async def test_record_keeps_profile_fields_of_existing_user() -> None:
         )
         await session.commit()
 
-    await GroupSnapshotStore(db_factory=get_db_session).record(_oidc_user("u-old", ["g"]))
+    await _store().observe(_token_user("u-old", ["g"], T0))
 
     row = await _row("u-old")
     assert (row.display_name, row.email, row.groups) == ("Browser Name", "old@example.com", ["g"])
 
 
-async def test_unchanged_groups_are_debounced() -> None:
-    store = GroupSnapshotStore(db_factory=get_db_session, debounce_seconds=300)
-    first_seen = datetime.now(UTC) - timedelta(minutes=1)
-    await store.record(_oidc_user("u-deb", ["g"], first_seen))
+async def test_older_token_cannot_overwrite_newer_snapshot() -> None:
+    await _store().observe(_token_user("u-roll", [], T0 + timedelta(minutes=10)))
 
-    wrote = await store.record(_oidc_user("u-deb", ["g"]))
+    snapshot, wrote = await _store().observe(
+        _token_user("u-roll", ["keenyspace-admins"], T0)
+    )
 
     assert wrote is False
-    assert (await _row("u-deb")).groups_seen_at == first_seen
+    assert snapshot == GroupSnapshot((), T0 + timedelta(minutes=10))
+    row = await _row("u-roll")
+    assert (row.groups, row.groups_seen_at) == ([], T0 + timedelta(minutes=10))
 
 
-async def test_changed_groups_are_written_immediately() -> None:
-    store = GroupSnapshotStore(db_factory=get_db_session, debounce_seconds=300)
-    await store.record(_oidc_user("u-chg", ["keenyspace-admins"]))
+async def test_older_token_is_refused_by_the_process_that_saw_the_newer_one() -> None:
+    store = _store()
+    await store.observe(_token_user("u-mem", [], T0 + timedelta(minutes=10)))
 
-    wrote = await store.record(_oidc_user("u-chg", []))
+    snapshot, wrote = await store.observe(_token_user("u-mem", ["keenyspace-admins"], T0))
 
-    assert wrote is True
+    assert (wrote, snapshot.groups) == (False, ())
+
+
+async def test_older_token_cannot_overwrite_revoke_all_tombstone() -> None:
+    service = ApiKeyService(pepper="p" * 32, db_factory=get_db_session)
+    before_revoke = datetime.now(UTC) - timedelta(minutes=1)
+    await _store().observe(_token_user("u-off", ["keenyspace-admins"], before_revoke))
+
+    await service.revoke_all_for_user("u-off", actor_sub="admin")
+    snapshot, wrote = await _store().observe(
+        _token_user("u-off", ["keenyspace-admins"], before_revoke)
+    )
+
+    assert (wrote, snapshot.groups) == (False, ())
+    assert (await _row("u-off")).groups == []
+
+
+async def test_newer_token_replaces_snapshot() -> None:
+    store = _store()
+    await store.observe(_token_user("u-chg", ["keenyspace-admins"], T0))
+
+    snapshot, wrote = await store.observe(_token_user("u-chg", [], T0 + timedelta(seconds=1)))
+
+    assert (wrote, snapshot.groups) == (True, ())
     assert (await _row("u-chg")).groups == []
 
 
-async def test_forget_all_forces_the_next_write() -> None:
-    store = GroupSnapshotStore(db_factory=get_db_session, debounce_seconds=300)
-    await store.record(_oidc_user("u-fgt", ["g"]))
+async def test_unchanged_groups_from_newer_token_are_debounced() -> None:
+    store = _store(debounce_seconds=300)
+    await store.observe(_token_user("u-deb", ["g"], T0))
 
-    store.forget_all()
+    _, wrote = await store.observe(_token_user("u-deb", ["g"], T0 + timedelta(minutes=1)))
 
-    assert await store.record(_oidc_user("u-fgt", ["g"])) is True
+    assert wrote is False
+    assert (await _row("u-deb")).groups_seen_at == T0
+
+
+async def test_forget_forces_the_next_write() -> None:
+    store = _store(debounce_seconds=300)
+    await store.observe(_token_user("u-fgt", ["g"], T0))
+
+    store.forget("u-fgt")
+
+    _, wrote = await store.observe(_token_user("u-fgt", ["g"], T0 + timedelta(minutes=1)))
+    assert wrote is True
+
+
+async def test_observe_requires_a_groups_claim() -> None:
+    user = User(sub="u", _display_name="u", source="oidc", issued_at=T0)
+
+    with pytest.raises(ValueError, match="groups claim"):
+        await _store().observe(user)

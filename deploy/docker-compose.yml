@@ -44,6 +44,8 @@ services:
       # (series carry workspace slugs and token usage). 0 disables it.
       # deploy/observability.yml scrapes keenyspace:9100.
       KEENYSPACE_METRICS_PORT: ${KEENYSPACE_METRICS_PORT:-9100}
+      # The listener defaults to loopback; the scraper is a sibling container.
+      KEENYSPACE_METRICS_ADDR: 0.0.0.0
       # Compile is provider-neutral (pydantic-ai). Anthropic stays the default
       # (D-04); override provider/model + supply the matching key via deploy/.env
       # (gitignored) for OpenAI/etc. Keys default to empty so the image is safe

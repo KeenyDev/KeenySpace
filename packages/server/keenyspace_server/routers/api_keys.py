@@ -13,12 +13,13 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from keenyspace_server.auth.api_keys import ApiKeyService
+from keenyspace_server.auth.api_keys import ApiKeyService, StaleCredentialError
 from keenyspace_server.auth.schemas import (
     ApiKeyListItem,
     ApiKeyMintRequest,
     ApiKeyMintResponse,
 )
+from keenyspace_server.auth.user import User
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -38,14 +39,32 @@ async def mint_api_key(
     request: Request,
     service: ApiKeyService = Depends(_get_service),  # noqa: B008
 ) -> ApiKeyMintResponse:
+    user = request.user
+    # A key must not be able to extend itself: an expiring or leaked key could
+    # otherwise mint a non-expiring successor.
+    if not isinstance(user, User) or user.source != "oidc" or user.issued_at is None:
+        log.warning("auth.api_key.mint_refused", reason="not_oidc", sub=user.identity)
+        raise HTTPException(
+            status_code=403,
+            detail="API keys are minted with an OIDC login (keenyspace login), not with a key",
+        )
     expires_at = (
         datetime.now(UTC) + timedelta(days=body.expires_in_days)
         if body.expires_in_days is not None
         else None
     )
-    result = await service.mint(
-        user_sub=request.user.identity, name=body.name, expires_at=expires_at
-    )
+    try:
+        result = await service.mint(
+            user_sub=user.sub,
+            name=body.name,
+            credential_issued_at=user.issued_at,
+            expires_at=expires_at,
+        )
+    except StaleCredentialError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="token predates your latest group change; log in again to mint keys",
+        ) from exc
     return ApiKeyMintResponse(**result)
 
 

@@ -95,32 +95,60 @@ class TestApiKeyPrincipals:
 
 
 class TestMintExpiry:
-    async def test_mint_with_expiry_reports_it(self, client: AsyncClient) -> None:
+    """Minting through the OIDC-principal stub (`api_key_client`)."""
+
+    async def test_mint_with_expiry_reports_it(self, api_key_client: AsyncClient) -> None:
         before = datetime.now(UTC)
 
-        resp = await client.post(
+        resp = await api_key_client.post(
             "/v1/api/auth/api-keys", json={"name": "short", "expires_in_days": 30}
         )
 
         assert resp.status_code == 201, resp.text
         expires_at = datetime.fromisoformat(resp.json()["expires_at"])
         assert before + timedelta(days=30) <= expires_at <= datetime.now(UTC) + timedelta(days=30)
-        listed = (await client.get("/v1/api/auth/api-keys")).json()
+        listed = (await api_key_client.get("/v1/api/auth/api-keys")).json()
         assert {item["id"]: item["expires_at"] for item in listed}[resp.json()["id"]] is not None
 
-    async def test_mint_without_expiry_never_expires(self, client: AsyncClient) -> None:
-        resp = await client.post("/v1/api/auth/api-keys", json={"name": "forever"})
+    async def test_mint_without_expiry_never_expires(self, api_key_client: AsyncClient) -> None:
+        resp = await api_key_client.post("/v1/api/auth/api-keys", json={"name": "forever"})
 
         assert resp.status_code == 201
         assert resp.json()["expires_at"] is None
 
     @pytest.mark.parametrize("days", [0, 3651, -1], ids=["zero", "over-ten-years", "negative"])
-    async def test_mint_rejects_out_of_range_expiry(self, client: AsyncClient, days: int) -> None:
-        resp = await client.post(
+    async def test_mint_rejects_out_of_range_expiry(
+        self, api_key_client: AsyncClient, days: int
+    ) -> None:
+        resp = await api_key_client.post(
             "/v1/api/auth/api-keys", json={"name": "bad", "expires_in_days": days}
         )
 
         assert resp.status_code == 422
+
+
+class TestKeysCannotMintKeys:
+    async def test_expiring_key_cannot_mint_a_successor(
+        self, app: Any, seed_api_key: Any
+    ) -> None:
+        sub, key = await seed_api_key(
+            groups=["keenyspace-users", ADMIN_GROUP],
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+        )
+        async with _http(app, key) as c:
+            resp = await c.post("/v1/api/auth/api-keys", json={"name": "successor"})
+            listed = (await c.get("/v1/api/auth/api-keys")).json()
+
+        assert resp.status_code == 403
+        assert "OIDC" in resp.json()["detail"]
+        assert len(listed) == 1, f"no key may have been minted for {sub}"
+
+    async def test_key_can_still_list_and_revoke_its_owners_keys(
+        self, client: AsyncClient
+    ) -> None:
+        (item,) = (await client.get("/v1/api/auth/api-keys")).json()
+
+        assert (await client.delete(f"/v1/api/auth/api-keys/{item['id']}")).status_code == 204
 
 
 @pytest.fixture
@@ -138,14 +166,16 @@ async def oidc_app(_admin_api_enabled: None, app_with_mocked_authentik: Any) -> 
     yield app_with_mocked_authentik
 
 
-def _token(provider: dict[str, Any], sub: str, groups: list[str] | None) -> str:
+def _token(
+    provider: dict[str, Any], sub: str, groups: list[str] | None, *, age_seconds: int = 0
+) -> str:
     now = int(time.time())
     claims: dict[str, Any] = {
         "iss": provider["issuer"],
         "aud": "keenyspace-test",
         "scope": "openid profile email groups",
         "sub": sub,
-        "iat": now,
+        "iat": now - age_seconds,
         "exp": now + 3600,
     }
     if groups is not None:
@@ -205,7 +235,7 @@ class TestOidcPrincipals:
 
     async def test_group_removal_reaches_cached_key_immediately(self, oidc_app: Any) -> None:
         app, provider = oidc_app
-        async with _http(app, _token(provider, "u-leaver", [ADMIN_GROUP])) as c:
+        async with _http(app, _token(provider, "u-leaver", [ADMIN_GROUP], age_seconds=60)) as c:
             key = (await c.post("/v1/api/auth/api-keys", json={"name": "k"})).json()["key"]
         async with _http(app, key) as key_client:
             ok = await key_client.post("/v1/admin/api-keys/revoke-all", json={"sub": "u-x"})
@@ -224,7 +254,9 @@ class TestRequiredGroupForKeys:
         self, _users_group_required: None, app_with_mocked_authentik: Any
     ) -> None:
         app, provider = app_with_mocked_authentik
-        async with _http(app, _token(provider, "u-member", ["keenyspace-users"])) as c:
+        async with _http(
+            app, _token(provider, "u-member", ["keenyspace-users"], age_seconds=60)
+        ) as c:
             key = (await c.post("/v1/api/auth/api-keys", json={"name": "k"})).json()["key"]
 
         async with _http(app, key) as key_client:
@@ -239,10 +271,49 @@ class TestRequiredGroupForKeys:
         self, _users_group_required: None, app_with_mocked_authentik: Any
     ) -> None:
         app, _ = app_with_mocked_authentik
-        minted = await app.state.api_key_service.mint(user_sub="u-never-logged-in", name="k")
+        minted = await app.state.api_key_service.mint(
+            user_sub="u-never-logged-in", name="k", credential_issued_at=datetime.now(UTC)
+        )
         key = minted["key"]
 
         async with _http(app, key) as c:
             resp = await c.get("/v1/api/auth/api-keys")
 
         assert resp.status_code == 401
+
+
+class TestSnapshotRollback:
+    async def test_older_admin_token_is_demoted_by_newer_snapshot(self, oidc_app: Any) -> None:
+        app, provider = oidc_app
+        old_admin_token = _token(provider, "u-demoted", [ADMIN_GROUP], age_seconds=600)
+        async with _http(app, _token(provider, "u-demoted", ["keenyspace-users"])) as c:
+            assert (await c.get("/v1/api/auth/api-keys")).status_code == 200
+
+        async with _http(app, old_admin_token) as c:
+            resp = await c.post("/v1/admin/api-keys/revoke-all", json={"sub": "u-x"})
+
+        assert resp.status_code == 403
+        snapshot = await _snapshot("u-demoted")
+        assert snapshot is not None
+        assert snapshot[0] == ["keenyspace-users"]
+
+    async def test_pre_revoke_token_cannot_mint_after_revoke_all(self, oidc_app: Any) -> None:
+        app, provider = oidc_app
+        stale = _token(provider, "u-offboarded", ["keenyspace-users"], age_seconds=120)
+        async with _http(app, stale) as c:
+            assert (await c.get("/v1/api/auth/api-keys")).status_code == 200
+        async with _http(app, _token(provider, "u-admin", [ADMIN_GROUP])) as admin:
+            revoked = await admin.post(
+                "/v1/admin/api-keys/revoke-all", json={"sub": "u-offboarded"}
+            )
+            assert revoked.status_code == 200, revoked.text
+
+        async with _http(app, stale) as c:
+            minted = await c.post("/v1/api/auth/api-keys", json={"name": "persist"})
+            listed = (await c.get("/v1/api/auth/api-keys")).json()
+
+        assert minted.status_code == 403
+        assert listed == []
+        snapshot = await _snapshot("u-offboarded")
+        assert snapshot is not None
+        assert snapshot[0] == []

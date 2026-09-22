@@ -228,7 +228,12 @@ async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
                 return None
             return (
                 AuthCredentials(["authenticated"]),
-                User(sub=user_sub, _display_name=user_sub, source="api_key"),
+                User(
+                    sub=user_sub,
+                    _display_name=user_sub,
+                    source="oidc",
+                    issued_at=datetime.now(UTC),
+                ),
             )
 
     for m in app.user_middleware:

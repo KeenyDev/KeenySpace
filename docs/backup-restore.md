@@ -86,6 +86,15 @@ After a successful restore:
 1. `keenyspace login` — sessions are not part of the backup; re-authenticate.
 2. `keenyspace workspace list` — confirm your workspaces are back.
 3. `keenyspace workspace pull <slug>` — re-sync local vaults from the restored canon.
+4. Re-offboard anyone offboarded after the backup was taken. The restore brings back the
+   `users` and `api_keys` rows as they were at backup time, so API keys revoked since then
+   are live again and their owners' group snapshots are the old ones. The restored audit
+   log also ends at the backup, so take the list from your own offboarding records (or
+   from `admin.api_keys.revoked_all` entries exported before the restore). For each user
+   offboarded after the backup date, run `POST /v1/admin/api-keys/revoke-all` again as
+   described in
+   "Offboarding a user" in [docs/oidc-authentik-setup.md](oidc-authentik-setup.md).
+   Do this before re-enabling client access.
 
 ## The drill
 

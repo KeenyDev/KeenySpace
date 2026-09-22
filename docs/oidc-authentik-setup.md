@@ -45,9 +45,19 @@ on every startup. This idempotently provisions:
   superuser to an `akadmin` you demoted.
 
 The `akadmin` entry writes the user's full group set on every apply: `authentik Admins`,
-`keenyspace-users` and `keenyspace-admins`. Any other group you add to `akadmin` by hand
-is dropped the next time the worker applies the blueprint (every startup). Manage extra
-memberships on other accounts, not on `akadmin`.
+`keenyspace-users` and `keenyspace-admins`. Authentik blueprints have no "add one
+membership" operation (a user's `groups` attribute is always replaced as a whole), so
+this has two consequences:
+
+- Any other group you add to `akadmin` by hand is dropped the next time the worker
+  applies the blueprint (every startup and every change to the file). Manage extra
+  memberships on other accounts, not on `akadmin`.
+- Removing `akadmin` from `keenyspace-admins` in the admin UI does not last: the next
+  apply adds it back. To take KeenySpace admin rights away from `akadmin`, either delete
+  the `authentik_core.user` entry for `akadmin` from
+  `deploy/authentik/blueprints/keenyspace.yaml` (then remove the membership in the UI),
+  or remove `akadmin` from `authentik Admins`, which makes the entry's condition false so
+  it stops touching `akadmin` altogether.
 
 Verify the application was provisioned (after Authentik is healthy):
 
@@ -198,10 +208,13 @@ Behavior:
   without the claim counts as "no groups" and is rejected by the gate.
 - API keys (`ks_live_*`) are gated too. A key carries no IdP claims, so the server
   checks it against its owner's group snapshot: the groups from the owner's most recent
-  OIDC token that carried a `groups` claim, stored in `users.groups`. Every such OIDC
-  request refreshes the snapshot, and a changed group set takes effect for the owner's
-  keys immediately (verified keys are cached for at most 60 seconds, and the cache is
-  dropped when the snapshot changes).
+  OIDC token that carried a `groups` claim, stored in `users.groups` and stamped with
+  that token's issue time (`iat`). Only a token issued later than the stored snapshot
+  replaces it, and a changed group set takes effect for the owner's keys immediately
+  (verified keys are cached for at most 60 seconds, and the cache is dropped when the
+  snapshot changes). A still-valid token issued before the newest snapshot is authorized
+  with the snapshot's groups, not its own, so an old token cannot restore a group the
+  user has since lost.
 - A key whose owner has never authenticated via OIDC since the snapshot was introduced
   has no snapshot and is rejected with 401 (`auth.group_gate.denied`,
   `reason=no_group_snapshot` in the server logs). The fix is one OIDC request by the
@@ -239,14 +252,24 @@ curl -sS -X POST http://localhost:8000/v1/api/auth/api-keys \
 Mint and list responses include `expires_at` (`null` for keys without expiry). An expired
 key is rejected with 401. Minting and revoking a key are recorded in the audit log.
 
+Minting requires an OIDC access token (`keenyspace login`, the browser session, or an MCP
+OAuth sign-in). An API key cannot mint keys (403), so a leaked or expiring key cannot
+create a longer-lived successor; `keenyspace token create` therefore needs a device-flow
+login, not a `--pat` login. Minting also returns 403 when the token was issued before the
+owner's newest group snapshot (for example another client signed in later, or an admin
+ran revoke-all); log in again to get a fresh token.
+
 ### Offboarding a user
 
 1. Remove the user from `keenyspace-users` (and `keenyspace-admins`, if applicable) in
    the Authentik admin UI, or deactivate the account. Newly issued tokens no longer
-   carry the group; an access token issued before the change keeps passing until it
-   expires.
+   carry the group; an access token issued before the change keeps passing (with its
+   old groups, unless a newer snapshot exists) until it expires.
 2. Revoke all of the user's API keys, because an API-key-only user keeps their old
-   group snapshot. With the admin API enabled and as a member of the admin group:
+   group snapshot. Revoke-all also replaces the user's snapshot with an empty one
+   stamped with the current time: access tokens issued before it are then authorized
+   with no groups and cannot mint new keys. With the admin API enabled and as a member
+   of the admin group:
 
    ```bash
    curl -sS -X POST http://localhost:8000/v1/admin/api-keys/revoke-all \

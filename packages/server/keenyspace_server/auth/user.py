@@ -13,9 +13,12 @@ class User(BaseUser):
     _display_name: str
     source: Literal["oidc", "api_key"]
     groups: list[str] = field(default_factory=list)
-    # When `groups` was observed from the IdP: now for an OIDC token carrying a
-    # groups claim, the owner's snapshot time for an API key, None when unknown.
+    # When the IdP asserted `groups`: the token's iat for an OIDC token carrying a
+    # groups claim (or the stored snapshot's time when that is newer than the
+    # token), the owner's snapshot time for an API key, None when unknown.
     groups_seen_at: datetime | None = None
+    # OIDC token iat; None for API keys.
+    issued_at: datetime | None = None
 
     @property
     def is_authenticated(self) -> bool:

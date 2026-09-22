@@ -88,3 +88,24 @@ async def test_lifespan_survives_port_in_use(monkeypatch: pytest.MonkeyPatch) ->
                 pass
     assert [entry["event"] for entry in logs] == ["metrics.server_bind_failed"]
     assert logs[0]["port"] == port
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        pytest.param(None, "127.0.0.1", id="unset-is-loopback"),
+        pytest.param("", "127.0.0.1", id="empty-is-loopback"),
+        pytest.param("0.0.0.0", "0.0.0.0", id="explicit-all-interfaces"),
+    ],
+)
+async def test_metrics_addr_defaults_to_loopback(
+    monkeypatch: pytest.MonkeyPatch, raw: str | None, expected: str
+) -> None:
+    from keenyspace_server.observability.metrics_server import metrics_addr_from_env
+
+    if raw is None:
+        monkeypatch.delenv(METRICS_ADDR_ENV, raising=False)
+    else:
+        monkeypatch.setenv(METRICS_ADDR_ENV, raw)
+
+    assert metrics_addr_from_env() == expected
