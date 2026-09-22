@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 class AppendLogRequest(BaseModel):
     workspace: str
-    content: str
+    content: str = Field(min_length=1)
     parent_id: str | None = None
 
 

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from keenyspace_shared.mcp_contracts import AppendLogRequest, AppendLogResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
@@ -38,15 +37,15 @@ async def append_log_endpoint(
     if ua:
         client_version = ua[:64]
 
-    from ulid import ULID as _ULID
-    parent_ulid: _ULID | None = None
+    parent_ulid: ULID | None = None
     if body.parent_id is not None:
-        import contextlib
-        with contextlib.suppress(Exception):
-            parent_ulid = _ULID.from_str(body.parent_id)
+        try:
+            parent_ulid = ULID.from_str(body.parent_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"invalid parent_id: {exc}") from exc
 
     try:
-        entry_id = await wal_writer.append_log(
+        appended = await wal_writer.append_log(
             ws_uuid=ws.uuid,
             ws_root=ws_root,
             content=body.content,
@@ -59,8 +58,9 @@ async def append_log_endpoint(
         )
     except wal_writer.PayloadTooLarge as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except wal_writer.WorkspaceArchivedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except wal_writer.EmptyContentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return AppendLogResponse(
-        entry_id=str(entry_id),
-        ts=datetime.now(UTC),
-    )
+    return AppendLogResponse(entry_id=str(appended.entry_id), ts=appended.ts)

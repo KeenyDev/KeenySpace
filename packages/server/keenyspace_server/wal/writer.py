@@ -4,14 +4,20 @@ import asyncio
 import fcntl
 import hashlib
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from ulid import ULID
 
 from .framing import format_entry
 from .locks import WorkspaceLockRegistry
+from .parser import parse_wal
+
+if TYPE_CHECKING:
+    from keenyspace_server.config import Settings
 
 
 class PayloadTooLargeError(ValueError):
@@ -23,6 +29,34 @@ PayloadTooLarge = PayloadTooLargeError
 
 class WorkspaceArchivedError(ValueError):
     pass
+
+
+class EmptyContentError(ValueError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class AppendResult:
+    entry_id: ULID
+    ts: datetime
+
+
+def _newest_logged_id(logs_dir: Path) -> ULID | None:
+    log_files = sorted(logs_dir.glob("*.md"))
+    if not log_files:
+        return None
+    entries = parse_wal(log_files[-1].read_text(encoding="utf-8"))
+    return max((e.id for e in entries), key=int, default=None)
+
+
+def _next_entry_id(ts: datetime, last_id: ULID | None) -> ULID:
+    # Compile advances its cursor with `id > last_wal_id`; a same-millisecond
+    # append (random low bits) or a backward clock step must never mint an id
+    # below one already issued, or that entry is silently never compiled.
+    candidate = ULID.from_datetime(ts)
+    if last_id is not None and int(candidate) <= int(last_id):
+        return ULID.from_int(int(last_id) + 1)
+    return candidate
 
 
 def _blocking_append(wal_file: Path, payload: bytes, multi_worker: bool) -> None:
@@ -51,11 +85,22 @@ async def append_log(
     source: str,
     client_version: str | None,
     parent_id: ULID | None = None,
-    settings: object,
+    settings: Settings,
     locks: WorkspaceLockRegistry,
-) -> ULID:
-    max_bytes: int = getattr(getattr(settings, "wal", settings), "max_entry_bytes", 256 * 1024)
-    multi_worker: bool = getattr(getattr(settings, "auth", settings), "multi_worker", False)
+) -> AppendResult:
+    """Append one framed entry to the workspace's daily WAL file.
+
+    Entry ids are strictly increasing per workspace within the process, so a
+    compile cursor filtering `id > last_wal_id` never skips an entry.
+
+    Raises EmptyContentError, PayloadTooLargeError or WorkspaceArchivedError.
+    """
+    if not content.strip():
+        raise EmptyContentError("WAL entry content must not be empty")
+    max_bytes = settings.wal.max_entry_bytes
+    if len(content.encode()) > max_bytes:
+        raise PayloadTooLarge(f"Entry content exceeds maximum size of {max_bytes} bytes")
+    multi_worker = settings.auth.multi_worker
 
     # D-01 / D-03: pre-flight Workspace.status check BEFORE lock acquisition. The
     # TOCTOU window (archive flips between this check and lock acquisition) is
@@ -79,9 +124,13 @@ async def append_log(
 
     ws_lock = await locks.for_workspace(ws_uuid)
     async with ws_lock:
-        wal_path = ws_root / "logs" / f"{datetime.now(UTC).date().isoformat()}.md"
         ts = datetime.now(UTC)
-        entry_id = ULID.from_datetime(ts)
+        logs_dir = ws_root / "logs"
+        wal_path = logs_dir / f"{ts.date().isoformat()}.md"
+        last_id = locks.last_id(ws_uuid)
+        if last_id is None:
+            last_id = await asyncio.to_thread(_newest_logged_id, logs_dir)
+        entry_id = _next_entry_id(ts, last_id)
         content_hash = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
 
         payload = format_entry(
@@ -103,6 +152,7 @@ async def append_log(
         await asyncio.to_thread(
             _blocking_append, wal_path, payload, multi_worker
         )
+        locks.record_id(ws_uuid, entry_id)
 
     from keenyspace_server.observability.metrics import WAL_APPENDS_TOTAL
     WAL_APPENDS_TOTAL.labels(workspace=str(ws_uuid), source=source).inc()
@@ -120,4 +170,4 @@ async def append_log(
             if coordinator is not None:
                 coordinator.notify_dirty(ws_uuid)
 
-    return entry_id
+    return AppendResult(entry_id=entry_id, ts=ts)

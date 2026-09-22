@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import contextlib
+import asyncio
 import io
-from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -10,6 +10,7 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_request
 from keenyspace_shared.mcp_contracts import AppendLogResponse, ReadPageResponse
 from sqlalchemy import select
+from ulid import ULID
 
 from keenyspace_server.compile.coordinator import get_coordinator
 from keenyspace_server.compile.models import CompileStatusResponse, CompileTriggerResponse
@@ -47,23 +48,24 @@ async def read_page(path: str, workspace: str | None = None) -> ReadPageResponse
         ws_root = settings.fs.root / "workspaces" / str(ws.uuid)
 
         try:
-            fd, resolved = open_workspace_page(ws_root, path)
+            return await asyncio.to_thread(_read_page_blocking, ws_root, path)
         except UnsafePath as exc:
             raise ToolError(f"400 Bad Request: {exc}") from exc
         except FileNotFoundError as exc:
             raise ToolError(f"page {path!r} not found in workspace {workspace!r}") from exc
 
-        with io.FileIO(fd) as f:
-            raw_content = f.read()
 
-        content_str = raw_content.decode("utf-8", errors="replace")
-        frontmatter, body = _split_frontmatter(content_str)
+def _read_page_blocking(ws_root: Path, path: str) -> ReadPageResponse:
+    fd, resolved = open_workspace_page(ws_root, path)
+    with io.FileIO(fd) as f:
+        raw_content = f.read()
 
-        return ReadPageResponse(
-            path=str(resolved.relative_to(ws_root)),
-            content=body,
-            frontmatter=frontmatter,
-        )
+    frontmatter, body = _split_frontmatter(raw_content.decode("utf-8", errors="replace"))
+    return ReadPageResponse(
+        path=str(resolved.relative_to(ws_root)),
+        content=body,
+        frontmatter=frontmatter,
+    )
 
 
 async def append_log(
@@ -102,28 +104,33 @@ async def append_log(
         except Exception:
             pass
 
-        from ulid import ULID as _ULID
-        parent_ulid: _ULID | None = None
+        parent_ulid: ULID | None = None
         if parent_id is not None:
-            with contextlib.suppress(Exception):
-                parent_ulid = _ULID.from_str(parent_id)
+            try:
+                parent_ulid = ULID.from_str(parent_id)
+            except ValueError as exc:
+                raise ToolError(f"invalid parent_id: {exc}") from exc
 
-        entry_id = await wal_writer.append_log(
-            ws_uuid=ws.uuid,
-            ws_root=ws_root,
-            content=content,
-            actor=actor,
-            source="mcp",
-            client_version=client_version,
-            parent_id=parent_ulid,
-            settings=settings,
-            locks=locks,
-        )
+        try:
+            appended = await wal_writer.append_log(
+                ws_uuid=ws.uuid,
+                ws_root=ws_root,
+                content=content,
+                actor=actor,
+                source="mcp",
+                client_version=client_version,
+                parent_id=parent_ulid,
+                settings=settings,
+                locks=locks,
+            )
+        except (
+            wal_writer.PayloadTooLarge,
+            wal_writer.WorkspaceArchivedError,
+            wal_writer.EmptyContentError,
+        ) as exc:
+            raise ToolError(str(exc)) from exc
 
-        return AppendLogResponse(
-            entry_id=str(entry_id),
-            ts=datetime.now(UTC),
-        )
+        return AppendLogResponse(entry_id=str(appended.entry_id), ts=appended.ts)
 
 
 async def compile_tool(workspace: str | None = None) -> CompileTriggerResponse:
