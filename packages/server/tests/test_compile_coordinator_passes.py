@@ -236,6 +236,40 @@ async def test_apply_plan_os_error_finalizes_run_and_pauses_workspace(
         assert await _cursor(ws_uuid) is None
 
 
+async def test_failure_before_agent_releases_workspace_for_retry(
+    app: Any, pg_url: str, fake_agent: FakeCompileAgent, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_extract = coordinator_module.extract_wal_slice
+    calls = 0
+
+    def _flaky_extract(*args: Any, **kwargs: Any) -> Any:
+        # WAL read failure on the first pass only; there is no seam to inject the
+        # filesystem into the slice reader, so the name the coordinator calls is swapped.
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("transient read failure")
+        return real_extract(*args, **kwargs)
+
+    monkeypatch.setattr(coordinator_module, "extract_wal_slice", _flaky_extract)
+    async with _serving(app, pg_url) as (client, coordinator):
+        slug, ws_uuid = await _create_workspace(client)
+        entry_id = await _append(client, slug, "fact")
+
+        await coordinator.trigger(ws_uuid, source="test")
+        await _settle(coordinator)
+
+        ws = await _workspace(ws_uuid)
+        assert (ws.compile_state, ws.compile_paused_reason) == ("idle", None)
+        assert fake_agent.wal_texts == []
+
+        await coordinator.trigger(ws_uuid, source="backstop")
+        await _settle(coordinator)
+
+        assert await _cursor(ws_uuid) == entry_id
+        assert [r.status for r in await _runs(ws_uuid)] == ["success"]
+
+
 async def test_aclose_interrupts_inflight_pass_and_frees_workspace(
     app: Any, pg_url: str, fake_agent: FakeCompileAgent,
 ) -> None:

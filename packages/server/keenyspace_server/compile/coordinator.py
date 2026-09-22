@@ -4,6 +4,7 @@ import asyncio
 import time
 from collections import defaultdict
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -51,6 +52,11 @@ class CompileCursorConflictError(RuntimeError):
     """The compile cursor moved underneath a pass; its pages may not match the cursor."""
 
 
+@dataclass
+class _PassProgress:
+    tokens_spent: bool = False
+
+
 class CompileCoordinator:
     def __init__(self, settings: CompileSettings) -> None:
         self.settings = settings
@@ -92,10 +98,16 @@ class CompileCoordinator:
 
         self._pending_debounce[ws_uuid] = loop.call_later(delay, _fire)
 
-    def _spawn(self, coro: Coroutine[Any, Any, None]) -> None:
+    def _spawn(self, coro: Coroutine[Any, Any, None]) -> bool:
+        # trigger() awaits the DB between its own closed-check and here; a task spawned
+        # after aclose() snapshotted self._tasks would outlive the engine.
+        if self._closed:
+            coro.close()
+            return False
         task = asyncio.get_running_loop().create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        return True
 
     async def _trigger_after_debounce(self, ws_uuid: UUID, source: str) -> None:
         try:
@@ -125,7 +137,8 @@ class CompileCoordinator:
                 return CompileTriggerResponse(job_id=in_flight, status="running")
 
         run_id = str(uuid4())
-        self._spawn(self._run_locked_pass(ws_uuid, ws_root, run_id, source))
+        if not self._spawn(self._run_locked_pass(ws_uuid, ws_root, run_id, source)):
+            raise ValueError("compile coordinator is shutting down")
         return CompileTriggerResponse(job_id=run_id, status="queued")
 
     async def _run_locked_pass(
@@ -310,10 +323,11 @@ class CompileCoordinator:
             return CompileRunResult(status="paused", pages_written=0)
 
         log.info("compile.started", workspace=str(ws_uuid), run_id=run_id, trigger_source=source)
+        progress = _PassProgress()
         try:
-            return await self._execute_pass(ws_uuid, ws_root, run_id, source, started_at)
+            return await self._execute_pass(ws_uuid, ws_root, run_id, source, started_at, progress)
         except BaseException as exc:
-            await self._finalize_failed_pass(ws_uuid, run_id, exc)
+            await self._finalize_failed_pass(ws_uuid, run_id, exc, tokens_spent=progress.tokens_spent)
             raise
 
     async def _execute_pass(
@@ -323,6 +337,7 @@ class CompileCoordinator:
         run_id: str,
         source: str,
         started_at: datetime,
+        progress: _PassProgress,
     ) -> CompileRunResult:
         cursor_row = await self._read_cursor(ws_uuid)
         last_wal_id = cursor_row.last_wal_id if cursor_row else None
@@ -395,6 +410,7 @@ class CompileCoordinator:
                 ws_uuid, run_id, status="abort_llm_error", reason="llm_error", error=str(exc)
             )
 
+        progress.tokens_spent = True
         # Tokens are spent once the agent returns, whether or not the plan lands on disk.
         # Per-space daily OUTPUT-token budget comes from real result.usage(); the daily
         # ceiling is a conservative estimate until v1.1. Both reset at 00:00 UTC.
@@ -473,7 +489,9 @@ class CompileCoordinator:
         log.warning("compile.aborted", workspace=str(ws_uuid), run_id=run_id, reason=reason)
         return CompileRunResult(status="paused", pages_written=0, plan_hash=plan_hash)
 
-    async def _finalize_failed_pass(self, ws_uuid: UUID, run_id: str, exc: BaseException) -> None:
+    async def _finalize_failed_pass(
+        self, ws_uuid: UUID, run_id: str, exc: BaseException, *, tokens_spent: bool
+    ) -> None:
         interrupted = not isinstance(exc, Exception)
         status = "abort_interrupted" if interrupted else "abort_error"
         error = "compile pass interrupted" if interrupted else f"{type(exc).__name__}: {exc}"
@@ -482,12 +500,13 @@ class CompileCoordinator:
                 ws_uuid, run_id, status=status, error_message=error,
                 completed_at=datetime.now(UTC), only_if_running=True,
             )
-            if interrupted:
-                await self._release_running(ws_uuid)
-            else:
+            if tokens_spent and not interrupted:
                 # Pausing (not idling) stops the backstop from re-spending LLM tokens
-                # every 15 minutes on a failure that will most likely repeat.
+                # every 15 minutes on a failure that will most likely repeat. Failures
+                # before the agent ran cost nothing to retry, so they go back to idle.
                 await self._pause(ws_uuid, reason="internal_error", error=error)
+            else:
+                await self._release_running(ws_uuid)
         except Exception as finalize_exc:
             log.error(
                 "compile.finalize_failed",

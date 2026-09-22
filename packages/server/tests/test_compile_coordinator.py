@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -68,3 +69,30 @@ async def test_concurrent_trigger_reuses_inflight_job_id() -> None:
     async with c._locks[ws]:
         assert c._locks[ws].locked()
         assert c._inflight.get(ws) == "in-flight-run-id"
+
+
+@pytest.mark.asyncio
+async def test_trigger_racing_shutdown_spawns_no_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    c = CompileCoordinator(CompileSettings())
+    state_read_started = asyncio.Event()
+    release_state_read = asyncio.Event()
+
+    async def _fake_root(self: CompileCoordinator, ws_uuid: UUID) -> Path:
+        return Path("/tmp")
+
+    async def _slow_state(self: CompileCoordinator, ws_uuid: UUID) -> str:
+        state_read_started.set()
+        await release_state_read.wait()
+        return "idle"
+
+    monkeypatch.setattr(CompileCoordinator, "_workspace_root", _fake_root)
+    monkeypatch.setattr(CompileCoordinator, "_workspace_state", _slow_state)
+
+    pending_trigger = asyncio.create_task(c.trigger(uuid4(), source="http_api"))
+    await state_read_started.wait()
+    await c.aclose()
+    release_state_read.set()
+
+    with pytest.raises(ValueError, match="shutting down"):
+        await pending_trigger
+    assert c._tasks == set()
