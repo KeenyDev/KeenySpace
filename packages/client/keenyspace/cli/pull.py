@@ -1,11 +1,13 @@
 """`keenyspace workspace pull <slug>` — dirty-aware pull (D-10..D-13).
 
 Workflow:
-1. GET /v1/api/workspaces/<slug>/manifest -> server file map.
+1. GET /v1/api/workspaces/<slug>/manifest -> server file map. Any key that would
+   resolve outside the vault aborts the pull (exit 7) before anything is written.
 2. Walk local vault, compute sha256 manifest (scope = .md + raw/).
 3. Diff. If dirty (modified | added | removed) and not --force: print summary, exit 4.
 4. If --force: stash dirty bytes under conflicts/<iso>/, print unified diff.
-5. Download every server file via /pages-raw/, atomic-write into vault.
+5. Download every server file whose local hash differs via /pages-raw/,
+   atomic-write into vault.
 6. Delete in-scope local files that vanished from server canon.
 7. Write slug-marker.json (D-13 option b) + local-state.json (atomic 0o600).
 """
@@ -20,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 EXIT_DIRTY = 4
+EXIT_UNSAFE_MANIFEST = 7
 
 
 async def run_pull(
@@ -29,12 +32,18 @@ async def run_pull(
     target: Path | None = None,
 ) -> None:
     from rich.console import Console
+    from rich.markup import escape
     from rich.table import Table
 
     from keenyspace.clients.http import build_authed_http_client
     from keenyspace.fs.atomic import write_atomic, write_atomic_secret
     from keenyspace.paths import DEFAULT_PULL_ROOT, STATE_DIR
-    from keenyspace.pull.manifest import diff_manifests, hash_local_tree
+    from keenyspace.pull.manifest import (
+        UnsafeManifestPathError,
+        diff_manifests,
+        hash_local_tree,
+        resolve_vault_path,
+    )
     from keenyspace.pull.stash import render_diff, stash_dirty
 
     console = Console()
@@ -48,6 +57,16 @@ async def run_pull(
         resp.raise_for_status()
         server_doc: dict[str, Any] = resp.json()
         server_files: dict[str, str] = dict(server_doc.get("files") or {})
+        try:
+            dest_paths = {
+                rel: resolve_vault_path(target_path, rel) for rel in server_files
+            }
+        except UnsafeManifestPathError as exc:
+            console.print(
+                "[red]Refusing to pull: manifest path resolves outside the vault "
+                f"(traversal or symlink): {escape(str(exc))}[/red]"
+            )
+            sys.exit(EXIT_UNSAFE_MANIFEST)
 
         # D-11: a target dir that does not exist yet means "first pull" — no
         # files can be modified/added/removed relative to nothing, and the
@@ -95,14 +114,15 @@ async def run_pull(
         # local-state.json must reflect the bytes actually on disk so the
         # next `pull` is not falsely reported as dirty.
         actual_hashes: dict[str, str] = {}
-        for rel, _server_hash in server_files.items():
+        for rel, server_hash in server_files.items():
+            if local_files.get(rel) == server_hash:
+                actual_hashes[rel] = server_hash
+                continue
             if rel in preloaded_server:
                 payload_bytes = preloaded_server[rel]
             else:
                 payload_bytes = await _fetch_page_bytes(client, slug, rel)
-            dest = target_path / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            write_atomic(dest, payload_bytes)
+            write_atomic(dest_paths[rel], payload_bytes)
             actual_hashes[rel] = "sha256:" + hashlib.sha256(payload_bytes).hexdigest()
 
         for rel in set(local_files) - set(server_files):

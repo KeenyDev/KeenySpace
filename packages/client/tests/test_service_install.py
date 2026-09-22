@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import platform
+import stat
 import subprocess
 from importlib.resources import files
 from pathlib import Path
@@ -142,6 +143,34 @@ def test_plist_renders_with_resolved_binary(
     assert captured[0][1] == "bootstrap"
     assert captured[0][2].startswith("gui/")
     assert captured[1][1] == "enable"
+
+
+def test_plist_written_owner_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import keenyspace.cli.service as service_mod
+
+    importlib.reload(service_mod)
+    fake_bin = tmp_path / "bin" / "keenyspace"
+    fake_bin.parent.mkdir(parents=True, exist_ok=True)
+    fake_bin.touch()
+    monkeypatch.setattr(service_mod.shutil, "which", lambda _bin: str(fake_bin))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        service_mod.subprocess,
+        "run",
+        lambda args, check=True: subprocess.CompletedProcess(args, 0),
+    )
+    plist_dest = tmp_path / "Library" / "LaunchAgents" / "com.keenyspace.daemon.plist"
+    plist_dest.parent.mkdir(parents=True)
+    plist_dest.write_text("stale world-readable copy", encoding="utf-8")
+    plist_dest.chmod(0o644)
+
+    service_mod._install_macos()  # type: ignore[attr-defined]
+
+    assert stat.S_IMODE(plist_dest.stat().st_mode) == 0o600
+    assert "__KEENYSPACE_BIN__" not in plist_dest.read_text(encoding="utf-8")
 
 
 def test_systemd_unit_renders_with_resolved_binary(

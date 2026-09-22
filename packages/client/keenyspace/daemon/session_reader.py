@@ -25,6 +25,7 @@ from typing import Any
 import structlog
 
 from keenyspace import paths
+from keenyspace.fs.atomic import write_atomic_secret
 from keenyspace.workspace_inference import resolve_workspace_slug
 
 log = structlog.get_logger(__name__)
@@ -42,15 +43,23 @@ INGEST_TIMEOUT_SECONDS = 180
 # session or an empty first-run cursor over a multi-MB transcript -- in bounded
 # chunks across ticks instead of one oversized, overflow-prone call.
 MAX_DELTA_BYTES = 120_000
+# Cap on buffered extracted text per file. While ingest keeps failing every tick
+# appends another window; without a cap the buffer (and every retry's payload)
+# grows without bound. Oldest text is dropped first.
+MAX_BUFFER_CHARS = 2 * MAX_DELTA_BYTES
 
 # resolve_workspace_slug sources that mean "this cwd maps to a registered
 # workspace". "default" (config.yaml fallback) and "unresolved" are NOT captured.
 _REGISTERED_SOURCES = frozenset({"explicit", "env", "slug-marker", "workspace-map"})
 
-# (slug, extracted_text, source_path) -> None
+# (slug, extracted_text, source_path) -> None; raise IngestSkippedError to keep the buffer.
 IngestFn = Callable[[str, str, str], Awaitable[None]]
 # cwd -> (slug, source)
 ResolveFn = Callable[[str], tuple[str | None, str]]
+
+
+class IngestSkippedError(Exception):
+    """Ingest could not run (no credential / LLM key); the buffer must be kept."""
 
 
 def _claude_projects_dir() -> Path:
@@ -65,6 +74,41 @@ def _load_cursors(path: Path) -> dict[str, int]:
     if not isinstance(data, dict):
         return {}
     return {k: int(v) for k, v in data.items() if isinstance(v, (int, float))}
+
+
+def _buffers_path(cursors_path: Path) -> Path:
+    return cursors_path.with_name("ingest-buffers.json")
+
+
+def _load_buffers(path: Path) -> dict[str, str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, str) and v}
+
+
+def _save_buffers(path: Path, buffers: dict[str, str]) -> None:
+    # Transcript text: owner-only, like every other secret-adjacent state file.
+    try:
+        write_atomic_secret(
+            path, json.dumps({k: v for k, v in buffers.items() if v}).encode("utf-8")
+        )
+    except OSError as exc:
+        log.warning("session_reader.buffer_persist_failed", error=str(exc))
+
+
+def _append_capped(existing: str, extracted: str, max_chars: int) -> tuple[str, bool]:
+    combined = (existing + "\n" + extracted).strip()
+    if len(combined) <= max_chars:
+        return combined, False
+    tail = combined[-max_chars:]
+    nl = tail.find("\n")
+    if 0 <= nl < len(tail) - 1:
+        tail = tail[nl + 1 :]
+    return tail, True
 
 
 def _save_cursors(path: Path, cursors: dict[str, int]) -> None:
@@ -173,10 +217,10 @@ async def _default_ingest(slug: str, text: str, source_path: str) -> None:
     api_key = await ensure_token(interactive=False)
     if not api_key:
         log.warning("session_reader.no_token", workspace=slug)
-        return
+        raise IngestSkippedError("no_token")
     if not os.environ.get(settings.llm.api_key_env):
         log.warning("session_reader.no_llm_key", env=settings.llm.api_key_env)
-        return
+        raise IngestSkippedError("no_llm_key")
     instructions = await get_instructions(
         settings.server_url,
         api_key,
@@ -202,6 +246,7 @@ async def _tick(
     resolve_fn: ResolveFn,
     min_delta_chars: int,
     max_delta_bytes: int = MAX_DELTA_BYTES,
+    max_buffer_chars: int = MAX_BUFFER_CHARS,
     ingest_timeout: float = INGEST_TIMEOUT_SECONDS,
 ) -> None:
     if not projects_dir.is_dir():
@@ -216,7 +261,10 @@ async def _tick(
                 size = transcript.stat().st_size
             except OSError:
                 continue
-            if size <= offset:
+            has_new_bytes = size > offset
+            # A full buffer whose earlier ingest failed/skipped is retried even when
+            # the session is idle; otherwise it would be stranded until new bytes.
+            if not has_new_bytes and len(buffers.get(key, "")) < min_delta_chars:
                 continue
             cwd = _transcript_cwd(transcript)
             if not cwd:
@@ -225,34 +273,45 @@ async def _tick(
             if slug is None or source not in _REGISTERED_SOURCES:
                 # Unregistered cwd: skip forward so we never reprocess it.
                 cursors[key] = size
+                buffers.pop(key, None)
                 continue
 
-            raw, new_offset = await asyncio.to_thread(
-                _read_delta, transcript, offset, max_delta_bytes
-            )
-            if new_offset <= offset:
-                # No complete line within the cap. A single record larger than the
-                # cap (huge tool_result / snapshot) would otherwise wedge the file
-                # forever -- skip past it so the reader keeps draining.
-                if size - offset > max_delta_bytes:
+            if has_new_bytes:
+                raw, new_offset = await asyncio.to_thread(
+                    _read_delta, transcript, offset, max_delta_bytes
+                )
+                if new_offset > offset:
+                    # Advance past the consumed window regardless of text density, so
+                    # a window dominated by non-text records never wedges the cursor.
+                    # Human/assistant text is buffered across windows until it is
+                    # worth an ingest, so low-text windows don't drop signal.
+                    cursors[key] = new_offset
+                    extracted = _extract_text(raw)
+                    if extracted:
+                        buffers[key], trimmed = _append_capped(
+                            buffers.get(key, ""), extracted, max_buffer_chars
+                        )
+                        if trimmed:
+                            log.warning(
+                                "session_reader.buffer_trimmed",
+                                file=key,
+                                max_chars=max_buffer_chars,
+                            )
+                elif size - offset > max_delta_bytes:
+                    # No complete line within the cap. A single record larger than
+                    # the cap (huge tool_result / snapshot) would otherwise wedge the
+                    # file forever -- skip past it so the reader keeps draining.
                     cursors[key] = offset + max_delta_bytes
                     log.warning("session_reader.oversized_record_skipped", file=key)
-                continue
-
-            # Advance past the consumed window regardless of text density, so a
-            # window dominated by non-text records never wedges the cursor. Human/
-            # assistant text is buffered across windows until it is worth an ingest,
-            # so low-text windows don't drop signal.
-            extracted = _extract_text(raw)
-            cursors[key] = new_offset
-            if extracted:
-                buffers[key] = (buffers.get(key, "") + "\n" + extracted).strip()
             if len(buffers.get(key, "")) < min_delta_chars:
                 continue
 
             text = buffers[key]
             try:
                 await asyncio.wait_for(ingest_fn(slug, text, key), timeout=ingest_timeout)
+            except IngestSkippedError as exc:
+                log.info("session_reader.ingest_skipped", file=key, reason=str(exc))
+                continue
             except Exception as exc:  # one bad session must not stall the loop
                 # Keep the buffer (cursor already advanced) so the text is retried,
                 # not lost, on the next tick.
@@ -278,10 +337,12 @@ async def run_transcript_reader(
     resolver: ResolveFn = resolve_fn or (lambda cwd: resolve_workspace_slug(cwd=cwd))
     pdir = projects_dir or _claude_projects_dir()
     cpath = cursors_path or paths.INGEST_CURSORS
+    bpath = _buffers_path(cpath)
     cursors = _load_cursors(cpath)
-    # Per-file extracted-text buffers, in-memory: accumulate low-text windows
-    # across ticks so signal isn't dropped while the cursor keeps advancing.
-    buffers: dict[str, str] = {}
+    # Per-file extracted-text buffers accumulate low-text windows (and text whose
+    # ingest failed) across ticks, so signal isn't dropped while the cursor keeps
+    # advancing. Persisted alongside the cursors so a restart doesn't lose them.
+    buffers = _load_buffers(bpath)
     log.info("session_reader.started", projects_dir=str(pdir), interval=interval_seconds)
     while not stop_event.is_set():
         try:
@@ -293,6 +354,7 @@ async def run_transcript_reader(
                 resolve_fn=resolver,
                 min_delta_chars=min_delta_chars,
             )
+            _save_buffers(bpath, buffers)
             _save_cursors(cpath, cursors)
         except Exception as exc:  # the loop must survive any single-tick failure
             log.warning("session_reader.tick_failed", error=str(exc))

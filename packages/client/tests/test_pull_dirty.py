@@ -242,3 +242,120 @@ async def test_pull_ignores_obsidian_and_keenyspace(
     assert (target / ".obsidian" / "workspace.json").is_file()
     # slug-marker.json was written, but the prior cache.json must persist
     assert (target / ".keenyspace" / "cache.json").is_file()
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "",
+        "/etc/passwd",
+        "../escape.md",
+        "concepts/../../escape.md",
+        "concepts/..",
+        "./index.md",
+        "concepts//foo.md",
+        "concepts/foo.md/",
+        "concepts\\..\\escape.md",
+        "index\x00.md",
+    ],
+)
+def test_resolve_vault_path_rejects_unsafe_keys(tmp_path: Path, rel: str) -> None:
+    from keenyspace.pull.manifest import UnsafeManifestPathError, resolve_vault_path
+
+    with pytest.raises(UnsafeManifestPathError):
+        resolve_vault_path(tmp_path / "vault", rel)
+
+
+def test_resolve_vault_path_rejects_symlink_out_of_vault(tmp_path: Path) -> None:
+    from keenyspace.pull.manifest import UnsafeManifestPathError, resolve_vault_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (vault / "concepts").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(UnsafeManifestPathError):
+        resolve_vault_path(vault, "concepts/foo.md")
+
+
+def test_resolve_vault_path_accepts_nested_key(tmp_path: Path) -> None:
+    from keenyspace.pull.manifest import resolve_vault_path
+
+    vault = tmp_path / "vault"
+    assert resolve_vault_path(vault, "raw/sub/img.png") == vault / "raw" / "sub" / "img.png"
+
+
+async def test_pull_aborts_before_writing_on_unsafe_manifest_key(
+    temp_config_dir: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    httpserver: HTTPServer,
+    tmp_path: Path,
+) -> None:
+    _seed_auth(temp_config_dir["config_dir"])
+    monkeypatch.setenv("KEENYSPACE_SERVER_URL", _ipv4(httpserver.url_for("")))
+
+    httpserver.expect_request(
+        "/v1/api/workspaces/demo/manifest"
+    ).respond_with_json(
+        {
+            "files": {
+                "index.md": _sha256(b"# index\n"),
+                "../escape.md": _sha256(b"pwned\n"),
+            },
+            "server_canon_at": "2026-05-24T00:00:00Z",
+        }
+    )
+
+    pull_mod = _reload()
+    target = tmp_path / "keenyspace" / "demo"
+    with pytest.raises(SystemExit) as excinfo:
+        await pull_mod.run_pull("demo", force=True, target=target)  # type: ignore[attr-defined]
+
+    assert excinfo.value.code == 7
+    assert not target.exists()
+    assert not (tmp_path / "keenyspace" / "escape.md").exists()
+    assert [req.path for req, _resp in httpserver.log] == [
+        "/v1/api/workspaces/demo/manifest"
+    ]
+
+
+async def test_pull_skips_fetching_unchanged_files(
+    temp_config_dir: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    httpserver: HTTPServer,
+    tmp_path: Path,
+) -> None:
+    _seed_auth(temp_config_dir["config_dir"])
+    monkeypatch.setenv("KEENYSPACE_SERVER_URL", _ipv4(httpserver.url_for("")))
+
+    target = tmp_path / "keenyspace" / "demo"
+    (target / "concepts").mkdir(parents=True)
+    unchanged = b"# same on both sides\n"
+    (target / "index.md").write_bytes(unchanged)
+    (target / "concepts" / "foo.md").write_bytes(b"# stale local\n")
+    server_foo = b"# fresh server\n"
+    server_manifest = {
+        "index.md": _sha256(unchanged),
+        "concepts/foo.md": _sha256(server_foo),
+    }
+    httpserver.expect_request(
+        "/v1/api/workspaces/demo/manifest"
+    ).respond_with_json(
+        {"files": server_manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
+    )
+    httpserver.expect_request(
+        "/v1/api/workspaces/demo/pages-raw/concepts/foo.md"
+    ).respond_with_data(server_foo, content_type="application/octet-stream")
+    inode_before = (target / "index.md").stat().st_ino
+
+    pull_mod = _reload()
+    await pull_mod.run_pull("demo", force=True, target=target)  # type: ignore[attr-defined]
+
+    fetched = [req.path for req, _resp in httpserver.log]
+    assert fetched.count("/v1/api/workspaces/demo/pages-raw/concepts/foo.md") == 1
+    assert "/v1/api/workspaces/demo/pages-raw/index.md" not in fetched
+    assert (target / "index.md").stat().st_ino == inode_before
+    assert (target / "concepts" / "foo.md").read_bytes() == server_foo
+    state_path = temp_config_dir["state_dir"] / "demo" / "local-state.json"
+    assert json.loads(state_path.read_text())["files"] == server_manifest

@@ -17,6 +17,8 @@ from pathlib import Path
 
 import typer
 
+from keenyspace.fs.atomic import write_atomic_secret
+
 service_app = typer.Typer(name="service", help="OS service registration")
 
 LAUNCHD_LABEL = "com.keenyspace.daemon"
@@ -47,8 +49,8 @@ def _install_macos() -> None:
         .replace("__HOME__", str(Path.home()))
     )
     dest = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(plist, encoding="utf-8")
+    # 0600: documented setup puts the LLM API key in EnvironmentVariables.
+    write_atomic_secret(dest, plist.encode("utf-8"))
     uid = os.getuid()
     subprocess.run(
         ["/bin/launchctl", "bootstrap", f"gui/{uid}", str(dest)], check=True

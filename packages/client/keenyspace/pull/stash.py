@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from keenyspace.pull.manifest import ManifestDiff
+from keenyspace.pull.manifest import ManifestDiff, resolve_vault_path
 
 
 def stash_dirty(diff: ManifestDiff, vault_root: Path, stash_root: Path) -> None:
@@ -17,7 +17,7 @@ def stash_dirty(diff: ManifestDiff, vault_root: Path, stash_root: Path) -> None:
         src = vault_root / rel
         if not src.is_file():
             continue
-        dst = stash_root / rel
+        dst = resolve_vault_path(stash_root, rel)
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(src.read_bytes())
 
