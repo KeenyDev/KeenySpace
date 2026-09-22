@@ -32,6 +32,9 @@ curl -sS -X POST http://localhost:8000/v1/api/auth/api-keys \
   -d '{"name": "claude-code"}'
 ```
 
+Add `"expires_in_days": N` (1-3650) to the body for a key that expires; `expires_at`
+is `null` otherwise.
+
 The response contains the plaintext key exactly once:
 
 ```json
@@ -41,7 +44,8 @@ The response contains the plaintext key exactly once:
   "key": "ks_live_...",
   "key_prefix": "ks_live_",
   "last4": "...",
-  "created_at": "..."
+  "created_at": "...",
+  "expires_at": null
 }
 ```
 
@@ -49,9 +53,12 @@ The response contains the plaintext key exactly once:
 include the prefix and last four characters. To revoke a key:
 `DELETE /v1/api/auth/api-keys/{id}`.
 
-Note: if the OIDC group entry gate is enabled (`KEENYSPACE_AUTH__REQUIRED_GROUP`), it
-applies when you log in and mint the key. The minted key itself bypasses the gate —
-possession proves the key was created by an already-authorized user.
+Note: if the group entry gate is enabled (`KEENYSPACE_AUTH__REQUIRED_GROUP`), it also
+applies to API keys. Each request with a key is checked against the owner's group
+snapshot, which is refreshed whenever the owner authenticates via OIDC with a token that
+carries the `groups` claim (`keenyspace login` requests the `groups` scope). A key whose
+owner has never been seen with a groups claim is rejected until the owner logs in once.
+See [OIDC setup](oidc-authentik-setup.md) for offboarding and snapshot max age.
 
 ## 3. Configure the MCP client
 

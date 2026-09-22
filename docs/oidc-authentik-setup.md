@@ -38,6 +38,16 @@ on every startup. This idempotently provisions:
 - OAuth2 provider `keenyspace-cli` (public client, device-code enabled, per_provider issuer)
 - Application `keenyspace` (slug: keenyspace)
 - Brand device-code flow enabled
+- Groups `keenyspace-users` (entry gate) and `keenyspace-admins` (admin API), plus the
+  `groups` scope mapping that puts group names into tokens
+- `akadmin` as a member of both groups, but only if `akadmin` already exists and is
+  still in `authentik Admins`. The blueprint never creates `akadmin` and never re-grants
+  superuser to an `akadmin` you demoted.
+
+The `akadmin` entry writes the user's full group set on every apply: `authentik Admins`,
+`keenyspace-users` and `keenyspace-admins`. Any other group you add to `akadmin` by hand
+is dropped the next time the worker applies the blueprint (every startup). Manage extra
+memberships on other accounts, not on `akadmin`.
 
 Verify the application was provisioned (after Authentik is healthy):
 
@@ -183,10 +193,80 @@ Behavior:
 
 - OIDC users NOT in the group are rejected at authentication with a plain 401. The
   error deliberately does not name the required group.
-- API keys (`ks_live_*`) BYPASS the gate. A key can only be minted by a user who passed
-  the gate at mint time, so possession proves admission — and long-running MCP sessions
-  survive later IdP group changes. Revoke the key
-  (`DELETE /v1/api/auth/api-keys/{id}`) to cut off a holder.
+- Tokens must carry the `groups` claim, so clients must request the `groups` scope. The
+  `keenyspace` CLI (`keenyspace login`) requests `openid profile email groups`. A token
+  without the claim counts as "no groups" and is rejected by the gate.
+- API keys (`ks_live_*`) are gated too. A key carries no IdP claims, so the server
+  checks it against its owner's group snapshot: the groups from the owner's most recent
+  OIDC token that carried a `groups` claim, stored in `users.groups`. Every such OIDC
+  request refreshes the snapshot, and a changed group set takes effect for the owner's
+  keys immediately (verified keys are cached for at most 60 seconds, and the cache is
+  dropped when the snapshot changes).
+- A key whose owner has never authenticated via OIDC since the snapshot was introduced
+  has no snapshot and is rejected with 401 (`auth.group_gate.denied`,
+  `reason=no_group_snapshot` in the server logs). The fix is one OIDC request by the
+  owner, e.g. `keenyspace login` followed by any command, or an MCP client signing in
+  via OAuth.
+- The snapshot only refreshes when the owner uses OIDC. A user removed from the group in
+  Authentik who only ever uses API keys keeps the old snapshot. To bound that window,
+  set `KEENYSPACE_AUTH__API_KEY_GROUP_SNAPSHOT_MAX_AGE_DAYS` in `deploy/.env` (unset by
+  default): keys whose owner has not presented a `groups` claim via OIDC within that
+  many days are refused (`reason=group_snapshot_stale`). Owners then have to log in
+  periodically.
+
+### Admin group
+
+`/v1/admin/*` (backup, restore, `api-keys/revoke-all`) is mounted only when
+`KEENYSPACE_ADMIN_API_ENABLED=1`, and every route additionally requires membership in
+`KEENYSPACE_AUTH__ADMIN_GROUP` (default `keenyspace-admins`). Non-members get 403. As
+with the entry gate, OIDC callers are checked against their token's `groups` claim and
+API keys against the owner's snapshot. Set a different group name in `deploy/.env`; an
+empty value falls back to `keenyspace-admins`. To disable the admin API, set
+`KEENYSPACE_ADMIN_API_ENABLED=0`. Procedures: [docs/backup-restore.md](backup-restore.md).
+
+### API key expiry
+
+Keys do not expire by default. To mint an expiring key, pass `expires_in_days` (1 to
+3650) to `POST /v1/api/auth/api-keys`:
+
+```bash
+curl -sS -X POST http://localhost:8000/v1/api/auth/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "ci-agent", "expires_in_days": 90}'
+```
+
+Mint and list responses include `expires_at` (`null` for keys without expiry). An expired
+key is rejected with 401. Minting and revoking a key are recorded in the audit log.
+
+### Offboarding a user
+
+1. Remove the user from `keenyspace-users` (and `keenyspace-admins`, if applicable) in
+   the Authentik admin UI, or deactivate the account. Newly issued tokens no longer
+   carry the group; an access token issued before the change keeps passing until it
+   expires.
+2. Revoke all of the user's API keys, because an API-key-only user keeps their old
+   group snapshot. With the admin API enabled and as a member of the admin group:
+
+   ```bash
+   curl -sS -X POST http://localhost:8000/v1/admin/api-keys/revoke-all \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"sub": "<user sub>"}'
+   ```
+
+   `sub` is the user's OIDC subject, the same value stored as `user_sub` on their keys.
+   The response is `{"sub": "...", "revoked": <count>}`, and the call is recorded in
+   the audit log as `admin.api_keys.revoked_all`.
+
+A single key can still be revoked by its owner with `DELETE /v1/api/auth/api-keys/{id}`.
+
+### Bearer tokens must be access tokens
+
+`Authorization: Bearer <jwt>` accepts only OIDC access tokens. The server rejects JWTs
+without a `scope` claim, which excludes the ID token Authentik returns alongside the
+access token (same signer, issuer and audience). A client that sends its ID token gets
+401, with `auth.token.not_access_token` in the server logs.
 
 ### Branding
 

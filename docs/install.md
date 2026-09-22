@@ -99,8 +99,10 @@ The `deploy/.env` settings you will most likely set:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `DOMAIN` | Public hostname for Caddy. Set a real domain (e.g. `keenyspace.example.com`) to enable automatic HTTPS via Let's Encrypt. Unset means plain HTTP on `localhost:80`. | `localhost:80` |
-| `KEENYSPACE_AUTH__REQUIRED_GROUP` | OIDC entry gate: only members of this Authentik group can log in. API keys bypass it (they are minted by an already-authorized user). | `keenyspace-users` |
-| `KEENYSPACE_AUTH__ADMIN_GROUP` | Authentik group whose members get administrative rights on the server. | `keenyspace-admins` |
+| `KEENYSPACE_AUTH__REQUIRED_GROUP` | Entry gate: only members of this Authentik group get access. Applies to OIDC tokens (their `groups` claim) and to API keys (the owner's group snapshot from their last OIDC login). | `keenyspace-users` |
+| `KEENYSPACE_AUTH__ADMIN_GROUP` | Authentik group whose members may call the admin API (`/v1/admin/*`: backup, restore, key revocation), which must also be enabled with `KEENYSPACE_ADMIN_API_ENABLED=1`. An empty value falls back to the default. | `keenyspace-admins` |
+| `KEENYSPACE_AUTH__API_KEY_GROUP_SNAPSHOT_MAX_AGE_DAYS` | Refuse API keys whose owner has not logged in via OIDC within this many days. | unset (no limit) |
+| `KEENYSPACE_ADMIN_API_ENABLED` | `1` mounts the admin API. Keep it `0` outside backup/restore/offboarding. | `0` |
 | `KEENYSPACE_METRICS_PORT` | Internal Prometheus listener inside the container. Not published to the host. `0` disables it. | `9100` |
 | `KEENYSPACE_COMPILE__PROVIDER` | LLM provider for the server-side compile agent (`anthropic` or `openai`). | `anthropic` |
 | `KEENYSPACE_COMPILE__MODEL` | Model used by the compile agent. | `claude-sonnet-4-6` |
@@ -127,15 +129,19 @@ chmod 600 deploy/keenyspace.env
 container. Move every `KEENYSPACE_*` override line from `deploy/.env` to
 `deploy/keenyspace.env`, except the ones listed in the table above
 (`KEENYSPACE_AUTH__REQUIRED_GROUP`, `KEENYSPACE_AUTH__ADMIN_GROUP`,
-`KEENYSPACE_METRICS_PORT`, `KEENYSPACE_COMPILE__PROVIDER`, `KEENYSPACE_COMPILE__MODEL`,
+`KEENYSPACE_AUTH__API_KEY_GROUP_SNAPSHOT_MAX_AGE_DAYS`, `KEENYSPACE_METRICS_PORT`,
+`KEENYSPACE_COMPILE__PROVIDER`, `KEENYSPACE_COMPILE__MODEL`,
 `KEENYSPACE_ADMIN_API_ENABLED`) and the secrets, which stay in `deploy/.env`. Overrides
 left behind in `deploy/.env` are silently ignored.
 
-The group gate is on by default: OIDC users who are not members of `keenyspace-users`
-are rejected at login. Add your users to that group in Authentik after first boot (see
-the production hardening section of [docs/oidc-authentik-setup.md](oidc-authentik-setup.md)).
-Existing installs that ran without the gate must add their users to the group before
-upgrading, or those users lose OIDC login (existing API keys keep working).
+The group gate is on by default: users who are not members of `keenyspace-users` are
+rejected, whether they authenticate via OIDC or with an API key. The blueprint adds
+`akadmin` to `keenyspace-users` and `keenyspace-admins`; add your other users to
+`keenyspace-users` in Authentik after first boot (see the production hardening section
+of [docs/oidc-authentik-setup.md](oidc-authentik-setup.md)). Existing installs that ran
+without the gate must add their users to the group before upgrading, and every API key
+owner must authenticate once via OIDC after the upgrade before their keys work again
+(see [docs/upgrade.md](upgrade.md)).
 
 For a production deployment behind a real domain, also review the split-horizon OIDC
 issuer variables (`KEENYSPACE_AUTH__OIDC_ISSUER_URL` must match the URL your users

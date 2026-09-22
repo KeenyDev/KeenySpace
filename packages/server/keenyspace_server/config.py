@@ -79,7 +79,9 @@ class AuthSettings(BaseModel):
 
     multi_worker: bool = False
     required_group: str = ""
-    # Empty string disables the admin API outright; it never widens it to all users.
+    # An empty value never widens admin access to all users: the gate refuses every
+    # caller. Empty env values fall back to this default (env_ignore_empty), so disable
+    # the admin API via KEENYSPACE_ADMIN_API_ENABLED=0 instead.
     admin_group: str = "keenyspace-admins"
     # API keys carry the owner's groups as last seen in an OIDC token. When set,
     # a key whose owner has not authenticated via OIDC within this many days is

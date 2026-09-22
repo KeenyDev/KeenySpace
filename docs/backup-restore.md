@@ -29,7 +29,21 @@ echo 'KEENYSPACE_ADMIN_API_ENABLED=1' >> deploy/.env
 docker compose -f deploy/docker-compose.yml up -d keenyspace
 ```
 
-**Step 2: Run the backup** (requires a logged-in CLI session or an API key):
+**Step 2: Make sure you are an admin.** Every `/v1/admin/*` route additionally requires
+membership in the admin group (`KEENYSPACE_AUTH__ADMIN_GROUP`, default
+`keenyspace-admins`). A caller outside the group gets 403 even with the flag on. The
+check uses the `groups` claim of your OIDC access token, or, when you call with an API
+key, the group snapshot of the key's owner (see "Group entry gate" in
+[docs/oidc-authentik-setup.md](oidc-authentik-setup.md)). The Authentik blueprint puts
+`akadmin` into `keenyspace-admins`; add other operators to that group in the Authentik
+admin UI.
+
+To use a different group name, set `KEENYSPACE_AUTH__ADMIN_GROUP` in `deploy/.env` (the
+compose file sets it under `environment:`, so `deploy/keenyspace.env` cannot override
+it). An empty value falls back to the default `keenyspace-admins`; it does not open the
+admin API to all users. To turn the admin API off, set `KEENYSPACE_ADMIN_API_ENABLED=0`.
+
+**Step 3: Run the backup** (requires a logged-in CLI session or an API key):
 
 ```bash
 keenyspace backup --output keenyspace-backup.tar.gz
@@ -39,11 +53,11 @@ The CLI streams the gzipped tarball from the server with a progress bar. Without
 `--output` it writes `keenyspace-backup-<iso-timestamp>.tar.gz` in the current
 directory.
 
-**Step 3: Store the tarball off-host.** A backup on the same disk as the stack protects
+**Step 4: Store the tarball off-host.** A backup on the same disk as the stack protects
 against nothing. Ship it to object storage, another machine, or at minimum another
 volume.
 
-**Step 4: Disable the admin API again** (see the security note below):
+**Step 5: Disable the admin API again** (see the security note below):
 
 ```bash
 sed -i '' '/KEENYSPACE_ADMIN_API_ENABLED/d' deploy/.env   # macOS; drop the '' on Linux
@@ -52,7 +66,8 @@ docker compose -f deploy/docker-compose.yml up -d keenyspace
 
 ## Restore procedure
 
-With the admin API enabled (Step 1 above) and an empty or expendable target:
+With the admin API enabled and your user in the admin group (Steps 1 and 2 above) and
+an empty or expendable target:
 
 ```bash
 keenyspace restore keenyspace-backup.tar.gz
@@ -103,5 +118,9 @@ path.
 
 Keep `KEENYSPACE_ADMIN_API_ENABLED` OFF in normal production operation. The flag is
 per-operation: enable it for a backup or restore, then remove it and restart. The
-admin endpoints stream your entire dataset to any authenticated caller — there is no
-reason to leave that surface mounted between backups.
+admin endpoints stream your entire dataset to (or overwrite it from) any member of the
+admin group, including through that member's API keys — there is no reason to leave
+that surface mounted between backups. Keep the admin group small.
+
+The admin API also carries `POST /v1/admin/api-keys/revoke-all`, used when offboarding a
+user; see "Offboarding a user" in [docs/oidc-authentik-setup.md](oidc-authentik-setup.md).
