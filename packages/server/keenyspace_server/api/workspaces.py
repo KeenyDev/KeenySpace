@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import shutil
 import uuid
@@ -8,14 +9,19 @@ from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
-from keenyspace_server.fs.blueprint import clone_default_blueprint
+from keenyspace_server.fs.blueprint import (
+    BLUEPRINT_NAME_PATTERN,
+    InvalidBlueprintNameError,
+    UnknownBlueprintError,
+    clone_default_blueprint,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -26,7 +32,7 @@ _SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}[a-zA-Z0-9]$|^[a-zA-Z0-9]
 
 class WorkspaceCreateRequest(BaseModel):
     slug: str
-    blueprint: str = "default"
+    blueprint: str = Field(default="default", pattern=BLUEPRINT_NAME_PATTERN)
 
 
 class WorkspaceResponse(BaseModel):
@@ -63,13 +69,20 @@ async def create_workspace(
     ws_uuid = uuid.uuid4()
     blueprint_ref = f"{body.blueprint}@v0.1"
 
-    ws_dir = clone_default_blueprint(
-        fs_root,
-        body.blueprint,
-        ws_uuid,
-        slug=body.slug,
-        display_name=body.slug,
-    )
+    try:
+        ws_dir = await asyncio.to_thread(
+            clone_default_blueprint,
+            fs_root,
+            body.blueprint,
+            ws_uuid,
+            slug=body.slug,
+            display_name=body.slug,
+        )
+    except (InvalidBlueprintNameError, UnknownBlueprintError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown blueprint {body.blueprint!r}",
+        ) from exc
 
     now = datetime.now(UTC)
     ws = Workspace(

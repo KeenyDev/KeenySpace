@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 pytestmark = pytest.mark.asyncio
+
+_IMAGE_BLUEPRINTS = Path(__file__).resolve().parents[4] / "blueprints"
+
+
+@pytest.fixture(autouse=True)
+def _seed_blueprints(fs_root: Path) -> None:
+    # `client` runs only the engine lifespan, so the boot-time blueprint sync
+    # never populates fs_root/blueprints.
+    from keenyspace_server.fs.bootstrap import ensure_fs_root_layout
+
+    ensure_fs_root_layout(fs_root, _IMAGE_BLUEPRINTS)
 
 
 async def test_create_workspace_returns_201(client, fs_root):

@@ -1,18 +1,25 @@
 """POST /v1/admin/backup + /v1/admin/restore endpoints (Phase 5 F-06).
 
-Backup streams a gzipped tarball whose first entry is manifest.json (BackupManifest
-shape from keenyspace_shared.mcp_contracts), followed by pg_dump.sql and the
-fs_root/workspaces + fs_root/blueprints subtrees with `.obsidian` filtered out.
+Backup builds a gzipped tarball under ``fs_root/tmp/`` and then streams it. The
+first entry is manifest.json (BackupManifest shape from
+keenyspace_shared.mcp_contracts), followed by pg_dump.sql and the
+fs_root/workspaces + fs_root/blueprints subtrees with `.obsidian` and links
+filtered out.
 
-Restore extracts via Python 3.14's `tarfile.extractall(filter="data")` to refuse
-path-traversal / absolute paths / symlinks, validates the manifest's
-keenyspace_version + alembic_head against the running server, and refuses a
-non-empty target unless `?force=true` is supplied (which then wipes via
-FK-aware DELETE + rmtree before applying).
+Restore extracts via Python 3.14's `tarfile.extractall(filter="data")` and
+refuses any link member, validates the manifest's keenyspace_version +
+alembic_head against the running server, refuses a non-empty target unless
+`?force=true` is supplied, and refuses a pg_dump.sql that psql could execute as
+a client-side meta-command. Every check runs before anything is changed. The
+restored trees are then swapped in with the replaced entries parked aside, the
+dump is replayed in one psql transaction (with the force wipe prepended to that
+same transaction), and the parked entries are deleted only once both steps
+succeeded — any failure puts the old trees back and leaves the database as it
+was.
 
 Pitfall #8 (atomic same-volume tmp) is the reason every pg_dump/restore scratch
 directory lives under `fs_root/tmp/` rather than `/tmp` — `os.rename` between
-volumes degrades to copy+delete and breaks the atomic FS move at step 8.
+volumes degrades to copy+delete and breaks the atomic FS swap.
 Pitfall #3 (Python 3.14 tarfile default filter) is set explicitly to `"data"`
 so a future stdlib regression does not silently widen the attack surface.
 """
@@ -23,10 +30,13 @@ import asyncio
 import contextlib
 import io
 import os
+import re
 import secrets
 import shutil
 import tarfile
+from collections.abc import AsyncIterator, Callable, Coroutine
 from datetime import UTC, datetime
+from enum import Enum, auto
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -75,8 +85,11 @@ PG_TABLES_FK_ORDER = [
     "alembic_version",
 ]
 
+FS_TREES = ("workspaces", "blueprints")
+
 UPLOAD_CHUNK_BYTES = 65536
 PSQL_LOCK_TIMEOUT_MS = 30_000
+PG_CLIENT_TIMEOUT_S = 30 * 60
 
 
 def _pg_dump_argv(db_url: str) -> list[str]:
@@ -113,7 +126,13 @@ def _pg_dump_argv(db_url: str) -> list[str]:
 
 def _psql_argv(db_url: str) -> list[str]:
     parsed = urlparse(db_url)
-    argv = ["psql", "--single-transaction", "-v", "ON_ERROR_STOP=1"]
+    argv = [
+        "psql",
+        "--no-psqlrc",
+        "--single-transaction",
+        "-v",
+        "ON_ERROR_STOP=1",
+    ]
     if parsed.hostname:
         argv.extend(["-h", parsed.hostname])
     if parsed.port:
@@ -126,8 +145,17 @@ def _psql_argv(db_url: str) -> list[str]:
 
 
 def _pg_env(db_url: str, *, lock_timeout_ms: int | None = None) -> dict[str, str]:
+    """Environment for pg_dump / psql: PATH plus libpq's own PG* variables.
+
+    The server environment carries LLM keys, the API-key pepper and the session
+    secret; the client tools need none of them, so nothing else is inherited.
+    """
     parsed = urlparse(db_url)
-    env = dict(os.environ)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key == "PATH" or key.startswith("PG")
+    }
     if parsed.password:
         env["PGPASSWORD"] = parsed.password
     if lock_timeout_ms is not None:
@@ -135,27 +163,468 @@ def _pg_env(db_url: str, *, lock_timeout_ms: int | None = None) -> dict[str, str
     return env
 
 
-def _replace_with(src: Path, target: Path) -> None:
-    """Move ``src`` onto ``target``, clearing whatever is already there.
+async def _run_pg_client(
+    argv: list[str],
+    env: dict[str, str],
+    *,
+    feed_stdin: Callable[[asyncio.StreamWriter], Coroutine[Any, Any, None]]
+    | None = None,
+    drain_stdout: Callable[[asyncio.StreamReader], Coroutine[Any, Any, None]]
+    | None = None,
+) -> tuple[int, bytes]:
+    """Run a PostgreSQL client tool and return ``(returncode, stderr)``.
 
-    Both trees hold plain files as well as directories — ``blueprints/`` also
-    carries the image-sync manifest — so the existing target is removed by type
-    rather than assumed to be a directory.
-
-    Pitfall #8: same-volume rename keeps the move atomic; tmp lives under
-    fs_root by construction.
+    stdin, stdout and stderr are serviced concurrently so a chatty stream can
+    never fill its pipe and stall the others. The process is killed when the
+    run exceeds ``PG_CLIENT_TIMEOUT_S`` (raising ``TimeoutError``) or when the
+    caller is cancelled.
     """
-    if target.is_symlink() or (target.exists() and not target.is_dir()):
-        target.unlink()
-    elif target.is_dir():
-        shutil.rmtree(target)
-    os.rename(src, target)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdin=asyncio.subprocess.PIPE if feed_stdin else asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE if drain_stdout else asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    assert proc.stderr is not None
+    try:
+        async with asyncio.timeout(PG_CLIENT_TIMEOUT_S):
+            async with asyncio.TaskGroup() as tg:
+                stderr_task = tg.create_task(proc.stderr.read())
+                if feed_stdin is not None:
+                    assert proc.stdin is not None
+                    tg.create_task(feed_stdin(proc.stdin))
+                if drain_stdout is not None:
+                    assert proc.stdout is not None
+                    tg.create_task(drain_stdout(proc.stdout))
+            returncode = await proc.wait()
+    except BaseException:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        raise
+    return returncode, stderr_task.result()
+
+
+class UnsafeDumpError(Exception):
+    """The dump holds input psql could run as a client-side meta-command."""
+
+    def __init__(self, line_number: int, reason: str) -> None:
+        super().__init__(f"line {line_number}: {reason}")
+        self.line_number = line_number
+        self.reason = reason
+
+
+class _LexState(Enum):
+    CODE = auto()
+    SINGLE_QUOTE = auto()
+    DOUBLE_QUOTE = auto()
+    BLOCK_COMMENT = auto()
+
+
+_IDENT_START = frozenset(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_" + bytes(range(0x80, 0x100))
+)
+_DIGITS = frozenset(b"0123456789")
+_IDENT_CONT = _IDENT_START | _DIGITS | frozenset(b"$")
+_NUMBER_CONT = _IDENT_START | _DIGITS | frozenset(b".")
+_PSQL_VARIABLE_START = _IDENT_START | _DIGITS | frozenset(b"'\"{")
+_WHITESPACE = frozenset(b" \t\n\r\f\v")
+
+# pg_dump >= 17.6 / 16.10 frames plain dumps with these (CVE-2025-8714); they
+# only narrow what psql accepts, so they are the one meta-command let through.
+_RESTRICT_LINE_RE = re.compile(rb"\\(?:un)?restrict [A-Za-z0-9]+\r?\n?")
+_COPY_FROM_STDIN_RE = re.compile(
+    rb'COPY [A-Za-z0-9_."]+(?: \([A-Za-z0-9_", ]+\))? FROM stdin;\r?\n?'
+)
+_COPY_END_LINES = (b"\\.\n", b"\\.\r\n")
+
+
+class _PsqlScriptScanner:
+    """Conservative model of how psql splits a plain-format dump.
+
+    psql treats a backslash outside quotes as the start of a meta-command
+    anywhere on a line (``SELECT 1; \\! id`` runs a shell), while COPY data
+    lines are passed through untouched and legitimately full of backslash
+    escapes. The scanner therefore only needs to know, line by line, whether
+    psql is reading COPY data. It follows psql's quoting, comment and
+    parenthesis rules, and rejects the constructs whose statement boundaries it
+    does not model — dollar quoting, psql variables, ``BEGIN ATOMIC`` bodies —
+    so a mismatch can only refuse a restore, never let a command through. A
+    COPY block is entered solely from a line psql executes as a complete
+    ``COPY ... FROM stdin;``; if that COPY fails, ``ON_ERROR_STOP`` ends the
+    run before psql reads the data lines.
+    """
+
+    def __init__(self) -> None:
+        self._state = _LexState.CODE
+        self._comment_depth = 0
+        self._paren_depth = 0
+        self._statement_open = False
+        self._in_copy = False
+
+    def feed(self, line: bytes, line_number: int) -> None:
+        if self._in_copy:
+            if line in _COPY_END_LINES:
+                self._in_copy = False
+            return
+        if b"\x00" in line:
+            raise UnsafeDumpError(line_number, "NUL byte in script text")
+        at_statement_start = self._at_statement_start()
+        if at_statement_start and _RESTRICT_LINE_RE.fullmatch(line):
+            return
+        if b"\\" in line:
+            raise UnsafeDumpError(line_number, "backslash outside COPY data")
+        self._lex(line, line_number)
+        if (
+            at_statement_start
+            and _COPY_FROM_STDIN_RE.fullmatch(line)
+            and self._at_statement_start()
+        ):
+            self._in_copy = True
+
+    def _at_statement_start(self) -> bool:
+        return (
+            self._state is _LexState.CODE
+            and not self._statement_open
+            and self._paren_depth == 0
+        )
+
+    def _lex(self, line: bytes, line_number: int) -> None:
+        i, n = 0, len(line)
+        while i < n:
+            if self._state is _LexState.SINGLE_QUOTE or self._state is _LexState.DOUBLE_QUOTE:
+                quote = b"'" if self._state is _LexState.SINGLE_QUOTE else b'"'
+                end = line.find(quote, i)
+                if end < 0:
+                    return
+                self._state = _LexState.CODE
+                i = end + 1
+                continue
+            if self._state is _LexState.BLOCK_COMMENT:
+                if line.startswith(b"/*", i):
+                    self._comment_depth += 1
+                    i += 2
+                elif line.startswith(b"*/", i):
+                    self._comment_depth -= 1
+                    if self._comment_depth == 0:
+                        self._state = _LexState.CODE
+                    i += 2
+                else:
+                    i += 1
+                continue
+
+            char = line[i]
+            if char in _WHITESPACE:
+                i += 1
+                continue
+            if line.startswith(b"--", i):
+                return
+            self._statement_open = True
+            if line.startswith(b"/*", i):
+                self._state = _LexState.BLOCK_COMMENT
+                self._comment_depth = 1
+                i += 2
+            elif char == ord("'"):
+                self._state = _LexState.SINGLE_QUOTE
+                i += 1
+            elif char == ord('"'):
+                self._state = _LexState.DOUBLE_QUOTE
+                i += 1
+            elif char == ord("("):
+                self._paren_depth += 1
+                i += 1
+            elif char == ord(")"):
+                self._paren_depth = max(self._paren_depth - 1, 0)
+                i += 1
+            elif char == ord(";"):
+                if self._paren_depth == 0:
+                    self._statement_open = False
+                i += 1
+            elif char == ord(":"):
+                following = line[i + 1] if i + 1 < n else None
+                if following == ord(":"):
+                    i += 2
+                elif following is not None and following in _PSQL_VARIABLE_START:
+                    raise UnsafeDumpError(line_number, "psql variable reference")
+                else:
+                    i += 1
+            elif char == ord("$"):
+                raise UnsafeDumpError(line_number, "dollar quote or parameter")
+            elif char in _IDENT_START:
+                end = _scan(line, i + 1, _IDENT_CONT)
+                if line[i:end].lower() == b"begin":
+                    raise UnsafeDumpError(line_number, "BEGIN block")
+                i = end
+            elif char in _DIGITS:
+                i = _scan(line, i + 1, _NUMBER_CONT)
+            else:
+                i += 1
+
+
+def _scan(line: bytes, start: int, allowed: frozenset[int]) -> int:
+    end = start
+    while end < len(line) and line[end] in allowed:
+        end += 1
+    return end
+
+
+def _check_dump_safe(dump_path: Path) -> None:
+    """Raise ``UnsafeDumpError`` unless psql would only run SQL from the dump."""
+    scanner = _PsqlScriptScanner()
+    with dump_path.open("rb") as fp:
+        for line_number, line in enumerate(fp, start=1):
+            scanner.feed(line, line_number)
+
+
+class _ArchiveLinkError(Exception):
+    """A restore archive carries a symlink or hard link member."""
+
+
+def _restore_member_filter(member: tarfile.TarInfo, dest_path: str) -> tarfile.TarInfo | None:
+    # The data filter admits links that stay inside the extraction dir, but the
+    # extracted trees are then moved one level up into fs_root, where a link
+    # to the extraction root points outside fs_root. Backups never contain
+    # links, so any link is tampering.
+    if member.issym() or member.islnk():
+        raise _ArchiveLinkError(member.name)
+    return tarfile.data_filter(member, dest_path)
+
+
+class _FsSwap:
+    """Reversible replacement of fs_root entries.
+
+    Each replaced entry is renamed into ``aside_dir`` (under fs_root, so the
+    rename stays on one volume) instead of being deleted. ``rollback`` puts the
+    parked entries back; ``commit`` deletes them.
+    """
+
+    def __init__(self, aside_dir: Path) -> None:
+        self._aside_dir = aside_dir
+        self._moves: list[tuple[Path, Path | None]] = []
+
+    def replace(self, src: Path, target: Path) -> None:
+        parked: Path | None = None
+        if target.exists() or target.is_symlink():
+            self._aside_dir.mkdir(parents=True, exist_ok=True)
+            parked = self._aside_dir / str(len(self._moves))
+            os.rename(target, parked)
+        self._moves.append((target, parked))
+        os.rename(src, target)
+
+    def rollback(self) -> None:
+        while self._moves:
+            target, parked = self._moves[-1]
+            _remove_entry(target)
+            if parked is not None:
+                os.rename(parked, target)
+            self._moves.pop()
+        shutil.rmtree(self._aside_dir, ignore_errors=True)
+
+    def commit(self) -> None:
+        self._moves.clear()
+        shutil.rmtree(self._aside_dir, ignore_errors=True)
+
+
+def _remove_entry(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _swap_in_restored_trees(
+    swap: _FsSwap, restored_root: Path, fs_root: Path, *, replace_trees: bool
+) -> None:
+    """Move the extracted fs trees into fs_root through ``swap``.
+
+    With ``replace_trees`` (a forced restore over existing state) each tree
+    present in the archive replaces the current tree wholesale; otherwise the
+    archive's entries are merged in, replacing same-named entries — both trees
+    hold plain files as well as directories (``blueprints/`` carries the
+    image-sync manifest). A tree absent from the archive is left untouched.
+    """
+    for tree in FS_TREES:
+        src = restored_root / tree
+        if not src.is_dir():
+            continue
+        target = fs_root / tree
+        if replace_trees:
+            swap.replace(src, target)
+            continue
+        target.mkdir(parents=True, exist_ok=True)
+        for item in sorted(src.iterdir()):
+            swap.replace(item, target / item.name)
+
+
+async def _rollback_fs_swap(swap: _FsSwap, aside_dir: Path) -> None:
+    try:
+        await asyncio.to_thread(swap.rollback)
+    except Exception:
+        log.exception("admin.restore.fs_rollback_failed", aside_dir=str(aside_dir))
+
+
+def _wipe_statements() -> bytes:
+    return "".join(f"DELETE FROM {table};\n" for table in PG_TABLES_FK_ORDER).encode()
+
+
+async def _replay_dump(db_url: str, pg_dump_path: Path, *, wipe: bool) -> None:
+    """Replay ``pg_dump_path`` through psql in a single transaction.
+
+    With ``wipe`` the FK-ordered DELETEs run first inside that same
+    transaction, so a failed replay leaves the existing rows in place.
+
+    Raises:
+        HTTPException: 500 ``psql_restore_failed`` on a non-zero exit or timeout.
+    """
+    prelude = _wipe_statements() if wipe else b""
+
+    async def _feed(stdin: asyncio.StreamWriter) -> None:
+        try:
+            stdin.write(prelude)
+            await stdin.drain()
+            with pg_dump_path.open("rb") as dump_fp:
+                while dump_chunk := dump_fp.read(UPLOAD_CHUNK_BYTES):
+                    stdin.write(dump_chunk)
+                    await stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            # ON_ERROR_STOP makes psql exit mid-stream; its exit status and
+            # stderr carry the actual failure.
+            pass
+        finally:
+            stdin.close()
+
+    try:
+        returncode, psql_err = await _run_pg_client(
+            _psql_argv(db_url),
+            _pg_env(db_url, lock_timeout_ms=PSQL_LOCK_TIMEOUT_MS),
+            feed_stdin=_feed,
+        )
+    except TimeoutError as exc:
+        ADMIN_RESTORE_TOTAL.labels(outcome="psql_restore_failed").inc()
+        log.error("admin.restore.psql_timeout", timeout_s=PG_CLIENT_TIMEOUT_S)
+        raise HTTPException(
+            500,
+            {
+                "error": "psql_restore_failed",
+                "detail": f"psql did not finish within {PG_CLIENT_TIMEOUT_S}s",
+            },
+        ) from exc
+    if returncode != 0:
+        ADMIN_RESTORE_TOTAL.labels(outcome="psql_restore_failed").inc()
+        stderr_text = psql_err.decode(errors="replace")
+        log.error("admin.restore.psql_failed", stderr=stderr_text)
+        raise HTTPException(
+            500,
+            {"error": "psql_restore_failed", "detail": stderr_text[:500]},
+        )
 
 
 async def _current_alembic_head(session: AsyncSession) -> str:
     row = await session.execute(text("SELECT version_num FROM alembic_version"))
     value = row.scalar_one_or_none()
     return value or "unknown"
+
+
+async def _run_pg_dump(db_url: str, out_path: Path) -> None:
+    """Dump the KeenySpace tables to ``out_path``.
+
+    Raises:
+        HTTPException: 500 ``pg_dump_failed`` on a non-zero exit or timeout.
+    """
+
+    # WR-02: stream pg_dump stdout to disk in chunks instead of buffering the
+    # whole dump; a multi-GB database would otherwise pin O(dump_size) RSS.
+    async def _drain(stdout: asyncio.StreamReader) -> None:
+        with out_path.open("wb") as pg_fp:
+            while pg_chunk := await stdout.read(UPLOAD_CHUNK_BYTES):
+                pg_fp.write(pg_chunk)
+
+    try:
+        returncode, pg_err = await _run_pg_client(
+            _pg_dump_argv(db_url), _pg_env(db_url), drain_stdout=_drain
+        )
+    except TimeoutError as exc:
+        log.error("admin.backup.pg_dump_timeout", timeout_s=PG_CLIENT_TIMEOUT_S)
+        raise HTTPException(500, {"error": "pg_dump_failed"}) from exc
+    if returncode != 0:
+        log.error(
+            "admin.backup.pg_dump_failed",
+            stderr=pg_err.decode(errors="replace"),
+        )
+        raise HTTPException(500, {"error": "pg_dump_failed"})
+
+
+def _backup_member_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    if ".obsidian" in info.name.split("/"):
+        return None
+    if info.issym() or info.islnk():
+        return None
+    return info
+
+
+def _sorted_dir_names(directory: Path) -> list[str]:
+    if not directory.exists():
+        return []
+    return sorted(d.name for d in directory.iterdir() if d.is_dir())
+
+
+def _write_backup_archive(
+    archive_path: Path,
+    pg_dump_path: Path,
+    fs_root: Path,
+    *,
+    alembic_head: str,
+    created_by: str,
+) -> int:
+    """Write the backup tarball to ``archive_path``; return the workspace count.
+
+    Blocking (tree walk, file reads, gzip) — run it off the event loop.
+    """
+    workspaces_dir = fs_root / "workspaces"
+    blueprints_dir = fs_root / "blueprints"
+    ws_uuids = _sorted_dir_names(workspaces_dir)
+    bp_names = _sorted_dir_names(blueprints_dir)
+    fs_root_size = (
+        sum(p.stat().st_size for p in workspaces_dir.rglob("*") if p.is_file())
+        if workspaces_dir.exists()
+        else 0
+    )
+    manifest = BackupManifest(
+        version=1,
+        keenyspace_version=KS_VERSION,
+        schema_version=1,
+        alembic_head=alembic_head,
+        created_at=datetime.now(UTC),
+        created_by=created_by,
+        fs_root_size_bytes=fs_root_size,
+        workspaces={"count": len(ws_uuids), "uuids": ws_uuids},
+        blueprints={"count": len(bp_names), "names": bp_names},
+        pg_tables_dumped=list(PG_TABLES_DUMPED),
+    )
+    manifest_bytes = manifest.model_dump_json(indent=2).encode()
+    now_ts = int(datetime.now(UTC).timestamp())
+
+    with tarfile.open(archive_path, mode="w:gz") as tar:
+        manifest_info = tarfile.TarInfo(name="manifest.json")
+        manifest_info.size = len(manifest_bytes)
+        manifest_info.mtime = now_ts
+        tar.addfile(manifest_info, io.BytesIO(manifest_bytes))
+
+        pg_info = tarfile.TarInfo(name="pg_dump.sql")
+        pg_info.size = pg_dump_path.stat().st_size
+        pg_info.mtime = now_ts
+        with pg_dump_path.open("rb") as fp:
+            tar.addfile(pg_info, fp)
+
+        for tree_dir in (workspaces_dir, blueprints_dir):
+            if tree_dir.exists():
+                tar.add(
+                    str(tree_dir),
+                    arcname=f"fs_root/{tree_dir.name}",
+                    filter=_backup_member_filter,
+                )
+    return len(ws_uuids)
 
 
 @router.post("/backup")
@@ -182,158 +651,40 @@ async def admin_backup(
     tmp_dir = fs_root / "tmp" / f"backup-{secrets.token_hex(8)}"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     pg_dump_path = tmp_dir / "pg_dump.sql"
-    # pg_dump runs BEFORE the StreamingResponse is returned: a failure raised
-    # inside the streaming generator cannot un-send the 200 + headers already on
-    # the wire, so the client would receive a silently-empty "successful" backup
-    # (e.g. a pg_dump client older than the server). Surface it as a real 500.
+    archive_path = tmp_dir / "backup.tar.gz"
+    # The archive is complete on disk BEFORE the StreamingResponse is returned:
+    # a failure raised inside the streaming generator cannot un-send the 200 +
+    # headers already on the wire, so the client would receive a truncated
+    # "successful" backup (e.g. a pg_dump client older than the server).
     try:
-        # WR-02: stream pg_dump stdout to disk in chunks instead of buffering
-        # the whole dump into a single bytes object. A multi-GB production
-        # database would otherwise pin O(dump_size) RSS in the worker process
-        # and risk OOM kills mid-backup.
-        proc = await asyncio.create_subprocess_exec(
-            *_pg_dump_argv(db_url),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=_pg_env(db_url),
+        await _run_pg_dump(db_url, pg_dump_path)
+        workspace_count = await asyncio.to_thread(
+            _write_backup_archive,
+            archive_path,
+            pg_dump_path,
+            fs_root,
+            alembic_head=alembic_head,
+            created_by=user.sub,
         )
-        assert proc.stdout is not None
-        assert proc.stderr is not None
-        with pg_dump_path.open("wb") as pg_fp:
-            while True:
-                pg_chunk = await proc.stdout.read(UPLOAD_CHUNK_BYTES)
-                if not pg_chunk:
-                    break
-                pg_fp.write(pg_chunk)
-        pg_err = await proc.stderr.read()
-        await proc.wait()
-        if proc.returncode != 0:
-            log.error(
-                "admin.backup.pg_dump_failed",
-                stderr=pg_err.decode(errors="replace"),
-            )
-            raise HTTPException(500, {"error": "pg_dump_failed"})
+        archive_size = archive_path.stat().st_size
     except BaseException:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
 
-    async def _stream() -> Any:
+    async def _stream() -> AsyncIterator[bytes]:
         total_bytes = 0
         try:
-            workspaces_dir = fs_root / "workspaces"
-            ws_uuids = (
-                sorted(d.name for d in workspaces_dir.iterdir() if d.is_dir())
-                if workspaces_dir.exists()
-                else []
-            )
-            blueprints_dir = fs_root / "blueprints"
-            bp_names = (
-                sorted(d.name for d in blueprints_dir.iterdir() if d.is_dir())
-                if blueprints_dir.exists()
-                else []
-            )
-            fs_root_size = (
-                sum(
-                    p.stat().st_size
-                    for p in workspaces_dir.rglob("*")
-                    if p.is_file()
-                )
-                if workspaces_dir.exists()
-                else 0
-            )
-            manifest = BackupManifest(
-                version=1,
-                keenyspace_version=KS_VERSION,
-                schema_version=1,
-                alembic_head=alembic_head,
-                created_at=datetime.now(UTC),
-                created_by=user.sub,
-                fs_root_size_bytes=fs_root_size,
-                workspaces={"count": len(ws_uuids), "uuids": ws_uuids},
-                blueprints={"count": len(bp_names), "names": bp_names},
-                pg_tables_dumped=list(PG_TABLES_DUMPED),
-            )
-            manifest_bytes = manifest.model_dump_json(indent=2).encode()
-
-            def _filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-                parts = info.name.split("/")
-                if ".obsidian" in parts:
-                    return None
-                if info.issym() or info.islnk():
-                    return None
-                return info
-
-            buf = io.BytesIO()
-            with tarfile.open(fileobj=buf, mode="w|gz") as tar:
-                manifest_info = tarfile.TarInfo(name="manifest.json")
-                manifest_info.size = len(manifest_bytes)
-                manifest_info.mtime = int(datetime.now(UTC).timestamp())
-                tar.addfile(manifest_info, io.BytesIO(manifest_bytes))
-                chunk = buf.getvalue()
-                if chunk:
+            with archive_path.open("rb") as fp:
+                while chunk := await asyncio.to_thread(fp.read, UPLOAD_CHUNK_BYTES):
                     total_bytes += len(chunk)
                     yield chunk
-                buf.seek(0)
-                buf.truncate()
-
-                pg_info = tarfile.TarInfo(name="pg_dump.sql")
-                pg_info.size = pg_dump_path.stat().st_size
-                pg_info.mtime = int(datetime.now(UTC).timestamp())
-                with pg_dump_path.open("rb") as fp:
-                    tar.addfile(pg_info, fp)
-                chunk = buf.getvalue()
-                if chunk:
-                    total_bytes += len(chunk)
-                    yield chunk
-                buf.seek(0)
-                buf.truncate()
-
-                # WR-07: tar.add() recursively walks the directory tree
-                # synchronously, reading file bytes and writing them to the
-                # tarfile object. Under single-worker uvicorn that blocks
-                # every other handler — health probes, hook callbacks,
-                # MCP tool calls — for the duration of the walk. Offload
-                # to a worker thread; the BytesIO buf is drained AFTER the
-                # to_thread call (no concurrent writer/reader, no need to
-                # interleave yield mid-walk for correctness).
-                def _tar_add_dir(
-                    tar_obj: tarfile.TarFile, src: Path, arcname: str
-                ) -> None:
-                    tar_obj.add(str(src), arcname=arcname, filter=_filter)
-
-                if workspaces_dir.exists():
-                    await asyncio.to_thread(
-                        _tar_add_dir, tar, workspaces_dir, "fs_root/workspaces"
-                    )
-                    chunk = buf.getvalue()
-                    if chunk:
-                        total_bytes += len(chunk)
-                        yield chunk
-                    buf.seek(0)
-                    buf.truncate()
-
-                if blueprints_dir.exists():
-                    await asyncio.to_thread(
-                        _tar_add_dir, tar, blueprints_dir, "fs_root/blueprints"
-                    )
-                    chunk = buf.getvalue()
-                    if chunk:
-                        total_bytes += len(chunk)
-                        yield chunk
-                    buf.seek(0)
-                    buf.truncate()
-
-            tail = buf.getvalue()
-            if tail:
-                total_bytes += len(tail)
-                yield tail
             ADMIN_BACKUP_BYTES.inc(total_bytes)
             ADMIN_BACKUP_TOTAL.inc()
             log.info(
                 "admin.backup.completed",
                 user_sub=user.sub,
                 total_bytes=total_bytes,
-                workspace_count=len(ws_uuids),
+                workspace_count=workspace_count,
             )
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -346,6 +697,7 @@ async def admin_backup(
             "Content-Disposition": (
                 f'attachment; filename="keenyspace-backup-{iso}.tar.gz"'
             ),
+            "Content-Length": str(archive_size),
         },
     )
 
@@ -367,6 +719,7 @@ async def admin_restore(
     tmp_dir = tmp_parent / f"restore-{secrets.token_hex(8)}"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     archive_path = tmp_parent / f"{tmp_dir.name}.tar.gz"
+    aside_dir = tmp_parent / f"{tmp_dir.name}.aside"
     try:
         with archive_path.open("wb") as fp:
             while True:
@@ -381,13 +734,18 @@ async def admin_restore(
         # requests during a large restore.
         def _extract_tar() -> None:
             with tarfile.open(archive_path, "r:gz") as tar:
-                # Pitfall #3: Python 3.14 defaults tarfile filter to "data" but
-                # we set it explicitly so a future stdlib regression cannot widen
-                # the attack surface silently.
-                tar.extractall(path=tmp_dir, filter="data")
+                # Pitfall #3: the data filter is applied explicitly (inside
+                # _restore_member_filter) so a future stdlib default change
+                # cannot widen the attack surface silently.
+                tar.extractall(path=tmp_dir, filter=_restore_member_filter)
 
         try:
             await asyncio.to_thread(_extract_tar)
+        except _ArchiveLinkError as exc:
+            ADMIN_RESTORE_TOTAL.labels(outcome="symlink").inc()
+            raise HTTPException(
+                422, {"error": "symlink", "detail": f"link member {exc}"}
+            ) from exc
         except tarfile.OutsideDestinationError as exc:
             ADMIN_RESTORE_TOTAL.labels(outcome="path_traversal").inc()
             raise HTTPException(
@@ -452,12 +810,7 @@ async def admin_restore(
             await session.execute(text("SELECT count(*) FROM workspaces"))
         ).scalar_one()
         existing = int(existing)
-        ws_dir = fs_root / "workspaces"
-        existing_dirs = (
-            [d.name for d in ws_dir.iterdir() if d.is_dir()]
-            if ws_dir.exists()
-            else []
-        )
+        existing_dirs = _sorted_dir_names(fs_root / "workspaces")
         if (existing > 0 or existing_dirs) and not force:
             ADMIN_RESTORE_TOTAL.labels(outcome="target_not_empty").inc()
             raise HTTPException(
@@ -469,12 +822,63 @@ async def admin_restore(
                 },
             )
 
-        if force and (existing > 0 or existing_dirs):
-            for table in PG_TABLES_FK_ORDER:
-                await session.execute(text(f"DELETE FROM {table}"))
-            await session.commit()
-            shutil.rmtree(fs_root / "workspaces", ignore_errors=True)
-            shutil.rmtree(fs_root / "blueprints", ignore_errors=True)
+        pg_dump_path = tmp_dir / "pg_dump.sql"
+        if not pg_dump_path.is_file():
+            ADMIN_RESTORE_TOTAL.labels(outcome="missing_pg_dump").inc()
+            raise HTTPException(422, {"error": "missing_pg_dump"})
+        restored_root = tmp_dir / "fs_root"
+        if not (restored_root / "workspaces").is_dir():
+            ADMIN_RESTORE_TOTAL.labels(outcome="missing_fs_tree").inc()
+            raise HTTPException(
+                422, {"error": "missing_fs_tree", "detail": "fs_root/workspaces"}
+            )
+        try:
+            await asyncio.to_thread(_check_dump_safe, pg_dump_path)
+        except UnsafeDumpError as exc:
+            ADMIN_RESTORE_TOTAL.labels(outcome="unsafe_pg_dump").inc()
+            log.warning(
+                "admin.restore.unsafe_pg_dump",
+                user_sub=user.sub,
+                line_number=exc.line_number,
+                reason=exc.reason,
+            )
+            raise HTTPException(
+                422, {"error": "unsafe_pg_dump", "detail": str(exc)}
+            ) from exc
+
+        wipe = force and (existing > 0 or bool(existing_dirs))
+
+        # This request's own session still holds the ACCESS SHARE locks taken by
+        # the reads above (alembic_version, workspaces). The dump replays with
+        # --clean, whose DROP TABLE needs ACCESS EXCLUSIVE, so psql would wait
+        # on our transaction forever — silently, with the connection healthy.
+        await session.commit()
+
+        swap = _FsSwap(aside_dir)
+        try:
+            await asyncio.to_thread(
+                _swap_in_restored_trees,
+                swap,
+                restored_root,
+                fs_root,
+                replace_trees=wipe,
+            )
+            await _replay_dump(db_url, pg_dump_path, wipe=wipe)
+        except BaseException:
+            await _rollback_fs_swap(swap, aside_dir)
+            raise
+
+        # psql replayed a --clean dump: every table the pool's connections have
+        # touched was dropped and recreated underneath them, invalidating the
+        # cached statements asyncpg holds per connection. Drop the pool so the
+        # writes below run on connections that have seen the restored schema.
+        engine = get_engine()
+        if engine is not None:
+            await engine.dispose()
+
+        await asyncio.to_thread(swap.commit)
+
+        if wipe:
             ADMIN_RESTORE_WIPED_TOTAL.inc()
             await write_audit(
                 session,
@@ -485,87 +889,6 @@ async def admin_restore(
                     "target_fs_uuid_count_before": len(existing_dirs),
                 },
             )
-            await session.commit()
-
-        pg_dump_path = tmp_dir / "pg_dump.sql"
-        if not pg_dump_path.exists():
-            ADMIN_RESTORE_TOTAL.labels(outcome="missing_pg_dump").inc()
-            raise HTTPException(422, {"error": "missing_pg_dump"})
-
-        # WR-02: stream the extracted pg_dump file into psql's stdin in
-        # chunks rather than loading the entire dump into a single bytes
-        # buffer before piping. For a multi-GB dump the buffered variant
-        # holds two copies (file bytes + subprocess input) in RSS.
-        # This request's own session still holds the ACCESS SHARE locks taken by
-        # the reads above (alembic_version, workspaces). The dump replays with
-        # --clean, whose DROP TABLE needs ACCESS EXCLUSIVE, so psql would wait
-        # on our transaction forever — silently, with the connection healthy.
-        # The force branch happens to commit; the non-force path did not, which
-        # is why an unforced restore hung until the client timed out.
-        await session.commit()
-
-        # Belt and braces: if some *other* session holds a conflicting lock,
-        # fail with psql_restore_failed instead of hanging the request.
-        psql = await asyncio.create_subprocess_exec(
-            *_psql_argv(db_url),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=_pg_env(db_url, lock_timeout_ms=PSQL_LOCK_TIMEOUT_MS),
-        )
-        assert psql.stdin is not None
-        assert psql.stderr is not None
-        with pg_dump_path.open("rb") as dump_fp:
-            while True:
-                dump_chunk = dump_fp.read(UPLOAD_CHUNK_BYTES)
-                if not dump_chunk:
-                    break
-                psql.stdin.write(dump_chunk)
-                await psql.stdin.drain()
-        psql.stdin.close()
-        psql_err = await psql.stderr.read()
-        await psql.wait()
-        if psql.returncode != 0:
-            ADMIN_RESTORE_TOTAL.labels(outcome="psql_restore_failed").inc()
-            log.error(
-                "admin.restore.psql_failed",
-                stderr=psql_err.decode(errors="replace"),
-            )
-            raise HTTPException(
-                500,
-                {
-                    "error": "psql_restore_failed",
-                    "detail": psql_err.decode(errors="replace")[:500],
-                },
-            )
-
-        # psql replayed a --clean dump: every table the pool's connections have
-        # touched was dropped and recreated underneath them, invalidating the
-        # cached statements asyncpg holds per connection. Drop the pool so the
-        # writes below run on connections that have seen the restored schema.
-        engine = get_engine()
-        if engine is not None:
-            await engine.dispose()
-
-        src_workspaces = tmp_dir / "fs_root" / "workspaces"
-        src_blueprints = tmp_dir / "fs_root" / "blueprints"
-        (fs_root / "workspaces").mkdir(parents=True, exist_ok=True)
-        # WR-08: the prior shutil.rmtree(..., ignore_errors=True) is
-        # best-effort and may silently leave partial subtrees (open file
-        # handles, immutable dirs, files in use by compile). os.rename to
-        # an existing directory then raises IsADirectoryError /
-        # OSError(EEXIST) mid-loop, leaving the restore HALF-APPLIED with
-        # `admin.restore.applied` audit row already committed. Detect-and-
-        # delete the conflicting target before rename, and surface the
-        # failure rather than ignore_errors-papering over it.
-        if src_workspaces.exists():
-            for item in src_workspaces.iterdir():
-                _replace_with(item, fs_root / "workspaces" / item.name)
-        (fs_root / "blueprints").mkdir(parents=True, exist_ok=True)
-        if src_blueprints.exists():
-            for item in src_blueprints.iterdir():
-                _replace_with(item, fs_root / "blueprints" / item.name)
-
         await write_audit(
             session,
             actor_sub=user.sub,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -110,3 +111,46 @@ def test_move_instructions_preserves_existing_dst(tmp_path: Path) -> None:
     assert (
         ws / ".keenyspace" / "instructions" / "ingest.md"
     ).read_text() == "already-here"
+
+
+def test_clone_rejects_name_outside_blueprints_dir(tmp_path: Path) -> None:
+    from keenyspace_server.fs.blueprint import (
+        InvalidBlueprintNameError,
+        clone_default_blueprint,
+    )
+
+    fs_root = tmp_path / "fs_root"
+    _make_blueprint(fs_root / "workspaces" / "victim", with_instructions=False)
+
+    for name in ("/etc", "..", "../workspaces/victim", "a/b"):
+        with pytest.raises(InvalidBlueprintNameError):
+            clone_default_blueprint(fs_root, name, uuid.uuid4())
+
+
+def test_clone_unknown_blueprint_raises_unknown(tmp_path: Path) -> None:
+    from keenyspace_server.fs.blueprint import UnknownBlueprintError, clone_default_blueprint
+
+    fs_root = tmp_path / "fs_root"
+    (fs_root / "blueprints").mkdir(parents=True)
+
+    with pytest.raises(UnknownBlueprintError):
+        clone_default_blueprint(fs_root, "missing", uuid.uuid4())
+
+
+def test_clone_skips_symlinks_inside_blueprint(tmp_path: Path) -> None:
+    from keenyspace_server.fs.blueprint import clone_default_blueprint
+
+    fs_root = tmp_path / "fs_root"
+    bp_dir = fs_root / "blueprints" / "test-bp"
+    _make_blueprint(bp_dir, with_instructions=False)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.md").write_text("not blueprint content\n")
+    (bp_dir / "linked-dir").symlink_to(outside, target_is_directory=True)
+    (bp_dir / "linked-file.md").symlink_to(outside / "secret.md")
+
+    ws_dir = clone_default_blueprint(fs_root, "test-bp", uuid.uuid4())
+
+    assert (ws_dir / "index.md").exists()
+    assert not (ws_dir / "linked-dir").exists()
+    assert not (ws_dir / "linked-file.md").exists()
