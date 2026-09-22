@@ -39,6 +39,6 @@ DAEMON_SOCK = STATE_DIR / "daemon.sock"
 DAEMON_LOG = STATE_DIR / "daemon.log"
 DAEMON_PID = STATE_DIR / "daemon.pid"
 DROPPED_JSON = STATE_DIR / "dropped.json"
-INGEST_CURSORS = STATE_DIR / "ingest-cursors.json"
+INGEST_STATE = STATE_DIR / "ingest-state.json"
 
 DEFAULT_PULL_ROOT = Path.home() / "keenyspace"

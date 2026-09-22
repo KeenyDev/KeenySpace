@@ -4,8 +4,8 @@ Independent of hooks. On a timer the daemon scans ``~/.claude/projects/*/*.jsonl
 maps each session's recorded ``cwd`` to a workspace slug (registered directories
 ONLY -- the workspace-map / slug-marker, never the ``default`` fallback), and
 ingests the bytes appended since the last cursor via the server-driven ``ingest``
-flow. Per-file byte cursors persist in ``ingest-cursors.json`` so a delta is never
-ingested twice. Distillation + the actual ``append_log`` happen server-side inside
+flow. Per-file byte cursors, pending text and retry state persist together in
+``ingest-state.json`` so a delta is never ingested twice. Distillation + the actual ``append_log`` happen server-side inside
 the ingest agent; compile then materialises pages on its own debounce/backstop.
 
 This is the implicit-capture write path. The hooks remain only for post-compact
@@ -18,7 +18,9 @@ import asyncio
 import contextlib
 import json
 import os
+import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -58,46 +60,136 @@ IngestFn = Callable[[str, str, str], Awaitable[None]]
 ResolveFn = Callable[[str], tuple[str | None, str]]
 
 
+# Real ingest failures (timeout, server/LLM error) cost tokens and may have
+# partially appended before failing, so they are retried with exponential backoff
+# and dead-lettered after MAX_INGEST_ATTEMPTS instead of every tick forever.
+RETRY_BASE_SECONDS = DEFAULT_INTERVAL_SECONDS
+RETRY_MAX_SECONDS = 6 * 3600
+MAX_INGEST_ATTEMPTS = 5
+
+_LEGACY_CURSORS_NAME = "ingest-cursors.json"
+_LEGACY_BUFFERS_NAME = "ingest-buffers.json"
+_DEAD_LETTER_NAME = "ingest-dead-letter.jsonl"
+
+
 class IngestSkippedError(Exception):
-    """Ingest could not run (no credential / LLM key); the buffer must be kept."""
+    """Ingest could not run (no credential / LLM key); the buffer must be kept.
+
+    Skips cost nothing, so they are retried every tick without backoff.
+    """
+
+
+@dataclass
+class IngestRetry:
+    attempts: int
+    next_retry_at: float
+
+
+@dataclass
+class ReaderState:
+    """Per-transcript byte cursors, pending extracted text, and failure backoff."""
+
+    cursors: dict[str, int] = field(default_factory=dict)
+    buffers: dict[str, str] = field(default_factory=dict)
+    retries: dict[str, IngestRetry] = field(default_factory=dict)
 
 
 def _claude_projects_dir() -> Path:
     return Path.home() / ".claude" / "projects"
 
 
-def _load_cursors(path: Path) -> dict[str, int]:
+def _read_json_object(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         return {}
-    if not isinstance(data, dict):
+    return data if isinstance(data, dict) else {}
+
+
+def _int_map(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, dict):
         return {}
-    return {k: int(v) for k, v in data.items() if isinstance(v, (int, float))}
+    return {k: int(v) for k, v in raw.items() if isinstance(v, (int, float))}
 
 
-def _buffers_path(cursors_path: Path) -> Path:
-    return cursors_path.with_name("ingest-buffers.json")
-
-
-def _load_buffers(path: Path) -> dict[str, str]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
+def _str_map(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
         return {}
-    if not isinstance(data, dict):
-        return {}
-    return {k: v for k, v in data.items() if isinstance(v, str) and v}
+    return {k: v for k, v in raw.items() if isinstance(v, str) and v}
 
 
-def _save_buffers(path: Path, buffers: dict[str, str]) -> None:
-    # Transcript text: owner-only, like every other secret-adjacent state file.
-    try:
-        write_atomic_secret(
-            path, json.dumps({k: v for k, v in buffers.items() if v}).encode("utf-8")
+def load_state(path: Path) -> ReaderState:
+    """Load reader state, falling back to the legacy split cursor/buffer files."""
+    data = _read_json_object(path)
+    if not data:
+        return ReaderState(
+            cursors=_int_map(_read_json_object(path.with_name(_LEGACY_CURSORS_NAME))),
+            buffers=_str_map(_read_json_object(path.with_name(_LEGACY_BUFFERS_NAME))),
         )
+    retries_raw = data.get("retries")
+    retries: dict[str, IngestRetry] = {}
+    if isinstance(retries_raw, dict):
+        for key, entry in retries_raw.items():
+            if not isinstance(entry, dict):
+                continue
+            attempts = entry.get("attempts")
+            next_retry_at = entry.get("next_retry_at")
+            if isinstance(attempts, int) and isinstance(next_retry_at, (int, float)):
+                retries[key] = IngestRetry(attempts, float(next_retry_at))
+    return ReaderState(
+        cursors=_int_map(data.get("cursors")),
+        buffers=_str_map(data.get("buffers")),
+        retries=retries,
+    )
+
+
+def save_state(path: Path, state: ReaderState) -> None:
+    """Persist cursors, buffers and retry state in one atomic owner-only write.
+
+    One file means a crash can never leave cursors advanced past text whose
+    buffer was not saved (or vice versa). Buffers hold transcript text -> 0600.
+    """
+    doc = {
+        "version": 1,
+        "cursors": state.cursors,
+        "buffers": {k: v for k, v in state.buffers.items() if v},
+        "retries": {
+            k: {"attempts": r.attempts, "next_retry_at": r.next_retry_at}
+            for k, r in state.retries.items()
+        },
+    }
+    try:
+        write_atomic_secret(path, json.dumps(doc).encode("utf-8"))
+        for legacy in (_LEGACY_CURSORS_NAME, _LEGACY_BUFFERS_NAME):
+            path.with_name(legacy).unlink(missing_ok=True)
     except OSError as exc:
-        log.warning("session_reader.buffer_persist_failed", error=str(exc))
+        log.warning("session_reader.state_persist_failed", error=str(exc))
+
+
+def _dead_letter(path: Path, *, key: str, slug: str, text: str, attempts: int, now: float) -> bool:
+    record = {"file": key, "workspace": slug, "attempts": attempts, "failed_at": now, "text": text}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, (json.dumps(record) + "\n").encode("utf-8"))
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        log.error("session_reader.dead_letter_failed", file=key, error=str(exc))
+        return False
+    log.warning(
+        "session_reader.dead_lettered",
+        file=key,
+        workspace=slug,
+        attempts=attempts,
+        dead_letter=str(path),
+    )
+    return True
+
+
+def _backoff_seconds(attempts: int) -> float:
+    return float(min(RETRY_BASE_SECONDS * 2 ** (attempts - 1), RETRY_MAX_SECONDS))
 
 
 def _append_capped(existing: str, extracted: str, max_chars: int) -> tuple[str, bool]:
@@ -109,16 +201,6 @@ def _append_capped(existing: str, extracted: str, max_chars: int) -> tuple[str, 
     if 0 <= nl < len(tail) - 1:
         tail = tail[nl + 1 :]
     return tail, True
-
-
-def _save_cursors(path: Path, cursors: dict[str, int]) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(cursors), encoding="utf-8")
-        tmp.replace(path)
-    except OSError as exc:
-        log.warning("session_reader.cursor_persist_failed", error=str(exc))
 
 
 def _transcript_cwd(path: Path) -> str | None:
@@ -238,19 +320,21 @@ async def _default_ingest(slug: str, text: str, source_path: str) -> None:
 
 
 async def _tick(
-    cursors: dict[str, int],
-    buffers: dict[str, str],
+    state: ReaderState,
     *,
     projects_dir: Path,
     ingest_fn: IngestFn,
     resolve_fn: ResolveFn,
     min_delta_chars: int,
+    dead_letter_path: Path,
     max_delta_bytes: int = MAX_DELTA_BYTES,
     max_buffer_chars: int = MAX_BUFFER_CHARS,
     ingest_timeout: float = INGEST_TIMEOUT_SECONDS,
+    clock: Callable[[], float] = time.time,
 ) -> None:
     if not projects_dir.is_dir():
         return
+    cursors, buffers, retries = state.cursors, state.buffers, state.retries
     for proj in sorted(projects_dir.iterdir()):
         if not proj.is_dir():
             continue
@@ -262,8 +346,8 @@ async def _tick(
             except OSError:
                 continue
             has_new_bytes = size > offset
-            # A full buffer whose earlier ingest failed/skipped is retried even when
-            # the session is idle; otherwise it would be stranded until new bytes.
+            # A full buffer is retried even when the session is idle; otherwise
+            # text whose ingest was skipped/failed would be stranded until new bytes.
             if not has_new_bytes and len(buffers.get(key, "")) < min_delta_chars:
                 continue
             cwd = _transcript_cwd(transcript)
@@ -274,6 +358,7 @@ async def _tick(
                 # Unregistered cwd: skip forward so we never reprocess it.
                 cursors[key] = size
                 buffers.pop(key, None)
+                retries.pop(key, None)
                 continue
 
             if has_new_bytes:
@@ -305,6 +390,9 @@ async def _tick(
                     log.warning("session_reader.oversized_record_skipped", file=key)
             if len(buffers.get(key, "")) < min_delta_chars:
                 continue
+            retry = retries.get(key)
+            if retry is not None and clock() < retry.next_retry_at:
+                continue
 
             text = buffers[key]
             try:
@@ -313,12 +401,32 @@ async def _tick(
                 log.info("session_reader.ingest_skipped", file=key, reason=str(exc))
                 continue
             except Exception as exc:  # one bad session must not stall the loop
-                # Keep the buffer (cursor already advanced) so the text is retried,
-                # not lost, on the next tick.
                 reason = "timeout" if isinstance(exc, TimeoutError) else str(exc)
-                log.warning("session_reader.ingest_failed", file=key, error=reason)
+                attempts = (retry.attempts if retry is not None else 0) + 1
+                now = clock()
+                if attempts >= MAX_INGEST_ATTEMPTS:
+                    if _dead_letter(
+                        dead_letter_path, key=key, slug=slug, text=text,
+                        attempts=attempts, now=now,
+                    ):
+                        buffers[key] = ""
+                        retries.pop(key, None)
+                    else:
+                        # Never drop text we could not park: keep it, retry rarely.
+                        retries[key] = IngestRetry(attempts, now + RETRY_MAX_SECONDS)
+                    continue
+                delay = _backoff_seconds(attempts)
+                retries[key] = IngestRetry(attempts, now + delay)
+                log.warning(
+                    "session_reader.ingest_failed",
+                    file=key,
+                    error=reason,
+                    attempts=attempts,
+                    retry_in=delay,
+                )
                 continue
             buffers[key] = ""
+            retries.pop(key, None)
             log.info("session_reader.ingested", workspace=slug, file=key, chars=len(text))
 
 
@@ -330,32 +438,27 @@ async def run_transcript_reader(
     ingest_fn: IngestFn | None = None,
     resolve_fn: ResolveFn | None = None,
     projects_dir: Path | None = None,
-    cursors_path: Path | None = None,
+    state_path: Path | None = None,
 ) -> None:
     """Poll loop: ingest transcript deltas until ``stop_event`` is set."""
     fn = ingest_fn or _default_ingest
     resolver: ResolveFn = resolve_fn or (lambda cwd: resolve_workspace_slug(cwd=cwd))
     pdir = projects_dir or _claude_projects_dir()
-    cpath = cursors_path or paths.INGEST_CURSORS
-    bpath = _buffers_path(cpath)
-    cursors = _load_cursors(cpath)
-    # Per-file extracted-text buffers accumulate low-text windows (and text whose
-    # ingest failed) across ticks, so signal isn't dropped while the cursor keeps
-    # advancing. Persisted alongside the cursors so a restart doesn't lose them.
-    buffers = _load_buffers(bpath)
+    spath = state_path or paths.INGEST_STATE
+    dead_letter_path = spath.with_name(_DEAD_LETTER_NAME)
+    state = load_state(spath)
     log.info("session_reader.started", projects_dir=str(pdir), interval=interval_seconds)
     while not stop_event.is_set():
         try:
             await _tick(
-                cursors,
-                buffers,
+                state,
                 projects_dir=pdir,
                 ingest_fn=fn,
                 resolve_fn=resolver,
                 min_delta_chars=min_delta_chars,
+                dead_letter_path=dead_letter_path,
             )
-            _save_buffers(bpath, buffers)
-            _save_cursors(cpath, cursors)
+            save_state(spath, state)
         except Exception as exc:  # the loop must survive any single-tick failure
             log.warning("session_reader.tick_failed", error=str(exc))
         with contextlib.suppress(TimeoutError):
