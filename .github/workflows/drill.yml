@@ -11,9 +11,10 @@ jobs:
   backup-restore-drill:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version: "0.10.8"
           enable-cache: true
       - name: Install keenyspace CLI
         run: |
@@ -21,6 +22,8 @@ jobs:
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Build image
         run: docker build -f deploy/Dockerfile -t keenyspace:drill .
+      - name: Generate deploy secrets
+        run: bash deploy/gen-secrets.sh
       - name: Start stack
         env:
           COMPOSE_PROJECT_NAME: ks-drill
@@ -125,12 +128,15 @@ jobs:
   proxy-test-caddy:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version: "0.10.8"
           enable-cache: true
       - name: Build image
         run: docker build -f deploy/Dockerfile -t keenyspace:drill .
+      - name: Generate deploy secrets
+        run: bash deploy/gen-secrets.sh
       - name: Start stack with Caddy
         env:
           COMPOSE_PROJECT_NAME: ks-caddy
@@ -174,12 +180,15 @@ jobs:
   proxy-test-nginx:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          version: "0.10.8"
           enable-cache: true
       - name: Build image
         run: docker build -f deploy/Dockerfile -t keenyspace:drill .
+      - name: Generate deploy secrets
+        run: bash deploy/gen-secrets.sh
       - name: Start stack with nginx
         env:
           COMPOSE_PROJECT_NAME: ks-nginx
@@ -191,7 +200,7 @@ jobs:
             --network ks-nginx_default \
             -p 80:80 \
             -v "$PWD/deploy/reverse-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
-            nginx:stable-alpine
+            nginx:1.30.5-alpine
       - name: Mint API key
         env:
           COMPOSE_PROJECT_NAME: ks-nginx

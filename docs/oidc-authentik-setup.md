@@ -11,22 +11,24 @@ on every startup so you can run `keenyspace login` immediately after `docker com
 **Step 1: Start the full stack**
 
 ```
-docker compose up
+./deploy/gen-secrets.sh
+docker compose -f deploy/docker-compose.yml up
 ```
 
 This starts: KeenySpace, Postgres, Authentik (server + worker), Authentik Postgres, Redis.
 Wait until all services pass their healthchecks (typically 60-90 seconds for Authentik).
 
-**Step 2: Default credentials warning**
+**Step 2: Secrets are required**
 
-The `deploy/docker-compose.yml` ships with `*-replace-me` placeholder values for:
+`deploy/docker-compose.yml` has no fallback values for secrets. Run
+`./deploy/gen-secrets.sh` before the first `docker compose up`; it creates
+`deploy/.env` with, among others:
 
 - `AUTHENTIK_BOOTSTRAP_PASSWORD` (akadmin initial password)
 - `AUTHENTIK_BOOTSTRAP_TOKEN` (admin API token)
 - `AUTHENTIK_SECRET_KEY` (session signing key)
 
-These are fine for local dogfood. Replace them before any production or internet-facing
-deployment (Phase 7 DEP-06b owns the real-secret-management section of this doc).
+Without them compose refuses to start and names the missing variable.
 
 **Step 3: Blueprint auto-provision evidence**
 
@@ -125,10 +127,12 @@ secrets the stack consumes: the KeenySpace and Authentik Postgres passwords, the
 Authentik secret key and bootstrap admin password/token, the OIDC client secret, the
 session signing key, and the API key pepper.
 
-Never ship the `replace-me` compose defaults. They exist only so the dogfood stack
-boots without a `.env` file — every `${VAR:-...replace-me...}` fallback in
-`deploy/docker-compose.yml` is overridden by the generated `.env`. The release CI scans
-for placeholder values reaching production configs; you should treat any `replace-me`
+The compose file interpolates every secret as `${VAR:?run deploy/gen-secrets.sh}`, so a
+missing value fails `docker compose` immediately instead of silently booting with a
+well-known default. The script only appends missing keys and never overwrites existing
+values. Existing installs that previously relied on the old `replace-me` defaults must
+carry the database passwords and `AUTHENTIK_SECRET_KEY` over into `deploy/.env` first;
+see "Existing installs" in [docs/install.md](install.md). Treat any `replace-me` value
 in a running deployment as an incident.
 
 ### Reverse proxy in front of Authentik
@@ -167,8 +171,9 @@ real hostname.
 
 Restrict server access to members of one Authentik group:
 
-1. Set `KEENYSPACE_AUTH__REQUIRED_GROUP=keenyspace-users` in `deploy/.env` and restart
-   the server. Empty (the default) means the gate is disabled.
+1. The compose file enables the gate by default with
+   `KEENYSPACE_AUTH__REQUIRED_GROUP=keenyspace-users`. Override the group name in
+   `deploy/.env` if you use a different one.
 2. The `keenyspace-users` group and the `groups` scope mapping are already provisioned
    by the blueprint (`deploy/authentik/blueprints/keenyspace.yaml`) — you only need to
    add users to the group: Authentik admin UI > Directory > Groups > keenyspace-users >

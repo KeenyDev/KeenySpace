@@ -20,3 +20,4 @@ dist/
 .vex*
 open-questions.md
 vision.md
+deploy/*.env

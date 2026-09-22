@@ -1,20 +1,30 @@
-ARG TARGETPLATFORM
-
 FROM python:3.14.1-slim-bookworm AS builder
 
 RUN pip install --no-cache-dir uv==0.10.8
 
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+
 WORKDIR /app
-COPY pyproject.toml .
+
+COPY pyproject.toml uv.lock ./
 COPY packages/server/pyproject.toml packages/server/pyproject.toml
 COPY packages/shared/pyproject.toml packages/shared/pyproject.toml
 COPY packages/client/pyproject.toml packages/client/pyproject.toml
-COPY uv.lock .
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-workspace --package keenyspace-server
+
 COPY packages/server/keenyspace_server packages/server/keenyspace_server
 COPY packages/shared/keenyspace_shared packages/shared/keenyspace_shared
-COPY packages/client/keenyspace packages/client/keenyspace
 
-RUN uv sync --frozen --no-dev --package keenyspace-server
+# Workspace members stay editable (installed as paths into /app/packages): the
+# server resolves alembic.ini and the default blueprints dir relative to its
+# source tree, so the runtime stage keeps that layout.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --package keenyspace-server && \
+    .venv/bin/python -m compileall -q packages/server/keenyspace_server packages/shared/keenyspace_shared
 
 FROM python:3.14.1-slim-bookworm AS runtime
 
@@ -45,14 +55,19 @@ COPY packages/server/alembic.ini packages/server/alembic.ini
 COPY packages/server/alembic packages/server/alembic
 COPY blueprints blueprints
 
-ENV TZ=UTC
-ENV PYTHONUNBUFFERED=1
-ENV KEENYSPACE_FS__ROOT=/var/lib/keenyspace
+ENV TZ=UTC \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH" \
+    KEENYSPACE_FS__ROOT=/var/lib/keenyspace
 
 RUN mkdir -p /var/lib/keenyspace && chown nonroot:nonroot /var/lib/keenyspace
 
 USER nonroot
 
-EXPOSE 8000
+# 8000: API. 9100: internal Prometheus listener (KEENYSPACE_METRICS_PORT); do not publish it.
+EXPOSE 8000 9100
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=5 \
+  CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz',timeout=2).status==200 else 1)"]
 
 CMD [".venv/bin/uvicorn", "keenyspace_server.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

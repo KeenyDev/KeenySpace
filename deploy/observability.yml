@@ -51,7 +51,10 @@ configs:
       global:
         scrape_interval: 15s
       scrape_configs:
+        # Internal metrics listener (KEENYSPACE_METRICS_PORT, default 9100). It is
+        # not published to the host; Prometheus reaches it over the compose network,
+        # so run this file in the same project as docker-compose.yml.
         - job_name: keenyspace
           static_configs:
-            - targets: ['keenyspace:8000']
+            - targets: ['keenyspace:9100']
           metrics_path: /metrics
