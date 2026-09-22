@@ -61,7 +61,9 @@ async def export_workspace(
     await session.commit()
 
     try:
-        chunk_iter = await build_workspace_zip(ws_dir)
+        chunk_iter = await build_workspace_zip(
+            ws_dir, tmp_root=Path(request.app.state.settings.fs.root) / ".tmp"
+        )
     except ExportTooLargeError as exc:
         raise HTTPException(
             status_code=413,

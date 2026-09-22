@@ -267,6 +267,61 @@ async def test_import_slug_conflict_returns_409(app, pg_url) -> None:  # type: i
             assert resp.json()["detail"]["code"] == "workspace_slug_conflict"
 
 
+async def test_import_releases_db_connection_and_reaps_dir_on_slug_race(  # type: ignore[no-untyped-def]
+    app, pg_url, monkeypatch
+) -> None:
+    import keenyspace_server.ws.import_ as import_mod
+    from keenyspace_server.config import get_settings
+    from keenyspace_server.db.models import Workspace
+    from keenyspace_server.db.session import get_db_session, get_engine
+
+    await _reset_schema(pg_url)
+    async with app.router.lifespan_context(app):
+        _, plaintext = await _seed_api_key_post_lifespan()
+        engine = get_engine()
+        assert engine is not None
+        workspaces_dir = get_settings().fs.root / "workspaces"
+        real_validate = import_mod.validate_import_zip
+        checked_out_during_validation: list[int] = []
+        slug = f"race-{uuid4().hex[:8]}"
+
+        async def _racing_validate(zip_path):  # type: ignore[no-untyped-def]
+            checked_out_during_validation.append(engine.pool.checkedout())
+            async with get_db_session() as session:
+                session.add(
+                    Workspace(
+                        uuid=uuid4(),
+                        slug=slug,
+                        display_name=slug,
+                        blueprint_ref="default@v0.1",
+                        status="active",
+                        created_at=datetime.now(UTC),
+                        archived_at=None,
+                    )
+                )
+                await session.commit()
+            return await real_validate(zip_path)
+
+        monkeypatch.setattr(import_mod, "validate_import_zip", _racing_validate)
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
+            before = set(workspaces_dir.iterdir()) if workspaces_dir.exists() else set()
+            resp = await client.post(
+                "/v1/api/workspaces/import",
+                data={"slug": slug},
+                files={"file": ("a.zip", _make_zip_bytes([("index.md", b"# x")]), "application/zip")},
+            )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"]["code"] == "workspace_slug_conflict"
+        assert checked_out_during_validation == [0]
+        assert set(workspaces_dir.iterdir()) == before
+
+
 async def test_import_assigns_new_uuid_ignoring_source(app, pg_url) -> None:  # type: ignore[no-untyped-def]
     from keenyspace_server.db.models import Workspace
     from keenyspace_server.db.session import get_db_session

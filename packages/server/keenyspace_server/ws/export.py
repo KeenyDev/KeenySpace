@@ -10,6 +10,8 @@ from typing import BinaryIO
 
 import structlog
 
+from keenyspace_server.ws.thread_slots import LoopLocalSemaphore, run_in_thread_slot
+
 log = structlog.get_logger(__name__)
 
 _STREAM_CHUNK_BYTES = 64 * 1024
@@ -21,7 +23,7 @@ MAX_EXPORT_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 # keeping the export/import dotfile policy symmetric by construction.
 EXPORT_SKIP_TOP_LEVEL: frozenset[str] = frozenset({".obsidian", "logs"})
 
-_EXPORT_BUILD_SLOTS = asyncio.Semaphore(2)
+_EXPORT_BUILD_SLOTS = LoopLocalSemaphore(2)
 
 
 class ExportTooLargeError(ValueError):
@@ -88,17 +90,22 @@ async def _stream_and_close(fh: BinaryIO) -> AsyncIterator[bytes]:
         fh.close()
 
 
+def _close_built_zip(built: tuple[BinaryIO, int]) -> None:
+    built[0].close()
+
+
 async def build_workspace_zip(
-    ws_dir: Path, *, enforce_size_cap: bool = True, tmp_root: Path | None = None
+    ws_dir: Path, *, tmp_root: Path, enforce_size_cap: bool = True
 ) -> AsyncIterator[bytes]:
     """Build the workspace zip and yield it as 64 KB chunks.
 
     The zip is built inside `asyncio.to_thread` into an anonymous temp file
-    under `tmp_root` (default `<fs_root>/.tmp`, derived from the
-    `<fs_root>/workspaces/<uuid>` layout of `ws_dir`), so memory stays flat
-    regardless of workspace size. At most two builds run concurrently. When
-    `enforce_size_cap` is true, raises `ExportTooLargeError` BEFORE building
-    if the uncompressed total exceeds `MAX_EXPORT_UNCOMPRESSED_BYTES`.
+    under `tmp_root`, so memory stays flat regardless of workspace size. At
+    most two builds run concurrently per event loop; a build whose caller is
+    cancelled keeps its slot until the thread finishes, then closes its
+    handle. When `enforce_size_cap` is true, raises `ExportTooLargeError`
+    BEFORE building if the uncompressed total exceeds
+    `MAX_EXPORT_UNCOMPRESSED_BYTES`.
     """
     if enforce_size_cap:
         total = await asyncio.to_thread(_total_uncompressed_bytes, ws_dir)
@@ -108,11 +115,13 @@ async def build_workspace_zip(
                 f"export cap {MAX_EXPORT_UNCOMPRESSED_BYTES} bytes"
             )
 
-    if tmp_root is None:
-        tmp_root = ws_dir.parent.parent / ".tmp"
-
-    async with _EXPORT_BUILD_SLOTS:
-        fh, zip_bytes = await asyncio.to_thread(_build_zip_sync, ws_dir, tmp_root)
+    fh, zip_bytes = await run_in_thread_slot(
+        _EXPORT_BUILD_SLOTS,
+        _build_zip_sync,
+        ws_dir,
+        tmp_root,
+        on_abandoned=_close_built_zip,
+    )
 
     log.info(
         "workspace.export.zip_built",

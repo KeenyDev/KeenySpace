@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +14,8 @@ from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_wor
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.ws.cursor import decode_mtime_cursor, encode_mtime_cursor
 from keenyspace_server.ws.recent import scan_recent_changes
+from keenyspace_server.ws.search import VAULT_SCAN_SLOTS
+from keenyspace_server.ws.thread_slots import run_in_thread_slot
 
 _PAGE_SIZE_DEFAULT = 50
 _PAGE_SIZE_MAX = 200
@@ -72,7 +73,9 @@ async def get_recent_changes_tool(
 
         settings = app.state.settings
         ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
-        all_items = await asyncio.to_thread(scan_recent_changes, ws_root, since_ns)
+        all_items = await run_in_thread_slot(
+            VAULT_SCAN_SLOTS, scan_recent_changes, ws_root, since_ns
+        )
 
         if cursor is not None:
             try:

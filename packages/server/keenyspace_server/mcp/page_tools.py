@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+from functools import partial
 from pathlib import Path
 
 from fastmcp.exceptions import ToolError
@@ -17,7 +17,13 @@ from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
 from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
-from keenyspace_server.ws.search import list_md_paths, search_workspace_files
+from keenyspace_server.ws.cursor import decode_cursor, encode_cursor
+from keenyspace_server.ws.search import (
+    VAULT_SCAN_SLOTS,
+    list_md_paths,
+    search_workspace_files,
+)
+from keenyspace_server.ws.thread_slots import run_in_thread_slot
 
 _PAGE_SIZE_DEFAULT = 50
 _PAGE_SIZE_MAX = 200
@@ -29,6 +35,25 @@ def _validated_limit(limit: int | None) -> int:
     if limit is None:
         return _PAGE_SIZE_DEFAULT
     return min(max(1, limit), _PAGE_SIZE_MAX)
+
+
+def _decode_search_cursor(cursor: str | None) -> tuple[str | None, int]:
+    """Return `(after_path, skip)` for a search cursor.
+
+    Current cursors are keyset (`after`: last path returned). Offset cursors
+    (`o`) issued before the keyset switch are still honoured as a skip count
+    so pagination in flight across an upgrade does not break.
+    """
+    if cursor is None:
+        return None, 0
+    data = decode_cursor(cursor)
+    after = data.get("after")
+    if isinstance(after, str):
+        return after, 0
+    offset = data.get("o")
+    if isinstance(offset, int) and not isinstance(offset, bool) and offset >= 0:
+        return None, offset
+    raise ValueError("malformed search cursor (missing after)")
 
 
 def _validate_prefix(prefix: str) -> str:
@@ -79,7 +104,9 @@ async def list_pages_tool(
 
         settings = app.state.settings
         ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
-        all_paths = await asyncio.to_thread(list_md_paths, ws_root, prefix_norm)
+        all_paths = await run_in_thread_slot(
+            VAULT_SCAN_SLOTS, list_md_paths, ws_root, prefix_norm
+        )
 
         page_size = _validated_limit(limit)
         try:
@@ -128,15 +155,27 @@ async def search_workspace_tool(
         # process). See WR-08.
         settings = app.state.settings
         ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
-        matches = await asyncio.to_thread(search_workspace_files, ws_root, query)
-
         page_size = _validated_limit(limit)
         try:
-            page, next_cursor = paginate_sequence(
-                matches, cursor=cursor, page_size=page_size
-            )
-        except (ValueError, TypeError) as exc:
+            after, skip = _decode_search_cursor(cursor)
+        except ValueError as exc:
             raise ToolError(f"malformed cursor: {exc}") from exc
 
+        matches = await run_in_thread_slot(
+            VAULT_SCAN_SLOTS,
+            partial(
+                search_workspace_files,
+                ws_root,
+                query,
+                after=after,
+                skip=skip,
+                limit=page_size + 1,
+            ),
+        )
+
+        page = matches[:page_size]
+        next_cursor = (
+            encode_cursor({"after": page[-1]}) if len(matches) > page_size else None
+        )
         results = [SearchResult(path=p) for p in page]
         return SearchResponse(results=results, next_cursor=next_cursor)

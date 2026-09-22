@@ -51,7 +51,13 @@ async def test_edge_01_empty_wal_returns_idempotent_noop(tmp_path: Path) -> None
     assert expect["expected_ops"] == []
 
 
-@pytest.mark.xfail(reason="WAL input-token splitter is deferred to v1.1")
+@pytest.mark.xfail(
+    reason=(
+        "fixture expects a wal_slice_truncated note or abort_budget; compile instead "
+        "chunks the backlog into max_slice_bytes passes (WalSlice.has_more), and "
+        "wal.md uses parent_id=\"\" which parse_wal rejects"
+    )
+)
 async def test_edge_02_oversized_slice_documents_behavior(tmp_path: Path) -> None:
     fixture_dir = EDGE_FIXTURES / "02-oversized-slice"
     wal_text, expect, _ = _load_fixture(fixture_dir)

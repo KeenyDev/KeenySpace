@@ -63,6 +63,9 @@ async def create_workspace(
             status_code=409,
             detail=f"workspace with slug {body.slug!r} already exists",
         )
+    # Release the pooled connection before the slow blueprint clone; a
+    # concurrent create of the same slug is caught by UNIQUE(slug) below.
+    await session.rollback()
 
     settings = request.app.state.settings
     fs_root: Path = settings.fs.root
@@ -100,7 +103,7 @@ async def create_workspace(
     except IntegrityError as exc:
         await session.rollback()
         try:
-            shutil.rmtree(ws_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, ws_dir, ignore_errors=True)
         except Exception as cleanup_exc:
             logger.error(
                 "failed to clean up orphaned workspace dir",

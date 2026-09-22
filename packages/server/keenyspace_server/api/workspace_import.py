@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 from collections.abc import Callable, Coroutine
 from pathlib import Path
@@ -87,6 +88,11 @@ class _UploadCapRoute(APIRoute):
 router = APIRouter(route_class=_UploadCapRoute)
 
 
+def _prepare_upload_dirs(workspaces_dir: Path, tmp_root: Path) -> None:
+    workspaces_dir.mkdir(parents=True, exist_ok=True)
+    tmp_root.mkdir(parents=True, exist_ok=True)
+
+
 @router.post("/import", response_model=WorkspaceImportResponse, status_code=201)
 async def import_endpoint(
     request: Request,
@@ -104,17 +110,16 @@ async def import_endpoint(
         settings = request.app.state.settings
 
         fs_root: Path = settings.fs.root
-        workspaces_dir = fs_root / "workspaces"
-        workspaces_dir.mkdir(parents=True, exist_ok=True)
         # Dedicated sibling tmp dir keeps ephemeral upload/import scratch out of
         # `workspaces/` (which must contain only UUID directories). Same fs_root
         # mount, so os.rename to workspaces/<uuid>/ stays atomic.
         tmp_root = fs_root / ".tmp"
-        tmp_root.mkdir(parents=True, exist_ok=True)
         upload_tmp = tmp_root / f"upload_{secrets.token_hex(8)}.zip"
+        await asyncio.to_thread(_prepare_upload_dirs, fs_root / "workspaces", tmp_root)
 
         written = 0
-        with upload_tmp.open("wb") as f:
+        f = await asyncio.to_thread(upload_tmp.open, "wb")
+        try:
             while True:
                 chunk = await file.read(_UPLOAD_CHUNK_BYTES)
                 if not chunk:
@@ -125,7 +130,9 @@ async def import_endpoint(
                     # cap. The finally block unlinks upload_tmp so the partial
                     # file is reaped immediately.
                     raise _upload_too_large()
-                f.write(chunk)
+                await asyncio.to_thread(f.write, chunk)
+        finally:
+            await asyncio.to_thread(f.close)
 
         try:
             response = await import_workspace(
@@ -153,7 +160,7 @@ async def import_endpoint(
     finally:
         if upload_tmp is not None:
             try:
-                upload_tmp.unlink(missing_ok=True)
+                await asyncio.to_thread(upload_tmp.unlink, missing_ok=True)
             except Exception as exc:
                 log.warning(
                     "workspace.import.upload_tmp_cleanup_failed",

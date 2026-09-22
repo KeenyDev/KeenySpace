@@ -134,13 +134,41 @@ async def test_build_workspace_zip_leaves_no_temp_file_on_disk(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_build_workspace_zip_default_tmp_root_is_fs_root_dot_tmp(tmp_path):
-    ws_dir = tmp_path / "workspaces" / "some-uuid"
-    ws_dir.mkdir(parents=True)
-    (ws_dir / "index.md").write_text("# index\n")
-    gen = await build_workspace_zip(ws_dir)
-    assert (tmp_path / ".tmp").is_dir()
-    assert b"".join([c async for c in gen])
+async def test_cancelled_export_holds_slot_until_build_ends_and_closes_handle(
+    monkeypatch, tmp_path
+):
+    import threading
+
+    import keenyspace_server.ws.export as export_mod
+    from keenyspace_server.ws.thread_slots import LoopLocalSemaphore
+
+    real_build = export_mod._build_zip_sync
+    release_build = threading.Event()
+    handles = []
+
+    def _blocking_build(ws_dir, tmp_root):
+        release_build.wait(timeout=5)
+        fh, size = real_build(ws_dir, tmp_root)
+        handles.append(fh)
+        return fh, size
+
+    slots = LoopLocalSemaphore(1)
+    monkeypatch.setattr(export_mod, "_build_zip_sync", _blocking_build)
+    monkeypatch.setattr(export_mod, "_EXPORT_BUILD_SLOTS", slots)
+    ws = _seed_ws(tmp_path)
+
+    task = asyncio.create_task(build_workspace_zip(ws, tmp_root=tmp_path / ".tmp"))
+    while not slots.get().locked():
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert slots.get().locked()
+
+    release_build.set()
+    async with asyncio.timeout(5):
+        while slots.get().locked() or not handles or not handles[0].closed:
+            await asyncio.sleep(0.01)
 
 
 @pytest.mark.asyncio
@@ -171,6 +199,7 @@ async def test_export_builds_are_limited_to_two_concurrent(monkeypatch, tmp_path
     import time
 
     import keenyspace_server.ws.export as export_mod
+    from keenyspace_server.ws.thread_slots import LoopLocalSemaphore
 
     real_build = export_mod._build_zip_sync
     lock = threading.Lock()
@@ -190,7 +219,7 @@ async def test_export_builds_are_limited_to_two_concurrent(monkeypatch, tmp_path
                 active -= 1
 
     monkeypatch.setattr(export_mod, "_build_zip_sync", _slow_build)
-    monkeypatch.setattr(export_mod, "_EXPORT_BUILD_SLOTS", asyncio.Semaphore(2))
+    monkeypatch.setattr(export_mod, "_EXPORT_BUILD_SLOTS", LoopLocalSemaphore(2))
     ws = _seed_ws(tmp_path)
     gens = await asyncio.gather(
         *(build_workspace_zip(ws, tmp_root=tmp_path / ".tmp") for _ in range(6))

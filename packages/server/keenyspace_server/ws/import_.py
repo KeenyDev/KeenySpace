@@ -259,6 +259,9 @@ async def import_workspace(
     if existing.scalar_one_or_none() is not None:
         WORKSPACE_IMPORT_TOTAL.labels(outcome="conflict").inc()
         raise WorkspaceSlugConflictError(slug)
+    # Release the pooled connection before zip validation and unpack; a
+    # concurrent import of the same slug is caught by UNIQUE(slug) at commit.
+    await session.rollback()
 
     try:
         validation = await validate_import_zip(zip_path)
@@ -269,20 +272,20 @@ async def import_workspace(
     new_uuid = uuid.uuid4()
     fs_root: Path = settings.fs.root
     workspaces_dir = fs_root / "workspaces"
-    workspaces_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(workspaces_dir.mkdir, parents=True, exist_ok=True)
     # Stage extraction under a sibling .tmp/ tree so workspace iteration (admin
     # UI, doctor sweep) never sees ephemeral .import_tmp_* entries. The .tmp/
     # dir lives on the same fs_root mount as workspaces/, so the final
     # os.rename(import_tmp, final_dir) stays atomic.
     tmp_root = fs_root / ".tmp"
-    tmp_root.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(tmp_root.mkdir, parents=True, exist_ok=True)
     import_tmp = tmp_root / f"import_{secrets.token_hex(8)}"
     final_dir = workspaces_dir / str(new_uuid)
 
     cleanup_tmp = True
     outcome = "validation_error"
     try:
-        import_tmp.mkdir(parents=True, exist_ok=False)
+        await asyncio.to_thread(import_tmp.mkdir, parents=True, exist_ok=False)
         await asyncio.to_thread(_unpack_zip_sync, zip_path, import_tmp)
 
         blueprint_ref = (
