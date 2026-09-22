@@ -1,10 +1,15 @@
-Edge fixture 02: WAL slice whose total byte size exceeds the max_input_tokens * 3 byte
-heuristic (50,000 tokens * 3 bytes/token = ~150KB).
+Edge fixture 02: WAL backlog whose serialized size exceeds `CompileSettings.max_slice_bytes`
+(default 40,000 bytes).
 
 Bucket: edge. Labeler: deployer (KeenySpace v1 eval baseline).
 
-Scenario: The wal.md contains 50 WAL entries of ~4KB each, totalling ~200KB. In v1,
-the coordinator does NOT implement the input-token splitter (deferred to v1.1 per AI-SPEC
-§4 Context Window Strategy). This test is xfail until the splitter ships. It documents
-the expected behavior: the coordinator should either truncate the slice at a safe entry
-boundary and set required_notes_substring to wal_slice_truncated, or abort with abort_budget.
+Scenario: The wal.md contains 30 WAL entries of ~4KB each, totalling ~125KB. The coordinator
+never feeds more than `max_slice_bytes` of serialized WAL to one pass: `extract_wal_slice`
+stops at an entry boundary and reports `has_more`, which the coordinator surfaces as
+`backlog_remaining` and answers with an immediate follow-up pass. The test replays that
+cursor progression with the default settings and verifies the backlog is compiled in
+several passes, no pass exceeds the byte budget, every entry is compiled exactly once in
+id order, and the cursor ends at the last entry id (`expected_final_cursor`).
+
+Regenerating wal.md: entries must be written with `keenyspace_server.wal.framing.format_entry`
+(valid ULIDs, no empty `parent_id`) so `parse_wal` accepts them.

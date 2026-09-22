@@ -34,15 +34,20 @@ def _serialize_page(frontmatter: dict[str, object], body: str) -> bytes:
     return body.encode()
 
 
+def check_plan_safety(ws_root: Path, plan: CompilePlan) -> None:
+    """Raise CompilePlanSafetyError on the first PageOp.path the compile denylist rejects."""
+    for op in plan.ops:
+        if not is_compile_writable(ws_root, op.path):
+            raise CompilePlanSafetyError(op.path)
+
+
 def apply_plan(ws_root: Path, plan: CompilePlan) -> int:
     """Validate every PageOp.path against the denylist, then atomically write all pages.
 
     Atomicity contract: if ANY PageOp fails the denylist check, NO file is written.
     Returns count of pages written. Coordinator records this as compile_runs.pages_written.
     """
-    for op in plan.ops:
-        if not is_compile_writable(ws_root, op.path):
-            raise CompilePlanSafetyError(op.path)
+    check_plan_safety(ws_root, plan)
 
     for op in plan.ops:
         target = ws_root / validate_relative_path(op.path)

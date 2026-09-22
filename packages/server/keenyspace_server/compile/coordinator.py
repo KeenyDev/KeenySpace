@@ -18,17 +18,23 @@ from pydantic_ai.exceptions import (
     UsageLimitExceeded,
 )
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
 
 from keenyspace_server.compile.agent import run_compile_agent
 from keenyspace_server.compile.hashing import hash_plan
 from keenyspace_server.compile.models import (
     CompileDeps,
+    CompilePlan,
     CompileRunResult,
     CompileStatusResponse,
     CompileTriggerResponse,
 )
-from keenyspace_server.compile.page_writer import CompilePlanSafetyError, apply_plan
+from keenyspace_server.compile.page_writer import (
+    CompilePlanSafetyError,
+    apply_plan,
+    check_plan_safety,
+)
 from keenyspace_server.compile.settings import CompileSettings
 from keenyspace_server.compile.wal_slice import extract_wal_slice
 from keenyspace_server.db.models import CompileCursor, CompileRun, Workspace
@@ -68,6 +74,17 @@ class CompileCoordinator:
         self._pending_debounce: dict[UUID, asyncio.TimerHandle] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._closed = False
+        self._agent_slots: asyncio.Semaphore | None = None
+        self._agent_slots_loop: asyncio.AbstractEventLoop | None = None
+
+    def _agent_semaphore(self) -> asyncio.Semaphore:
+        # Created on first use and rebuilt per event loop: an asyncio primitive binds
+        # to the loop it first waits on, and a coordinator can outlive a loop in tests.
+        loop = asyncio.get_running_loop()
+        if self._agent_slots is None or self._agent_slots_loop is not loop:
+            self._agent_slots = asyncio.Semaphore(self.settings.max_concurrent_passes)
+            self._agent_slots_loop = loop
+        return self._agent_slots
 
     def notify_dirty(self, ws_uuid: UUID) -> None:
         """Sync, fire-and-forget. Schedules a debounced compile after settings.debounce_seconds.
@@ -340,6 +357,8 @@ class CompileCoordinator:
         progress: _PassProgress,
     ) -> CompileRunResult:
         cursor_row = await self._read_cursor(ws_uuid)
+        if cursor_row is not None and cursor_row.pending_wal_last_id is not None:
+            return await self._replay_intent(ws_uuid, ws_root, run_id, source, started_at, cursor_row)
         last_wal_id = cursor_row.last_wal_id if cursor_row else None
         slice_ = await asyncio.to_thread(
             extract_wal_slice, ws_root, last_wal_id, max_bytes=self.settings.max_slice_bytes
@@ -381,18 +400,19 @@ class CompileCoordinator:
         deps = CompileDeps(ws_root=ws_root, wal_text=slice_.formatted_text)
         detector = LoopDetector(max_repeats=3)
         try:
-            plan, detector, output_tokens = await asyncio.wait_for(
-                run_compile_agent(
-                    deps,
-                    model_name=self.settings.model,
-                    provider=self.settings.provider,
-                    max_tool_calls=self.settings.max_tool_calls,
-                    max_input_tokens=self.settings.max_input_tokens,
-                    max_output_tokens_per_call=self.settings.max_output_tokens_per_call,
-                    loop_detector=detector,
-                ),
-                timeout=self.settings.max_seconds,
-            )
+            async with self._agent_semaphore():
+                plan, detector, output_tokens = await asyncio.wait_for(
+                    run_compile_agent(
+                        deps,
+                        model_name=self.settings.model,
+                        provider=self.settings.provider,
+                        max_tool_calls=self.settings.max_tool_calls,
+                        max_input_tokens=self.settings.max_input_tokens,
+                        max_output_tokens_per_call=self.settings.max_output_tokens_per_call,
+                        loop_detector=detector,
+                    ),
+                    timeout=self.settings.max_seconds,
+                )
         except UsageLimitExceeded as exc:
             if detector.triggered:
                 return await self._abort(
@@ -421,27 +441,36 @@ class CompileCoordinator:
         self._daily_tokens[ws_uuid] = self._daily_tokens.get(ws_uuid, 0) + estimated_tokens
         COMPILE_DAILY_TOKENS.labels(workspace=str(ws_uuid)).set(self._daily_tokens[ws_uuid])
 
-        plan_hash_value = hash_plan(slice_.wal_first_id or "", slice_.wal_last_id or "", plan)
-
-        if cursor_row is not None and plan_hash_value == cursor_row.last_compile_hash:
-            await self._update_run_row(
-                ws_uuid, run_id, status="idempotent_noop",
-                plan_hash=plan_hash_value, completed_at=datetime.now(UTC),
-            )
-            await self._release_running(ws_uuid)
-            log.info("compile.idempotent_noop", workspace=str(ws_uuid), run_id=run_id, reason="hash_match")
-            COMPILE_RUNS_TOTAL.labels(workspace=str(ws_uuid), status="idempotent_noop").inc()
-            return CompileRunResult(status="idempotent_noop", pages_written=0, plan_hash=plan_hash_value)
+        wal_last_id = slice_.wal_last_id or ""
+        plan_hash_value = hash_plan(slice_.wal_first_id or "", wal_last_id, plan)
 
         try:
-            pages_written = await asyncio.to_thread(apply_plan, ws_root, plan)
+            check_plan_safety(ws_root, plan)
         except CompilePlanSafetyError as exc:
             return await self._abort(
                 ws_uuid, run_id, status="abort_plan_invalid", reason="plan_invalid",
                 error=str(exc), plan_hash=plan_hash_value,
             )
 
-        await self._advance_cursor(ws_uuid, slice_.wal_last_id or "", plan_hash_value, last_wal_id)
+        # The intent is committed before any page is written, so a crash between the
+        # page writes and the cursor advance replays this plan instead of paying the
+        # LLM again for the same slice (and compiling its knowledge twice).
+        await self._record_intent(ws_uuid, last_wal_id, wal_last_id, plan_hash_value, plan)
+        try:
+            pages_written = await asyncio.to_thread(apply_plan, ws_root, plan)
+        except CompilePlanSafetyError as exc:
+            await self._discard_intent(ws_uuid, plan_hash_value)
+            return await self._abort(
+                ws_uuid, run_id, status="abort_plan_invalid", reason="plan_invalid",
+                error=str(exc), plan_hash=plan_hash_value,
+            )
+        except Exception:
+            # A failed (not interrupted) apply drops the intent so a resume recompiles
+            # instead of replaying a plan that cannot land; interruption keeps it.
+            await self._discard_intent(ws_uuid, plan_hash_value)
+            raise
+
+        await self._advance_cursor(ws_uuid, last_wal_id, wal_last_id, plan_hash_value)
 
         for op in plan.ops:
             COMPILE_PAGES_WRITTEN_TOTAL.labels(workspace=str(ws_uuid), action=op.action).inc()
@@ -474,6 +503,59 @@ class CompileCoordinator:
             pages_written=pages_written,
             plan_hash=plan_hash_value,
             backlog_remaining=slice_.has_more,
+        )
+
+    async def _replay_intent(
+        self,
+        ws_uuid: UUID,
+        ws_root: Path,
+        run_id: str,
+        source: str,
+        started_at: datetime,
+        cursor_row: CompileCursor,
+    ) -> CompileRunResult:
+        pending_last = cursor_row.pending_wal_last_id
+        plan_hash_value = cursor_row.pending_plan_hash
+        if pending_last is None or plan_hash_value is None:
+            raise CompileCursorConflictError(f"compile cursor for {ws_uuid} holds an incomplete intent")
+        await self._write_run_row(
+            ws_uuid, run_id, started_at, source,
+            status="running", pages_written=0,
+            wal_first_id=None, wal_last_id=pending_last, plan_hash=plan_hash_value,
+        )
+        try:
+            plan = CompilePlan.model_validate(cursor_row.pending_plan)
+            pages_written = await asyncio.to_thread(apply_plan, ws_root, plan)
+        except CompilePlanSafetyError as exc:
+            await self._discard_intent(ws_uuid, plan_hash_value)
+            return await self._abort(
+                ws_uuid, run_id, status="abort_plan_invalid", reason="plan_invalid",
+                error=str(exc), plan_hash=plan_hash_value,
+            )
+        except Exception:
+            await self._discard_intent(ws_uuid, plan_hash_value)
+            raise
+
+        await self._advance_cursor(ws_uuid, cursor_row.last_wal_id, pending_last, plan_hash_value)
+        for op in plan.ops:
+            COMPILE_PAGES_WRITTEN_TOTAL.labels(workspace=str(ws_uuid), action=op.action).inc()
+        COMPILE_RUNS_TOTAL.labels(workspace=str(ws_uuid), status="success").inc()
+        await self._update_run_row(
+            ws_uuid, run_id,
+            status="success", pages_written=pages_written,
+            plan_hash=plan_hash_value, completed_at=datetime.now(UTC),
+        )
+        await self._release_running(ws_uuid)
+        log.info(
+            "compile.intent_replayed",
+            workspace=str(ws_uuid), run_id=run_id,
+            pages_written=pages_written, plan_hash=plan_hash_value, wal_last_id=pending_last,
+        )
+        # WAL appended after the interrupted slice is unknown here; a follow-up pass
+        # finds out, and costs nothing when the slice is empty.
+        return CompileRunResult(
+            status="success", pages_written=pages_written,
+            plan_hash=plan_hash_value, backlog_remaining=True,
         )
 
     async def _abort(
@@ -566,35 +648,89 @@ class CompileCoordinator:
                 select(CompileCursor).where(CompileCursor.workspace_uuid == ws_uuid)
             )).scalar_one_or_none()
 
-    async def _advance_cursor(
-        self, ws_uuid: UUID, new_last_wal_id: str, plan_hash_value: str, expected_last_wal_id: str | None,
+    async def _record_intent(
+        self,
+        ws_uuid: UUID,
+        expected_last_wal_id: str | None,
+        pending_wal_last_id: str,
+        plan_hash_value: str,
+        plan: CompilePlan,
     ) -> None:
+        intent = {
+            "pending_wal_last_id": pending_wal_last_id,
+            "pending_plan_hash": plan_hash_value,
+            "pending_plan": plan.model_dump(mode="json"),
+            "updated_at": datetime.now(UTC),
+        }
         async with get_db_session() as session:
-            if expected_last_wal_id is None:
-                session.add(CompileCursor(
-                    workspace_uuid=ws_uuid,
-                    last_wal_id=new_last_wal_id,
-                    last_compile_hash=plan_hash_value,
-                    updated_at=datetime.now(UTC),
-                ))
-            else:
-                res = await session.execute(
+            recorded = (await session.execute(
+                update(CompileCursor)
+                .where(
+                    CompileCursor.workspace_uuid == ws_uuid,
+                    CompileCursor.last_wal_id.is_not_distinct_from(expected_last_wal_id),
+                    CompileCursor.pending_wal_last_id.is_(None),
+                )
+                .values(**intent)
+                .returning(CompileCursor.workspace_uuid)
+            )).scalar_one_or_none()
+            if recorded is None and expected_last_wal_id is None:
+                recorded = (await session.execute(
+                    pg_insert(CompileCursor)
+                    .values(workspace_uuid=ws_uuid, last_wal_id=None, last_compile_hash=None, **intent)
+                    .on_conflict_do_nothing(index_elements=[CompileCursor.workspace_uuid])
+                    .returning(CompileCursor.workspace_uuid)
+                )).scalar_one_or_none()
+            if recorded is None:
+                raise CompileCursorConflictError(
+                    f"compile cursor for {ws_uuid} moved from {expected_last_wal_id!r} during the pass"
+                )
+            await session.commit()
+
+    async def _discard_intent(self, ws_uuid: UUID, plan_hash_value: str) -> None:
+        try:
+            async with get_db_session() as session:
+                await session.execute(
                     update(CompileCursor)
                     .where(
                         CompileCursor.workspace_uuid == ws_uuid,
-                        CompileCursor.last_wal_id == expected_last_wal_id,
+                        CompileCursor.pending_plan_hash == plan_hash_value,
                     )
-                    .values(
-                        last_wal_id=new_last_wal_id,
-                        last_compile_hash=plan_hash_value,
-                        updated_at=datetime.now(UTC),
-                    )
-                    .returning(CompileCursor.workspace_uuid)
+                    .values(pending_wal_last_id=None, pending_plan_hash=None, pending_plan=None)
                 )
-                if res.scalar_one_or_none() is None:
-                    raise CompileCursorConflictError(
-                        f"compile cursor for {ws_uuid} moved from {expected_last_wal_id!r} during the pass"
-                    )
+                await session.commit()
+        except Exception as exc:
+            # A surviving intent only means the next pass replays the plan once more.
+            log.error("compile.intent_discard_failed", workspace=str(ws_uuid), error=str(exc))
+
+    async def _advance_cursor(
+        self,
+        ws_uuid: UUID,
+        expected_last_wal_id: str | None,
+        new_last_wal_id: str,
+        plan_hash_value: str,
+    ) -> None:
+        async with get_db_session() as session:
+            res = await session.execute(
+                update(CompileCursor)
+                .where(
+                    CompileCursor.workspace_uuid == ws_uuid,
+                    CompileCursor.last_wal_id.is_not_distinct_from(expected_last_wal_id),
+                    CompileCursor.pending_plan_hash == plan_hash_value,
+                )
+                .values(
+                    last_wal_id=new_last_wal_id,
+                    last_compile_hash=plan_hash_value,
+                    pending_wal_last_id=None,
+                    pending_plan_hash=None,
+                    pending_plan=None,
+                    updated_at=datetime.now(UTC),
+                )
+                .returning(CompileCursor.workspace_uuid)
+            )
+            if res.scalar_one_or_none() is None:
+                raise CompileCursorConflictError(
+                    f"compile cursor for {ws_uuid} moved from {expected_last_wal_id!r} during the pass"
+                )
             await session.commit()
 
     async def _write_run_row(

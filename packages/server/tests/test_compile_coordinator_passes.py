@@ -427,3 +427,167 @@ async def test_resume_endpoint_refuses_archived_workspace(app: Any, pg_url: str)
         assert resp.json()["detail"]["error"] == "workspace_archived"
         ws = await _workspace(ws_uuid)
         assert (ws.compile_state, ws.compile_paused_reason) == ("paused", "archived")
+
+
+class _SimulatedCrash(BaseException):
+    """Process death between the page writes and the cursor advance."""
+
+
+async def _pending_intent(ws_uuid: UUID) -> tuple[str | None, str | None]:
+    async with get_db_session() as session:
+        row = (await session.execute(
+            select(CompileCursor.pending_wal_last_id, CompileCursor.pending_plan_hash)
+            .where(CompileCursor.workspace_uuid == ws_uuid)
+        )).one_or_none()
+    return (row[0], row[1]) if row is not None else (None, None)
+
+
+@pytest.mark.parametrize("prior_pass", [False, True], ids=["first-pass", "after-committed-pass"])
+async def test_crash_after_apply_replays_intent_without_agent(
+    app: Any, pg_url: str, fs_root: Path, fake_agent: FakeCompileAgent,
+    monkeypatch: pytest.MonkeyPatch, prior_pass: bool,
+) -> None:
+    async with _serving(app, pg_url) as (client, coordinator):
+        slug, ws_uuid = await _create_workspace(client)
+        ws_root = fs_root / "workspaces" / str(ws_uuid)
+        expected_runs: list[str] = []
+        if prior_pass:
+            await _append(client, slug, "committed fact")
+            await coordinator.trigger(ws_uuid, source="test")
+            await _settle(coordinator)
+            expected_runs.append("success")
+        entry_id = await _append(client, slug, "fact")
+        agent_calls = len(fake_agent.wal_texts)
+        page = ws_root / "notes" / f"pass-{agent_calls + 1}.md"
+
+        real_advance = coordinator._advance_cursor
+
+        async def _crash(*_: Any, **__: Any) -> None:
+            raise _SimulatedCrash
+
+        monkeypatch.setattr(coordinator, "_advance_cursor", _crash)
+        with pytest.raises(_SimulatedCrash):
+            await coordinator._run_compile_pass(ws_uuid, ws_root, str(uuid4()), "test")
+        expected_runs.append("abort_interrupted")
+        written = page.read_bytes()
+        # A crash can also land mid-apply; the replay must restore the page either way.
+        page.unlink()
+        assert (await _pending_intent(ws_uuid))[0] == entry_id
+
+        monkeypatch.setattr(coordinator, "_advance_cursor", real_advance)
+        await coordinator.trigger(ws_uuid, source="backstop")
+        await _settle(coordinator)
+        expected_runs.append("success")
+
+        assert len(fake_agent.wal_texts) == agent_calls + 1
+        assert page.read_bytes() == written
+        assert await _cursor(ws_uuid) == entry_id
+        assert await _pending_intent(ws_uuid) == (None, None)
+        runs = await _runs(ws_uuid)
+        assert [r.status for r in runs] == expected_runs
+        assert (runs[-1].wal_last_id, runs[-1].pages_written, runs[-1].tokens_output) == (entry_id, 1, 0)
+        assert (await _workspace(ws_uuid)).compile_state == "idle"
+
+
+async def test_replayed_plan_keeps_frontmatter_key_order(
+    app: Any, pg_url: str, fs_root: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frontmatter = {"zeta": 1, "alpha": ["x"], "title": "Ordered"}
+
+    async def _agent(
+        deps: CompileDeps, *, loop_detector: LoopDetector | None = None, **_: Any
+    ) -> tuple[CompilePlan, LoopDetector, int]:
+        plan = CompilePlan(ops=[
+            PageOp(action="create", path="notes/ordered.md", body="body\n", frontmatter=frontmatter),
+        ])
+        return plan, loop_detector or LoopDetector(), 1
+
+    monkeypatch.setattr(coordinator_module, "run_compile_agent", _agent)
+    async with _serving(app, pg_url) as (client, coordinator):
+        slug, ws_uuid = await _create_workspace(client)
+        ws_root = fs_root / "workspaces" / str(ws_uuid)
+        await _append(client, slug, "fact")
+
+        async def _crash(*_: Any, **__: Any) -> None:
+            raise _SimulatedCrash
+
+        real_advance = coordinator._advance_cursor
+        monkeypatch.setattr(coordinator, "_advance_cursor", _crash)
+        with pytest.raises(_SimulatedCrash):
+            await coordinator._run_compile_pass(ws_uuid, ws_root, str(uuid4()), "test")
+        page = ws_root / "notes" / "ordered.md"
+        written = page.read_bytes()
+        page.unlink()
+
+        monkeypatch.setattr(coordinator, "_advance_cursor", real_advance)
+        await coordinator._run_compile_pass(ws_uuid, ws_root, str(uuid4()), "test")
+
+        assert page.read_bytes() == written
+        assert written.index(b"zeta") < written.index(b"alpha") < written.index(b"title")
+
+
+async def test_failed_apply_discards_intent_so_resume_recompiles(
+    app: Any, pg_url: str, fs_root: Path, fake_agent: FakeCompileAgent,
+) -> None:
+    async with _serving(app, pg_url) as (client, coordinator):
+        slug, ws_uuid = await _create_workspace(client)
+        entry_id = await _append(client, slug, "fact")
+        blocker = fs_root / "workspaces" / str(ws_uuid) / "notes" / "pass-1.md"
+        blocker.mkdir(parents=True)
+
+        await coordinator.trigger(ws_uuid, source="test")
+        await _settle(coordinator)
+        assert await _pending_intent(ws_uuid) == (None, None)
+
+        blocker.rmdir()
+        await coordinator.resume(ws_uuid)
+        await coordinator.trigger(ws_uuid, source="test")
+        await _settle(coordinator)
+
+        assert len(fake_agent.wal_texts) == 2
+        assert await _cursor(ws_uuid) == entry_id
+        assert [r.status for r in await _runs(ws_uuid)] == ["abort_error", "success"]
+
+
+async def test_backstop_caps_concurrent_agent_runs(
+    app: Any, pg_url: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate = asyncio.Event()
+    running = 0
+    peak = 0
+    calls = 0
+
+    async def _agent(
+        deps: CompileDeps, *, loop_detector: LoopDetector | None = None, **_: Any
+    ) -> tuple[CompilePlan, LoopDetector, int]:
+        nonlocal running, peak, calls
+        running += 1
+        calls += 1
+        peak = max(peak, running)
+        try:
+            await gate.wait()
+        finally:
+            running -= 1
+        plan = CompilePlan(ops=[PageOp(action="create", path="notes/cap.md", body="compiled\n")])
+        return plan, loop_detector or LoopDetector(), 1
+
+    monkeypatch.setattr(coordinator_module, "run_compile_agent", _agent)
+    async with _serving(app, pg_url, max_concurrent_passes=2) as (client, coordinator):
+        workspaces = [await _create_workspace(client) for _ in range(4)]
+        entry_ids = {ws_uuid: await _append(client, slug, "fact") for slug, ws_uuid in workspaces}
+
+        await coordinator.backstop_all_workspaces()
+        async with asyncio.timeout(5):
+            while running < 2:
+                await asyncio.sleep(0.01)
+        # Give the remaining passes every chance to (wrongly) enter the agent.
+        await asyncio.sleep(0.2)
+        assert (running, calls) == (2, 2)
+
+        gate.set()
+        await _settle(coordinator)
+
+        assert peak == 2
+        assert calls == 4
+        for ws_uuid, entry_id in entry_ids.items():
+            assert await _cursor(ws_uuid) == entry_id

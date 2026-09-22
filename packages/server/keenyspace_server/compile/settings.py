@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CompileSettings(BaseModel):
@@ -23,6 +23,9 @@ class CompileSettings(BaseModel):
     # per-pass token budget and pauses the workspace in a loop.
     max_slice_bytes: int = 40_000
     max_seconds: int = 180
+    # Server-wide cap on compile agents running at once; the backstop otherwise fans
+    # out one LLM call per active workspace simultaneously.
+    max_concurrent_passes: int = Field(default=2, ge=1)
     daily_token_ceiling: int = 500_000
     # Provider is pydantic-ai's provider id (anthropic | openai | google-gla | ...).
     # `model` is the bare model name; the agent joins them as "<provider>:<model>".
