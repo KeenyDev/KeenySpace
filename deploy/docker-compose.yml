@@ -35,6 +35,7 @@ services:
       KEENYSPACE_AUTH__API_KEY_PEPPER: ${KEENYSPACE_API_KEY_PEPPER:?run deploy/gen-secrets.sh}
       KEENYSPACE_AUTH__REQUIRED_GROUP: ${KEENYSPACE_AUTH__REQUIRED_GROUP:-keenyspace-users}
       KEENYSPACE_AUTH__ADMIN_GROUP: ${KEENYSPACE_AUTH__ADMIN_GROUP:-keenyspace-admins}
+      KEENYSPACE_AUTH__API_KEY_GROUP_SNAPSHOT_MAX_AGE_DAYS: ${KEENYSPACE_AUTH__API_KEY_GROUP_SNAPSHOT_MAX_AGE_DAYS:-}
       # Destructive admin backup/restore endpoints stay off by default (CR-02);
       # the backup-restore drill exports KEENYSPACE_ADMIN_API_ENABLED=1 for its run.
       KEENYSPACE_ADMIN_API_ENABLED: ${KEENYSPACE_ADMIN_API_ENABLED:-0}

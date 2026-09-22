@@ -65,10 +65,11 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     async with get_db_session() as session:
         await session.execute(
             text(
-                "INSERT INTO users (sub, display_name, email, source, created_at) "
-                "VALUES (:sub, :dn, NULL, 'api_key', :now)"
+                "INSERT INTO users (sub, display_name, email, source, created_at, "
+                "groups, groups_seen_at) VALUES (:sub, :dn, NULL, 'api_key', :now, "
+                "CAST(:groups AS jsonb), :now)"
             ),
-            {"sub": user_sub, "dn": "rt", "now": now},
+            {"groups": '["keenyspace-admins"]', "sub": user_sub, "dn": "rt", "now": now},
         )
         await session.execute(
             text(
@@ -262,6 +263,11 @@ async def test_restore_without_force_into_empty_target(
             )
             assert restore_resp.status_code == 200, restore_resp.text
             assert restore_resp.json()["wiped"] is False
+
+            # The dump replaced api_keys: the key that ran the restore is not in
+            # the backup, and its cached verification must not outlive that.
+            after = await client.get("/v1/api/auth/api-keys")
+            assert after.status_code == 401
 
         assert await _workspace_count(pg_url) == 1
 

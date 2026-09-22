@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -113,6 +114,15 @@ class OidcClient:
             log.warning("auth.token.iss_mismatch", expected=self._issuer, got=iss_claim)
             return None
 
+        # Authentik mints the access token as the ID token's claims plus
+        # `scope`, `azp` and `uid` (IDToken.to_access_token); the ID token it
+        # returns next to it carries no `scope`. Requiring the claim keeps an ID
+        # token — same signer, issuer and audience — from being replayed as a
+        # bearer credential.
+        if not isinstance(decoded.claims.get("scope"), str):
+            log.warning("auth.token.not_access_token", reason="missing_scope_claim")
+            return None
+
         if conn is not None and self.is_near_expiry(
             decoded.claims, self._auth.refresh_threshold_seconds
         ):
@@ -125,15 +135,18 @@ class OidcClient:
         display_name = (
             decoded.claims.get("preferred_username") or decoded.claims.get("name") or sub_value
         )
-        raw_groups = decoded.claims.get("groups", [])
-        groups: list[str] = (
-            [g for g in raw_groups if isinstance(g, str)] if isinstance(raw_groups, list) else []
-        )
+        raw_groups = decoded.claims.get("groups")
+        groups_seen_at: datetime | None = None
+        groups: list[str] = []
+        if isinstance(raw_groups, list):
+            groups = [g for g in raw_groups if isinstance(g, str)]
+            groups_seen_at = datetime.now(UTC)
         return User(
             sub=sub_value,
             _display_name=str(display_name),
             source="oidc",
             groups=groups,
+            groups_seen_at=groups_seen_at,
         )
 
     async def refresh(self, refresh_token: str) -> dict[str, Any] | None:

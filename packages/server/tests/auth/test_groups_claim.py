@@ -1,8 +1,9 @@
 """D-05 — groups claim extraction in OidcClient.validate_access_token.
 
 Four test cases exercise groups claim coercion:
-  1. groups claim populated from token -> User.groups == ["keenyspace-users"].
-  2. groups claim absent -> User.groups == [].
+  1. groups claim populated from token -> User.groups == ["keenyspace-users"],
+     groups_seen_at set (the token is a source for the owner's group snapshot).
+  2. groups claim absent -> User.groups == [], groups_seen_at None (no snapshot).
   3. groups claim is a non-list -> User.groups == [].
   4. groups claim has non-string members -> only strings kept.
 """
@@ -53,6 +54,7 @@ def _valid_claims(
     claims: dict = {
         "sub": sub,
         "aud": "keenyspace-cli",
+        "scope": "openid profile email groups",
         "exp": now + 3600,
         "iat": now,
     }
@@ -78,6 +80,7 @@ async def test_groups_claim_populated_from_token(mock_authentik_provider) -> Non
     result = await client.validate_access_token(token)
     assert result is not None
     assert result.groups == ["keenyspace-users"]
+    assert result.groups_seen_at is not None
 
 
 @pytest.mark.asyncio
@@ -90,6 +93,7 @@ async def test_groups_claim_absent_defaults_to_empty_list(mock_authentik_provide
     result = await client.validate_access_token(token)
     assert result is not None
     assert result.groups == []
+    assert result.groups_seen_at is None
 
 
 @pytest.mark.asyncio

@@ -76,3 +76,15 @@ def test_psql_argv_ignores_psqlrc() -> None:
 
     assert "--no-psqlrc" in argv
     assert "--single-transaction" in argv
+
+
+def test_percent_encoded_credentials_are_decoded_for_libpq() -> None:
+    url = "postgresql+asyncpg://ks%40ops:p%40ss%2Fw%3Ard%25@db.internal:5433/keenyspace"
+
+    env = admin._pg_env(url)
+    dump_argv = admin._pg_dump_argv(url)
+    psql_argv = admin._psql_argv(url)
+
+    assert env["PGPASSWORD"] == "p@ss/w:rd%"
+    assert dump_argv[dump_argv.index("-U") + 1] == "ks@ops"
+    assert psql_argv[psql_argv.index("-U") + 1] == "ks@ops"

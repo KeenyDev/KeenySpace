@@ -4,7 +4,7 @@
 - Resolution order: cookie > api_key > oidc_bearer (Wave 2: cookie+oidc_bearer stubs)
 - API-key path: ks_live_* → User(source='api_key')
 - Anonymous → AuthenticationError
-- PUBLIC_PREFIXES bypass: /healthz, /readyz, /metrics, /v1/api/auth/login, /v1/api/auth/callback
+- PUBLIC_PREFIXES bypass: /healthz, /readyz, /v1/api/auth/login, /v1/api/auth/callback
 - Invalid api-key (verify returns None) → AuthenticationError (no silent fallthrough)
 - Non-ks_live Bearer → не дёргает ApiKeyService.verify, проваливается на 401
 """
@@ -130,11 +130,18 @@ def test_public_prefixes_constant_includes_required() -> None:
     required = {
         "/healthz",
         "/readyz",
-        "/metrics",
         "/v1/api/auth/login",
         "/v1/api/auth/callback",
     }
     assert required.issubset(set(PUBLIC_PREFIXES))
+
+
+@pytest.mark.asyncio
+async def test_metrics_path_requires_credentials() -> None:
+    """Metrics live on the internal port; on the API port /metrics is not public."""
+    backend = CompositeAuthBackend(oidc_client=None, api_key_service=AsyncMock())
+    with pytest.raises(AuthenticationError):
+        await backend.authenticate(_conn("/metrics"))
 
 
 def test_public_prefixes_is_tuple_for_immutability() -> None:

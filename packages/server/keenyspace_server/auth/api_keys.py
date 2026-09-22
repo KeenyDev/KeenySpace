@@ -4,6 +4,12 @@ Pepper защищает от offline rainbow-table при DB dump (D-08).
 Plaintext key возвращается ровно один раз через mint response; в DB
 никогда не хранится. last_used_at дебансится in-process на single-worker
 (Pitfall F + PROJECT.md Assumption A6).
+
+A key authenticates as its owner with the owner's group snapshot (the groups
+last seen in an OIDC token, see auth/group_snapshot.py), so group gates apply
+to keys the same way they apply to OIDC tokens. Successful verifications are
+cached in-process for a short TTL because argon2 costs ~37 ms and 64 MiB per
+call; revocation drops the cached entries immediately.
 """
 
 from __future__ import annotations
@@ -12,9 +18,12 @@ import asyncio
 import base64
 import hashlib
 import secrets
+import time
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -24,11 +33,16 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from keenyspace_server.auth.audit import write_audit
 from keenyspace_server.auth.user import User
 from keenyspace_server.db.models import ApiKey
+from keenyspace_server.db.models import User as UserRow
 
 log = structlog.get_logger(__name__)
 _PH = PasswordHasher()
+
+VERIFIED_CACHE_TTL_SECONDS = 60.0
+VERIFIED_CACHE_MAX_ENTRIES = 1024
 
 
 def _generate_key_body() -> str:
@@ -43,7 +57,54 @@ def _compute_lookup_hash(body: str, pepper: str) -> str:
     return hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
 
 
+def _snapshot_groups(raw: object) -> tuple[str, ...] | None:
+    if not isinstance(raw, list):
+        return None
+    return tuple(g for g in raw if isinstance(g, str))
+
+
 DbFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+
+
+@dataclass(frozen=True, slots=True)
+class _VerifiedKey:
+    key_id: UUID
+    user_sub: str
+    expires_at: datetime | None
+    groups: tuple[str, ...] | None
+    groups_seen_at: datetime | None
+
+
+class _VerifiedKeyCache:
+    """Bounded TTL map lookup_hash -> verified key. Holds successes only."""
+
+    def __init__(self, *, ttl_seconds: float, max_entries: int) -> None:
+        self._ttl = ttl_seconds
+        self._max = max_entries
+        self._entries: OrderedDict[str, tuple[float, _VerifiedKey]] = OrderedDict()
+
+    def get(self, lookup_hash: str) -> _VerifiedKey | None:
+        item = self._entries.get(lookup_hash)
+        if item is None:
+            return None
+        stored_at, entry = item
+        if time.monotonic() - stored_at >= self._ttl:
+            del self._entries[lookup_hash]
+            return None
+        return entry
+
+    def put(self, lookup_hash: str, entry: _VerifiedKey) -> None:
+        self._entries[lookup_hash] = (time.monotonic(), entry)
+        self._entries.move_to_end(lookup_hash)
+        while len(self._entries) > self._max:
+            self._entries.popitem(last=False)
+
+    def drop_where(self, predicate: Callable[[_VerifiedKey], bool]) -> None:
+        for lookup_hash in [h for h, (_, e) in self._entries.items() if predicate(e)]:
+            del self._entries[lookup_hash]
+
+    def clear(self) -> None:
+        self._entries.clear()
 
 
 class ApiKeyService:
@@ -53,13 +114,24 @@ class ApiKeyService:
         pepper: str,
         db_factory: DbFactory,
         debounce_seconds: int = 300,
+        group_snapshot_max_age: timedelta | None = None,
     ) -> None:
         self._pepper = pepper
         self._db_factory = db_factory
         self._debounce = debounce_seconds
+        self._snapshot_max_age = group_snapshot_max_age
         self._last_used_writes: dict[UUID, datetime] = {}
+        self._verified = _VerifiedKeyCache(
+            ttl_seconds=VERIFIED_CACHE_TTL_SECONDS,
+            max_entries=VERIFIED_CACHE_MAX_ENTRIES,
+        )
+        # Bumped after every invalidation: a verification that read its row
+        # before a concurrent revoke committed must not repopulate the cache.
+        self._invalidation_epoch = 0
 
-    async def mint(self, *, user_sub: str, name: str) -> Mapping[str, Any]:
+    async def mint(
+        self, *, user_sub: str, name: str, expires_at: datetime | None = None
+    ) -> Mapping[str, Any]:
         body = _generate_key_body()
         plaintext = _full_key(body)
         lookup_hash = _compute_lookup_hash(body, self._pepper)
@@ -74,9 +146,20 @@ class ApiKeyService:
             hash=argon_hash,
             lookup_hash=lookup_hash,
             created_at=now,
+            expires_at=expires_at,
         )
         async with self._db_factory() as session:
             session.add(row)
+            await write_audit(
+                session,
+                actor_sub=user_sub,
+                action="auth.api_key.minted",
+                payload={
+                    "key_id": str(key_id),
+                    "name": name,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                },
+            )
             await session.commit()
         log.info(
             "auth.api_key.minted",
@@ -91,6 +174,7 @@ class ApiKeyService:
             "key_prefix": "ks_live_",
             "last4": body[-4:],
             "created_at": now,
+            "expires_at": expires_at,
         }
 
     async def verify(self, plaintext: str) -> User | None:
@@ -98,22 +182,70 @@ class ApiKeyService:
             return None
         body = plaintext[len("ks_live_") :]
         lookup_hash = _compute_lookup_hash(body, self._pepper)
+        entry = self._verified.get(lookup_hash)
+        if entry is None:
+            entry = await self._load_and_verify(lookup_hash, body)
+            if entry is None:
+                return None
+        now = datetime.now(UTC)
+        if entry.expires_at is not None and entry.expires_at <= now:
+            log.info("auth.api_key.denied", reason="expired", key_id=str(entry.key_id))
+            return None
+        if self._snapshot_max_age is not None and (
+            entry.groups_seen_at is None or now - entry.groups_seen_at > self._snapshot_max_age
+        ):
+            log.warning(
+                "auth.api_key.denied",
+                reason="group_snapshot_stale",
+                key_id=str(entry.key_id),
+                user_sub=entry.user_sub,
+            )
+            return None
+        await self._maybe_touch_last_used(entry.key_id)
+        return User(
+            sub=entry.user_sub,
+            _display_name=entry.user_sub,
+            source="api_key",
+            groups=list(entry.groups or ()),
+            groups_seen_at=entry.groups_seen_at,
+        )
+
+    async def _load_and_verify(self, lookup_hash: str, body: str) -> _VerifiedKey | None:
+        epoch = self._invalidation_epoch
         async with self._db_factory() as session:
             result = await session.execute(
-                select(ApiKey).where(
+                select(
+                    ApiKey.id,
+                    ApiKey.user_sub,
+                    ApiKey.hash,
+                    ApiKey.expires_at,
+                    UserRow.groups,
+                    UserRow.groups_seen_at,
+                )
+                .outerjoin(UserRow, UserRow.sub == ApiKey.user_sub)
+                .where(
                     ApiKey.lookup_hash == lookup_hash,
                     ApiKey.revoked_at.is_(None),
                 )
             )
-            row = result.scalar_one_or_none()
+            row = result.one_or_none()
         if row is None:
             return None
         try:
             await asyncio.to_thread(_PH.verify, row.hash, body)
         except VerifyMismatchError, VerificationError, InvalidHashError:
             return None
-        await self._maybe_touch_last_used(row.id)
-        return User(sub=row.user_sub, _display_name=row.user_sub, source="api_key")
+        groups = _snapshot_groups(row.groups)
+        entry = _VerifiedKey(
+            key_id=row.id,
+            user_sub=row.user_sub,
+            expires_at=row.expires_at,
+            groups=groups,
+            groups_seen_at=row.groups_seen_at if groups is not None else None,
+        )
+        if self._invalidation_epoch == epoch:
+            self._verified.put(lookup_hash, entry)
+        return entry
 
     async def list_for_user(self, user_sub: str) -> list[Mapping[str, Any]]:
         async with self._db_factory() as session:
@@ -130,6 +262,7 @@ class ApiKeyService:
                 "created_at": r.created_at,
                 "last_used_at": r.last_used_at,
                 "revoked_at": r.revoked_at,
+                "expires_at": r.expires_at,
             }
             for r in rows
         ]
@@ -146,15 +279,61 @@ class ApiKeyService:
                 )
                 .values(revoked_at=now)
             )
-            await session.commit()
-        if cursor.rowcount > 0:
-            log.info(
-                "auth.api_key.revoked",
-                key_id=str(key_id),
-                user_sub=user_sub,
+            if cursor.rowcount == 0:
+                return False
+            await write_audit(
+                session,
+                actor_sub=user_sub,
+                action="auth.api_key.revoked",
+                payload={"key_id": str(key_id)},
             )
-            return True
-        return False
+            await session.commit()
+        self._invalidate(lambda e: e.key_id == key_id)
+        log.info(
+            "auth.api_key.revoked",
+            key_id=str(key_id),
+            user_sub=user_sub,
+        )
+        return True
+
+    async def revoke_all_for_user(self, user_sub: str, *, actor_sub: str) -> int:
+        now = datetime.now(UTC)
+        async with self._db_factory() as session:
+            result = await session.execute(
+                update(ApiKey)
+                .where(ApiKey.user_sub == user_sub, ApiKey.revoked_at.is_(None))
+                .values(revoked_at=now)
+                .returning(ApiKey.id)
+            )
+            key_ids = [str(key_id) for key_id in result.scalars()]
+            await write_audit(
+                session,
+                actor_sub=actor_sub,
+                action="admin.api_keys.revoked_all",
+                payload={"target_sub": user_sub, "revoked_count": len(key_ids), "key_ids": key_ids},
+            )
+            await session.commit()
+        self._invalidate(lambda e: e.user_sub == user_sub)
+        log.info(
+            "admin.api_keys.revoked_all",
+            actor_sub=actor_sub,
+            target_sub=user_sub,
+            revoked_count=len(key_ids),
+        )
+        return len(key_ids)
+
+    def forget_user(self, user_sub: str) -> None:
+        """Drop cached verifications for a user whose group snapshot changed."""
+        self._invalidate(lambda e: e.user_sub == user_sub)
+
+    def forget_all(self) -> None:
+        """Drop every cached verification, e.g. after api_keys was replaced wholesale."""
+        self._invalidation_epoch += 1
+        self._verified.clear()
+
+    def _invalidate(self, predicate: Callable[[_VerifiedKey], bool]) -> None:
+        self._invalidation_epoch += 1
+        self._verified.drop_where(predicate)
 
     async def _maybe_touch_last_used(self, key_id: UUID) -> None:
         now = datetime.now(UTC)

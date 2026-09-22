@@ -39,7 +39,7 @@ from datetime import UTC, datetime
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import semver as _semver
 import structlog
@@ -49,7 +49,11 @@ from keenyspace_shared.mcp_contracts import BackupManifest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from keenyspace_server.auth.admin_gate import AdminRoute
+from keenyspace_server.auth.api_keys import ApiKeyService
 from keenyspace_server.auth.audit import write_audit
+from keenyspace_server.auth.group_snapshot import GroupSnapshotStore
+from keenyspace_server.auth.schemas import ApiKeyRevokeAllRequest, ApiKeyRevokeAllResponse
 from keenyspace_server.db.session import get_db, get_engine
 from keenyspace_server.observability.metrics import (
     ADMIN_BACKUP_BYTES,
@@ -59,7 +63,7 @@ from keenyspace_server.observability.metrics import (
 )
 
 log = structlog.get_logger(__name__)
-router = APIRouter()
+router = APIRouter(route_class=AdminRoute)
 
 KS_VERSION = "0.1.0"
 
@@ -118,7 +122,7 @@ def _pg_dump_argv(db_url: str) -> list[str]:
     if parsed.port:
         argv.extend(["-p", str(parsed.port)])
     if parsed.username:
-        argv.extend(["-U", parsed.username])
+        argv.extend(["-U", unquote(parsed.username)])
     dbname = parsed.path.lstrip("/") or "postgres"
     argv.append(dbname)
     return argv
@@ -138,7 +142,7 @@ def _psql_argv(db_url: str) -> list[str]:
     if parsed.port:
         argv.extend(["-p", str(parsed.port)])
     if parsed.username:
-        argv.extend(["-U", parsed.username])
+        argv.extend(["-U", unquote(parsed.username)])
     dbname = parsed.path.lstrip("/") or "postgres"
     argv.extend(["-d", dbname])
     return argv
@@ -157,7 +161,7 @@ def _pg_env(db_url: str, *, lock_timeout_ms: int | None = None) -> dict[str, str
         if key == "PATH" or key.startswith("PG")
     }
     if parsed.password:
-        env["PGPASSWORD"] = parsed.password
+        env["PGPASSWORD"] = unquote(parsed.password)
     if lock_timeout_ms is not None:
         env["PGOPTIONS"] = f"-c lock_timeout={lock_timeout_ms}"
     return env
@@ -646,14 +650,16 @@ async def admin_backup(
 
     ws_count_row = await session.execute(text("SELECT count(*) FROM workspaces"))
     ws_count = ws_count_row.scalar_one()
+    alembic_head = await _current_alembic_head(session)
     await write_audit(
         session,
         actor_sub=user.sub,
         action="admin.backup.requested",
         payload={"workspace_count": int(ws_count)},
     )
+    # Ends the request's only transaction: nothing may keep a pooled connection
+    # (and its ACCESS SHARE locks) idle-in-transaction through pg_dump.
     await session.commit()
-    alembic_head = await _current_alembic_head(session)
     db_url = settings.db.url
 
     tmp_dir = fs_root / "tmp" / f"backup-{secrets.token_hex(8)}"
@@ -899,6 +905,12 @@ async def admin_restore(
         engine = get_engine()
         if engine is not None:
             await engine.dispose()
+        # api_keys and users now hold the backup's rows; cached key
+        # verifications and snapshot debounce state describe the old ones.
+        api_key_service: ApiKeyService = request.app.state.api_key_service
+        api_key_service.forget_all()
+        group_snapshots: GroupSnapshotStore = request.app.state.group_snapshots
+        group_snapshots.forget_all()
 
         await asyncio.to_thread(swap.commit)
 
@@ -947,3 +959,12 @@ async def admin_restore(
             archive_path.unlink(missing_ok=True)
         if tmp_dir.exists():
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@router.post("/api-keys/revoke-all", response_model=ApiKeyRevokeAllResponse)
+async def admin_revoke_user_api_keys(
+    body: ApiKeyRevokeAllRequest, request: Request
+) -> ApiKeyRevokeAllResponse:
+    service: ApiKeyService = request.app.state.api_key_service
+    revoked = await service.revoke_all_for_user(body.sub, actor_sub=request.user.sub)
+    return ApiKeyRevokeAllResponse(sub=body.sub, revoked=revoked)

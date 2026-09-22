@@ -40,3 +40,28 @@ async def test_backup_response_never_iterated_leaves_no_scratch(
     assert len(body) == int(response.headers["content-length"])
     with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as tar:
         assert tar.getnames()[0] == "manifest.json"
+
+
+async def test_backup_holds_no_transaction_while_pg_dump_runs(
+    app: Any, api_key_user: tuple[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from keenyspace_server.api import admin
+    from keenyspace_server.db.session import get_db_session
+
+    user_sub, _ = api_key_user
+    request = SimpleNamespace(user=SimpleNamespace(sub=user_sub), app=app)
+    real_pg_dump = admin._run_pg_dump
+    in_transaction_during_dump: list[bool] = []
+
+    async with get_db_session() as session:
+
+        async def _observing_pg_dump(db_url: str, out_path: Path) -> None:
+            in_transaction_during_dump.append(session.in_transaction())
+            await real_pg_dump(db_url, out_path)
+
+        monkeypatch.setattr(admin, "_run_pg_dump", _observing_pg_dump)
+        response = await admin.admin_backup(request, session)  # type: ignore[arg-type]  # duck-typed Request stub
+        async for _ in response.body_iterator:  # type: ignore[union-attr]  # async generator at runtime
+            pass
+
+    assert in_transaction_during_dump == [False]

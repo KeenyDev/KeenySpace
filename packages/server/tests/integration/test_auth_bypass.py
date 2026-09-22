@@ -23,7 +23,6 @@ from httpx import ASGITransport, AsyncClient
 WHITELIST = {
     "/healthz",
     "/readyz",
-    "/metrics",
     "/.well-known/oauth-protected-resource",
     "/docs",
     "/openapi.json",
@@ -183,6 +182,7 @@ async def test_expired_jwt_in_cookie_returns_401(app_with_mocked_authentik) -> N
         {
             "iss": issuer,
             "aud": "keenyspace-test",
+            "scope": "openid profile email groups",
             "sub": "u-exp",
             "iat": int(time.time()) - 7200,
             "exp": int(time.time()) - 100,  # 100s past exp (>leeway 30s)

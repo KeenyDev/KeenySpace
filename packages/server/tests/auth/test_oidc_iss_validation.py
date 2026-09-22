@@ -50,6 +50,7 @@ def _valid_claims(*, iss: str | None, sub: str = "u-iss-test") -> dict:
     claims: dict = {
         "sub": sub,
         "aud": "keenyspace-cli",
+        "scope": "openid profile email groups",
         "exp": now + 3600,
         "iat": now,
     }

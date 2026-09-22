@@ -7,20 +7,18 @@ Revoke = soft (UPDATE revoked_at); cross-user revoke → 404 (T-3-12 existence-l
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.auth.api_keys import ApiKeyService
-from keenyspace_server.auth.audit import write_audit
 from keenyspace_server.auth.schemas import (
     ApiKeyListItem,
     ApiKeyMintRequest,
     ApiKeyMintResponse,
 )
-from keenyspace_server.db.session import get_db
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -39,17 +37,15 @@ async def mint_api_key(
     body: ApiKeyMintRequest,
     request: Request,
     service: ApiKeyService = Depends(_get_service),  # noqa: B008
-    session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> ApiKeyMintResponse:
-    user_sub = request.user.identity
-    result = await service.mint(user_sub=user_sub, name=body.name)
-    await write_audit(
-        session,
-        actor_sub=user_sub,
-        action="auth.api_key.minted",
-        payload={"key_id": str(result["id"]), "name": str(result["name"])},
+    expires_at = (
+        datetime.now(UTC) + timedelta(days=body.expires_in_days)
+        if body.expires_in_days is not None
+        else None
     )
-    await session.commit()
+    result = await service.mint(
+        user_sub=request.user.identity, name=body.name, expires_at=expires_at
+    )
     return ApiKeyMintResponse(**result)
 
 
@@ -68,16 +64,6 @@ async def revoke_api_key(
     key_id: UUID,
     request: Request,
     service: ApiKeyService = Depends(_get_service),  # noqa: B008
-    session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> None:
-    user_sub = request.user.identity
-    ok = await service.revoke(key_id, user_sub)
-    if not ok:
+    if not await service.revoke(key_id, request.user.identity):
         raise HTTPException(status_code=404, detail="not found")
-    await write_audit(
-        session,
-        actor_sub=user_sub,
-        action="auth.api_key.revoked",
-        payload={"key_id": str(key_id)},
-    )
-    await session.commit()

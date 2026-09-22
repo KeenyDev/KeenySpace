@@ -99,8 +99,8 @@ def _archive(
     return buf.getvalue()
 
 
-async def _seed_workspace(client: AsyncClient, fs_root: Path) -> Path:
-    resp = await client.post(
+async def _seed_workspace(admin_client: AsyncClient, fs_root: Path) -> Path:
+    resp = await admin_client.post(
         "/v1/api/workspaces/", json={"slug": "keep-me", "blueprint": "default"}
     )
     assert resp.status_code == 201, resp.text
@@ -109,8 +109,8 @@ async def _seed_workspace(client: AsyncClient, fs_root: Path) -> Path:
     return ws_dir
 
 
-async def _force_restore(client: AsyncClient, archive: bytes) -> Any:
-    return await client.post(
+async def _force_restore(admin_client: AsyncClient, archive: bytes) -> Any:
+    return await admin_client.post(
         "/v1/admin/restore",
         params={"force": "true"},
         files={"file": ("backup.tar.gz", archive, "application/gzip")},
@@ -130,13 +130,13 @@ def _assert_no_restore_scratch(fs_root: Path) -> None:
     ],
 )
 async def test_force_restore_rejects_shell_meta_command_before_wiping(
-    client: AsyncClient, fs_root: Path, tmp_path: Path, meta_line: str
+    admin_client: AsyncClient, fs_root: Path, tmp_path: Path, meta_line: str
 ) -> None:
-    ws_dir = await _seed_workspace(client, fs_root)
+    ws_dir = await _seed_workspace(admin_client, fs_root)
     marker = tmp_path / "pwned"
     dump = f"SELECT 1;\n{meta_line.format(marker=marker)}\n".encode()
 
-    resp = await _force_restore(client, _archive(await _alembic_head(), pg_dump=dump))
+    resp = await _force_restore(admin_client, _archive(await _alembic_head(), pg_dump=dump))
 
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["error"] == "unsafe_pg_dump"
@@ -147,11 +147,11 @@ async def test_force_restore_rejects_shell_meta_command_before_wiping(
 
 
 async def test_force_restore_without_pg_dump_keeps_existing_state(
-    client: AsyncClient, fs_root: Path
+    admin_client: AsyncClient, fs_root: Path
 ) -> None:
-    ws_dir = await _seed_workspace(client, fs_root)
+    ws_dir = await _seed_workspace(admin_client, fs_root)
 
-    resp = await _force_restore(client, _archive(await _alembic_head(), pg_dump=None))
+    resp = await _force_restore(admin_client, _archive(await _alembic_head(), pg_dump=None))
 
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["error"] == "missing_pg_dump"
@@ -160,14 +160,14 @@ async def test_force_restore_without_pg_dump_keeps_existing_state(
 
 
 async def test_force_restore_without_workspaces_tree_keeps_existing_state(
-    client: AsyncClient, fs_root: Path
+    admin_client: AsyncClient, fs_root: Path
 ) -> None:
-    ws_dir = await _seed_workspace(client, fs_root)
+    ws_dir = await _seed_workspace(admin_client, fs_root)
     archive = _archive(
         await _alembic_head(), pg_dump=b"SELECT 1;\n", with_workspaces_tree=False
     )
 
-    resp = await _force_restore(client, archive)
+    resp = await _force_restore(admin_client, archive)
 
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["error"] == "missing_fs_tree"
@@ -176,14 +176,14 @@ async def test_force_restore_without_workspaces_tree_keeps_existing_state(
 
 
 async def test_force_restore_psql_failure_rolls_back_db_and_fs(
-    client: AsyncClient, fs_root: Path
+    admin_client: AsyncClient, fs_root: Path
 ) -> None:
-    ws_dir = await _seed_workspace(client, fs_root)
+    ws_dir = await _seed_workspace(admin_client, fs_root)
     marker_file = ws_dir / "index.md"
     before = marker_file.read_bytes()
     dump = b"SELECT 1;\nSELECT * FROM table_that_does_not_exist;\n"
 
-    resp = await _force_restore(client, _archive(await _alembic_head(), pg_dump=dump))
+    resp = await _force_restore(admin_client, _archive(await _alembic_head(), pg_dump=dump))
 
     assert resp.status_code == 500, resp.text
     assert resp.json()["detail"]["error"] == "psql_restore_failed"
@@ -194,14 +194,14 @@ async def test_force_restore_psql_failure_rolls_back_db_and_fs(
 
 
 async def test_restore_rejects_link_to_extraction_root(
-    client: AsyncClient, fs_root: Path
+    admin_client: AsyncClient, fs_root: Path
 ) -> None:
     link = tarfile.TarInfo(name="fs_root/workspaces/escape")
     link.type = tarfile.SYMTYPE
     link.linkname = "../.."
 
     archive = _archive(await _alembic_head(), pg_dump=b"SELECT 1;\n", extra=[link])
-    resp = await client.post(
+    resp = await admin_client.post(
         "/v1/admin/restore",
         files={"file": ("backup.tar.gz", archive, "application/gzip")},
     )
@@ -212,16 +212,16 @@ async def test_restore_rejects_link_to_extraction_root(
 
 
 async def test_force_restore_psql_timeout_rolls_back_fs(
-    client: AsyncClient, fs_root: Path, monkeypatch: pytest.MonkeyPatch
+    admin_client: AsyncClient, fs_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import keenyspace_server.api.admin as admin_mod
 
-    ws_dir = await _seed_workspace(client, fs_root)
+    ws_dir = await _seed_workspace(admin_client, fs_root)
     monkeypatch.setattr(admin_mod, "PG_CLIENT_TIMEOUT_S", 0.5)
     monkeypatch.setattr(admin_mod, "_psql_argv", lambda _db_url: ["sleep", "30"])
 
     resp = await _force_restore(
-        client, _archive(await _alembic_head(), pg_dump=b"SELECT 1;\n")
+        admin_client, _archive(await _alembic_head(), pg_dump=b"SELECT 1;\n")
     )
 
     assert resp.status_code == 500, resp.text
@@ -232,11 +232,11 @@ async def test_force_restore_psql_timeout_rolls_back_fs(
 
 
 async def test_force_restore_reports_failed_fs_rollback(
-    client: AsyncClient, fs_root: Path, monkeypatch: pytest.MonkeyPatch
+    admin_client: AsyncClient, fs_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import keenyspace_server.api.admin as admin_mod
 
-    ws_dir = await _seed_workspace(client, fs_root)
+    ws_dir = await _seed_workspace(admin_client, fs_root)
 
     def _broken_rollback(self: Any) -> None:
         raise OSError("device busy")
@@ -244,7 +244,7 @@ async def test_force_restore_reports_failed_fs_rollback(
     monkeypatch.setattr(admin_mod._FsSwap, "rollback", _broken_rollback)
     dump = b"SELECT * FROM table_that_does_not_exist;\n"
 
-    resp = await _force_restore(client, _archive(await _alembic_head(), pg_dump=dump))
+    resp = await _force_restore(admin_client, _archive(await _alembic_head(), pg_dump=dump))
 
     assert resp.status_code == 500, resp.text
     detail = resp.json()["detail"]

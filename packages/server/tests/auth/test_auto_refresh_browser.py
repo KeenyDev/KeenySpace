@@ -24,6 +24,7 @@ async def test_browser_path_inline_refresh_when_at_near_expiry(
         {
             "iss": issuer,
             "aud": "keenyspace-test",
+            "scope": "openid profile email groups",
             "sub": "u-refresh",
             "preferred_username": "alice",
             "email": "a@x",
@@ -35,6 +36,7 @@ async def test_browser_path_inline_refresh_when_at_near_expiry(
         {
             "iss": issuer,
             "aud": "keenyspace-test",
+            "scope": "openid profile email groups",
             "sub": "u-refresh",
             "iat": int(time.time()),
             "exp": int(time.time()) + 3600,
@@ -94,6 +96,7 @@ async def test_browser_path_no_refresh_when_at_fresh(
         {
             "iss": issuer,
             "aud": "keenyspace-test",
+            "scope": "openid profile email groups",
             "sub": "u-fresh",
             "iat": int(time.time()),
             "exp": int(time.time()) + 3500,

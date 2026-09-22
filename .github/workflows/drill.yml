@@ -45,7 +45,7 @@ jobs:
               -d client_id=keenyspace-cli \
               -d username=ks-test-svc \
               -d password=ks-test-app-password-known-value-32chars \
-              -d 'scope=openid profile email' | jq -r '.access_token // empty') || true
+              -d 'scope=openid profile email groups' | jq -r '.access_token // empty') || true
             [ -n "$TOKEN" ] && break
             sleep 3
           done
@@ -77,7 +77,7 @@ jobs:
               -d client_id=keenyspace-cli \
               -d username=ks-test-svc \
               -d password=ks-test-app-password-known-value-32chars \
-              -d 'scope=openid profile email' | jq -r '.access_token // empty') || true
+              -d 'scope=openid profile email groups' | jq -r '.access_token // empty') || true
             [ -n "$TOKEN" ] && break
             sleep 3
           done
@@ -161,7 +161,7 @@ jobs:
               -d client_id=keenyspace-cli \
               -d username=ks-test-svc \
               -d password=ks-test-app-password-known-value-32chars \
-              -d 'scope=openid profile email' | jq -r '.access_token // empty') || true
+              -d 'scope=openid profile email groups' | jq -r '.access_token // empty') || true
             [ -n "$TOKEN" ] && break
             sleep 3
           done
@@ -221,7 +221,7 @@ jobs:
               -d client_id=keenyspace-cli \
               -d username=ks-test-svc \
               -d password=ks-test-app-password-known-value-32chars \
-              -d 'scope=openid profile email' | jq -r '.access_token // empty') || true
+              -d 'scope=openid profile email groups' | jq -r '.access_token // empty') || true
             [ -n "$TOKEN" ] && break
             sleep 3
           done

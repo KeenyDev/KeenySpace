@@ -32,7 +32,14 @@ def _auth() -> AuthSettings:
 
 def _claims() -> dict[str, object]:
     now = int(time.time())
-    return {"sub": "u1", "aud": "keenyspace-cli", "iss": ISSUER, "exp": now + 3600, "iat": now}
+    return {
+        "sub": "u1",
+        "aud": "keenyspace-cli",
+        "iss": ISSUER,
+        "exp": now + 3600,
+        "iat": now,
+        "scope": "openid",
+    }
 
 
 def _random_kid_token() -> str:

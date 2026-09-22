@@ -51,6 +51,8 @@ def _ensure_auth_env():
         "KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI": "http://localhost:8000/",
         "KEENYSPACE_AUTH__API_KEY_PEPPER": "test-pepper-32chars-padded-here!",
         "KEENYSPACE_AUTH__SESSION_SECRET_KEY": "test-session-secret-32chars-pad!",
+        # Every app lifespan would otherwise bind the metrics port 9100 on the host.
+        "KEENYSPACE_METRICS_PORT": "0",
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
@@ -247,10 +249,49 @@ async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
 async def api_key_user(app, _engine_lifespan_ctx):
     """D-20a fast-path API-key fixture — direct DB seed bypassing OIDC.
 
-    Returns: (user_sub: str, plaintext_key: str).
-    Wave 0 stub: создаёт users row + api_keys row напрямую через get_db_session.
-    Real argon2 hash + lookup_hash вычисляются здесь же (НЕ ждём Wave 1).
+    Returns: (user_sub: str, plaintext_key: str). The owner has no group
+    snapshot (never logged in via OIDC), so the key is not an admin key.
     """
+    return await _seed_api_key_user(groups=None)
+
+
+@pytest_asyncio.fixture
+async def admin_api_key_user(app, _engine_lifespan_ctx):
+    """Like api_key_user, but the owner's snapshot holds the admin group."""
+    return await _seed_api_key_user(groups=["keenyspace-users", "keenyspace-admins"])
+
+
+@pytest_asyncio.fixture
+async def admin_client(app, _engine_lifespan_ctx, admin_api_key_user):
+    """Authenticated like `client`, with a key whose owner is in the admin group."""
+    _, plaintext = admin_api_key_user
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    ) as c:
+        yield c
+
+
+@pytest.fixture
+def seed_api_key(_engine_lifespan_ctx):
+    """Callable seeding a key whose owner has the given snapshot/expiry."""
+    return _seed_api_key_user
+
+
+async def _seed_api_key_user(
+    *,
+    groups: list[str] | None,
+    groups_seen_at: datetime | None = None,
+    expires_at: datetime | None = None,
+) -> tuple[str, str]:
+    """Insert a users row (with the given group snapshot) and one API key for it.
+
+    Requires engine_lifespan to be running. Real argon2 hash + lookup_hash.
+    """
+    import json
+
     from argon2 import PasswordHasher
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
@@ -264,19 +305,29 @@ async def api_key_user(app, _engine_lifespan_ctx):
     user_sub = f"test-user-{uuid4().hex[:8]}"
     key_id = uuid4()
     now = datetime.now(UTC)
+    if groups is not None and groups_seen_at is None:
+        groups_seen_at = now
 
     async with get_db_session() as session:
         await session.execute(
             text(
-                "INSERT INTO users (sub, display_name, email, source, created_at) "
-                "VALUES (:sub, :dn, NULL, 'api_key', :now)"
+                "INSERT INTO users (sub, display_name, email, source, created_at, groups, "
+                "groups_seen_at) VALUES (:sub, :dn, NULL, 'api_key', :now, "
+                "CAST(:groups AS jsonb), :seen)"
             ),
-            {"sub": user_sub, "dn": "test", "now": now},
+            {
+                "sub": user_sub,
+                "dn": "test",
+                "now": now,
+                "groups": json.dumps(groups) if groups is not None else None,
+                "seen": groups_seen_at if groups is not None else None,
+            },
         )
         await session.execute(
             text(
                 "INSERT INTO api_keys (id, user_sub, name, prefix, hash, lookup_hash, "
-                "created_at) VALUES (:id, :sub, 'test', 'ks_live_', :h, :lh, :now)"
+                "created_at, expires_at) VALUES (:id, :sub, 'test', 'ks_live_', :h, :lh, "
+                ":now, :exp)"
             ),
             {
                 "id": key_id,
@@ -284,6 +335,7 @@ async def api_key_user(app, _engine_lifespan_ctx):
                 "h": argon_hash,
                 "lh": lookup_hash,
                 "now": now,
+                "exp": expires_at,
             },
         )
         await session.commit()

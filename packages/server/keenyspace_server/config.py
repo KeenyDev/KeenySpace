@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import structlog
-from pydantic import BaseModel, ConfigDict, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from keenyspace_server.compile.settings import CompileSettings
@@ -79,6 +79,12 @@ class AuthSettings(BaseModel):
 
     multi_worker: bool = False
     required_group: str = ""
+    # Empty string disables the admin API outright; it never widens it to all users.
+    admin_group: str = "keenyspace-admins"
+    # API keys carry the owner's groups as last seen in an OIDC token. When set,
+    # a key whose owner has not authenticated via OIDC within this many days is
+    # refused, bounding how long a group removal in the IdP can go unnoticed.
+    api_key_group_snapshot_max_age_days: int | None = Field(default=None, ge=1)
 
     # Warn instead of refusing to start: the dev compose stack ships
     # "replace-me" fallbacks and must keep booting.

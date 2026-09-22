@@ -102,6 +102,7 @@ def authentik_stack() -> Generator[str]:
     compose = DockerCompose(
         context=deploy_dir,
         compose_file_name=["docker-compose.yml", "docker-compose.authentik-test.yml"],
+        env_file="authentik-test.env",
     )
     compose.waiting_for(
         {

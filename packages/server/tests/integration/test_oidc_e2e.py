@@ -63,6 +63,7 @@ async def test_login_callback_sets_cookies_and_upserts_user(
                     {
                         "iss": issuer,
                         "aud": "keenyspace-test",
+                        "scope": "openid profile email groups",
                         "sub": "u-1",
                         "preferred_username": "alice",
                         "email": "a@x",
@@ -124,6 +125,7 @@ async def test_oidc_bearer_validates_via_jwks(app_with_mocked_authentik, pg_url)
         {
             "iss": issuer,
             "aud": "keenyspace-test",
+            "scope": "openid profile email groups",
             "sub": "u-bearer",
             "iat": int(time.time()),
             "exp": int(time.time()) + 3600,
@@ -195,6 +197,7 @@ async def test_refresh_rotates_cookies(app_with_mocked_authentik, pg_url) -> Non
         {
             "iss": issuer,
             "aud": "keenyspace-test",
+            "scope": "openid profile email groups",
             "sub": "u-4",
             "iat": int(time.time()),
             "exp": int(time.time()) + 3600,
@@ -345,6 +348,7 @@ async def test_logout_calls_end_session(app_with_mocked_authentik, pg_url) -> No
         {
             "iss": issuer,
             "aud": "keenyspace-test",
+            "scope": "openid profile email groups",
             "sub": "u-3",
             "preferred_username": "carol",
             "iat": int(time.time()),
