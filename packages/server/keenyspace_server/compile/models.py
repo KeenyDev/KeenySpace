@@ -75,6 +75,7 @@ class CompileRunResult:
     status: Literal["success", "idempotent_noop", "paused"]
     pages_written: int
     plan_hash: str | None = None
+    backlog_remaining: bool = False
 
 
 class CompileTriggerResponse(BaseModel):

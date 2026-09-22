@@ -6,7 +6,7 @@ import yaml
 
 from keenyspace_server.compile.models import CompilePlan
 from keenyspace_server.fs.atomic import write_atomic
-from keenyspace_server.fs.path_safety import is_compile_writable
+from keenyspace_server.fs.path_safety import is_compile_writable, validate_relative_path
 
 
 class CompilePlanSafetyError(Exception):
@@ -45,7 +45,7 @@ def apply_plan(ws_root: Path, plan: CompilePlan) -> int:
             raise CompilePlanSafetyError(op.path)
 
     for op in plan.ops:
-        target = ws_root / op.path
+        target = ws_root / validate_relative_path(op.path)
         target.parent.mkdir(parents=True, exist_ok=True)
         data = _serialize_page(op.frontmatter, op.body)
         write_atomic(target, data)

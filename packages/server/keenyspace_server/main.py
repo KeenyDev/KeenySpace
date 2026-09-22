@@ -60,6 +60,7 @@ def build_app() -> FastAPI:
             from .compile.scheduler import build_scheduler
 
             coordinator = CompileCoordinator(settings=settings.compile)
+            await coordinator.reconcile_interrupted()
             app.state.compile_coordinator = coordinator
             set_coordinator(coordinator)
 
@@ -89,6 +90,7 @@ def build_app() -> FastAPI:
                 # APScheduler 3.x shutdown() is sync; D-11 prose "await" wording
                 # is descriptive intent, not a literal API call — see RESEARCH §2.
                 scheduler.shutdown(wait=True)
+                await coordinator.aclose()
                 set_coordinator(None)
                 app.state.compile_coordinator = None
                 app.state.scheduler = None
@@ -107,7 +109,7 @@ def build_app() -> FastAPI:
     mcp_app.state.settings = settings
     mcp_app.state.wal_locks = app.state.wal_locks
     api_key_service = ApiKeyService(
-        pepper=settings.auth.api_key_pepper,
+        pepper=settings.auth.api_key_pepper.get_secret_value(),
         db_factory=get_db_session,
         debounce_seconds=settings.auth.api_key_last_used_debounce_seconds,
     )
@@ -136,7 +138,7 @@ def build_app() -> FastAPI:
     )
     app.add_middleware(
         SessionMiddleware,
-        secret_key=settings.auth.session_secret_key,
+        secret_key=settings.auth.session_secret_key.get_secret_value(),
         session_cookie="ks_oidc_session",
         max_age=900,
         same_site="lax",

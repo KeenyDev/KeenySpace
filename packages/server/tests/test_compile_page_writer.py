@@ -60,3 +60,10 @@ def test_serialize_page_preserves_dict_insertion_order(tmp_path: Path) -> None:
 def test_serialize_page_round_trip_no_frontmatter(tmp_path: Path) -> None:
     out = _serialize_page({}, "body-only").decode("utf-8")
     assert out == "body-only"
+
+
+def test_apply_plan_writes_to_canonical_md_path(tmp_path: Path) -> None:
+    unvalidated = PageOp.model_construct(action="create", path="notes/raw-name", body="b", frontmatter={})
+    apply_plan(tmp_path, CompilePlan.model_construct(ops=[unvalidated], notes=""))
+    assert (tmp_path / "notes" / "raw-name.md").is_file()
+    assert not (tmp_path / "notes" / "raw-name").exists()

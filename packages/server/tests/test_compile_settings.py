@@ -17,6 +17,7 @@ def test_compile_settings_defaults_match_d09() -> None:
     assert cs.max_output_tokens_per_space == 128_000
     assert cs.max_seconds == 180
     assert cs.daily_token_ceiling == 500_000
+    assert cs.max_slice_bytes == 40_000
     assert cs.model == "claude-sonnet-4-6"
     assert not hasattr(cs, "temperature")
 

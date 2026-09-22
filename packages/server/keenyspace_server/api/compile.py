@@ -69,6 +69,14 @@ async def compile_resume(
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> CompileStatusResponse:
     ws = await _load_workspace(slug, session)
+    if ws.status == "archived":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "workspace_archived",
+                "message": f"workspace {slug!r} is archived; unarchive it to resume compile",
+            },
+        )
     coordinator = request.app.state.compile_coordinator
     if coordinator is None:
         raise HTTPException(status_code=503, detail="compile coordinator not initialised")
