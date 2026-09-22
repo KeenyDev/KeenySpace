@@ -12,3 +12,11 @@ plans/
 dist/
 .mypy_cache/
 .ruff_cache/
+.env
+**/.env
+*.local.env
+.DS_Store
+.github/
+.vex*
+open-questions.md
+vision.md

@@ -163,8 +163,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpw}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    # Loopback only: the app reaches Postgres over compose DNS and backups use
+    # in-container pg_dump; host access is for local debugging.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keenyspace -d keenyspace"]
       interval: 5s
