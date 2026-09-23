@@ -32,3 +32,10 @@ deploy/.env
 deploy/keenyspace.env
 *.local.env
 .env.bak*
+
+# macOS
+.DS_Store
+
+# Per-user local agent state
+.claude/settings.local.json
+.claude/worktrees/

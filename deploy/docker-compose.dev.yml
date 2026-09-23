@@ -1,0 +1,37 @@
+# Local development dependencies only — this is NOT a deployment stack.
+# Use docker-compose.yml to run KeenySpace itself.
+#
+# Brings up the Postgres that the server test suite expects. The credentials and
+# port below are the fallback that packages/server/tests/conftest.py uses when
+# KEENYSPACE_DB__URL is unset:
+#
+#   postgresql+asyncpg://postgres:x@localhost:55432/postgres
+#
+# The suite runs `DROP SCHEMA public CASCADE` between tests, so this database is
+# disposable by design. Do not point it at anything you care about.
+name: keenyspace-dev
+
+services:
+  postgres:
+    image: postgres:17.2-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      # Throwaway local credential, fixed to match the conftest.py fallback URL.
+      # Safe because the listener is loopback-only and the data is disposable;
+      # never reuse this value for anything reachable off the machine.
+      POSTGRES_PASSWORD: x
+    ports:
+      # Loopback only, on a non-default port so it cannot collide with a system
+      # Postgres or with the deployment stack's 5432.
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - dev-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dev-postgres-data:
