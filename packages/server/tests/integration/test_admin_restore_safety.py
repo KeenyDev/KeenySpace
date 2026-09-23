@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from keenyspace_server.api.admin import KS_VERSION
 from sqlalchemy import text
 
 PG_URL = os.environ.get("KEENYSPACE_DB__URL")
@@ -77,7 +78,7 @@ def _archive(
 ) -> bytes:
     manifest = {
         "version": 1,
-        "keenyspace_version": "0.1.0",
+        "keenyspace_version": KS_VERSION,
         "schema_version": 1,
         "alembic_head": head,
         "created_at": datetime.now(UTC).isoformat(),

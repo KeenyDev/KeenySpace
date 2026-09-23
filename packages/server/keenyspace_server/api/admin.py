@@ -65,7 +65,9 @@ from keenyspace_server.observability.metrics import (
 log = structlog.get_logger(__name__)
 router = APIRouter(route_class=AdminRoute)
 
-KS_VERSION = "0.1.0"
+# Written into every backup manifest and compared (major.minor) on restore, so it
+# must stay semver-parseable — not the PEP 440 spelling used in pyproject.
+KS_VERSION = "0.2.0-alpha.1"
 
 PG_TABLES_DUMPED = [
     "users",

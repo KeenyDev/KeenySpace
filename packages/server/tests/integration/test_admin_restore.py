@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from keenyspace_server.api.admin import KS_VERSION
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -151,7 +152,7 @@ async def test_restore_version_mismatch_returns_422(app: Any, pg_url: str) -> No
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
         head = await _current_alembic_head()
-        manifest = _default_manifest(keenyspace_version="0.2.0", alembic_head=head)
+        manifest = _default_manifest(keenyspace_version="9.9.0", alembic_head=head)
         tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(
@@ -175,7 +176,7 @@ async def test_restore_schema_mismatch_returns_422(app: Any, pg_url: str) -> Non
     await _reset_schema(pg_url)
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
-        manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head="0001_bogus")
+        manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head="0001_bogus")
         tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(
@@ -210,7 +211,7 @@ async def test_restore_target_not_empty_returns_409(app: Any, pg_url: str) -> No
                 pytest.skip("server not ready")
             await _seed_workspace(client)
             head = await _current_alembic_head()
-            manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head=head)
+            manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head=head)
             tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
             resp = await client.post(
                 "/v1/admin/restore",
@@ -240,7 +241,7 @@ async def test_restore_force_wipes_existing(app: Any, pg_url: str) -> None:
                 pytest.skip("server not ready")
             await _seed_workspace(client)
             head = await _current_alembic_head()
-            manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head=head)
+            manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head=head)
             tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
             resp = await client.post(
                 "/v1/admin/restore",
@@ -273,7 +274,7 @@ async def test_restore_force_wipe_audit_log_row(app: Any, pg_url: str) -> None:
                 pytest.skip("server not ready")
             await _seed_workspace(client)
             head = await _current_alembic_head()
-            manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head=head)
+            manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head=head)
             tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
             resp = await client.post(
                 "/v1/admin/restore",
@@ -312,7 +313,7 @@ async def test_restore_happy_path_empty_target(app: Any, pg_url: str) -> None:
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
         head = await _current_alembic_head()
-        manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head=head)
+        manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head=head)
         manifest["workspaces"] = {"count": 0, "uuids": []}
         tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
         transport = ASGITransport(app=app, raise_app_exceptions=False)

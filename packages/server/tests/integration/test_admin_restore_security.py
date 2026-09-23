@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from keenyspace_server.api.admin import KS_VERSION
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -96,7 +97,7 @@ async def _current_alembic_head() -> str:
 def _minimal_manifest(head: str) -> dict[str, Any]:
     return {
         "version": 1,
-        "keenyspace_version": "0.1.0",
+        "keenyspace_version": KS_VERSION,
         "schema_version": 1,
         "alembic_head": head,
         "created_at": datetime.now(UTC).isoformat(),

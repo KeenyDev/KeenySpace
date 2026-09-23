@@ -37,6 +37,8 @@ jobs:
             echo "::error::Remove internal planning references; state the decision in plain words instead."
             exit 1
           fi
+      - name: release-notes assembler
+        run: uv run pytest scripts/tests -q
       - name: mypy
         run: |
           uv run mypy --strict \
