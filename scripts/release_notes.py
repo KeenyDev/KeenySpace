@@ -103,17 +103,43 @@ def parse_commit(message: str) -> Entry:
     return Entry(section=_OTHER, title=subject, pr=None)
 
 
+def _commit_messages(rev_range: list[str], repo: Path) -> list[str]:
+    log = run_git(["log", "--format=%B%x1e", *rev_range], repo)
+    return [record.strip() for record in log.split("\x1e") if record.strip()]
+
+
+def branch_entries(sha: str, parents: list[str], pr: str | None, repo: Path) -> list[Entry]:
+    """The branch's own commits, so one merged branch yields one entry per change."""
+    if len(parents) != 2:
+        return []
+    messages = _commit_messages([f"{parents[0]}..{parents[1]}"], repo)
+    entries = [parse_commit(message) for message in messages]
+    named = [
+        Entry(section=entry.section, title=entry.title, pr=pr)
+        for entry in entries
+        if entry.title and entry.section != _OTHER
+    ]
+    # A branch of unlabelled commits says more through its merge title.
+    return named if named else []
+
+
 def collect(from_rev: str, to_rev: str, repo: Path) -> list[Entry]:
     """Entries for every change that landed in from_rev..to_rev, newest first."""
-    log = run_git(["log", "--first-parent", "--format=%H%x1f%B%x1e", f"{from_rev}..{to_rev}"], repo)
+    log = run_git(
+        ["log", "--first-parent", "--format=%H%x1f%P%x1f%B%x1e", f"{from_rev}..{to_rev}"], repo
+    )
     entries: list[Entry] = []
     for record in log.split("\x1e"):
         if not record.strip():
             continue
-        _, _, message = record.strip().partition("\x1f")
-        entry = parse_commit(message)
-        if entry.title:
-            entries.append(entry)
+        sha, _, rest = record.strip().partition("\x1f")
+        parent_field, _, message = rest.partition("\x1f")
+        merged = parse_commit(message)
+        expanded = branch_entries(sha, parent_field.split(), merged.pr, repo)
+        if expanded:
+            entries.extend(expanded)
+        elif merged.title:
+            entries.append(merged)
     return entries
 
 
