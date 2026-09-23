@@ -1,1 +1,0 @@
-- [Review case law](review_case_law.md) — recurring KeenySpace defect patterns: uneven to_thread offload, WAL regex framing, stale compile_state, swallowed inputs

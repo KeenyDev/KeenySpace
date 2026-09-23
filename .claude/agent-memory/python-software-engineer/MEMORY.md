@@ -1,4 +1,0 @@
-- [Lifespan in pytest fixtures breaks](test_lifespan_in_fixture.md) — run app lifespan via in-test asynccontextmanager, not a yield fixture (anyio cancel scope)
-- [psql meta-command quirks](psql_meta_command_quirks.md) — mid-line \! and backtick args execute; restore scanner must fail closed; client fixture lacks blueprints
-- [Authentik 2026.2 facts](authentik_facts.md) — token claims, scope mappings, blueprint M2M; blueprint edits auto-apply to dev IdP; real_idp lane hits dev stack
-- [Prove a refactor keeps the wire contract](contract_diff_vs_head.md) — PYTHONPATH a HEAD worktree onto the repo .venv, diff route+OpenAPI dumps
