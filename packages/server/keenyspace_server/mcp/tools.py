@@ -26,6 +26,17 @@ async def ping(message: str) -> str:
 
 
 async def read_page(path: str, workspace: str | None = None) -> ReadPageResponse:
+    """Read one markdown page from a workspace vault.
+
+    Returns the page body with its YAML frontmatter parsed into a mapping.
+    Fails when the workspace or the page does not exist, or when the path
+    would escape the workspace root.
+
+    Args:
+        path: Page path relative to the workspace root, e.g. "notes/topic.md".
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+    """
     with MCP_TOOL_CALL_DURATION.labels(tool="read_page").time():
         user = current_user_from_mcp()
         _ = user
@@ -69,6 +80,24 @@ async def append_log(
     parent_id: str | None = None,
     workspace: str | None = None,
 ) -> AppendLogResponse:
+    """Append one knowledge fragment to the workspace write-ahead log.
+
+    The log is the only writeable surface: there is no tool that edits a page.
+    An appended entry does NOT become a page on its own — call `compile`, poll
+    `compile_status` until it reports idle, and only then is the new content
+    visible to `read_page` and `search_workspace`.
+
+    Returns the new entry id and the server-side timestamp it was written at.
+    Fails when the workspace is unknown or archived, when `parent_id` is not a
+    valid entry id, or when the content is empty or over the size limit.
+
+    Args:
+        content: A self-contained knowledge fragment (a fact, a decision, a
+            relationship), not raw dialogue.
+        parent_id: Entry id of an earlier append that this entry refines.
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+    """
     with MCP_TOOL_CALL_DURATION.labels(tool="append_log").time():
         user = current_user_from_mcp()
         workspace = resolve_workspace(workspace)
@@ -127,7 +156,20 @@ async def append_log(
 
 
 async def compile_tool(workspace: str | None = None) -> CompileTriggerResponse:
-    """Trigger a compile pass for the workspace. Fire-and-forget; poll compile_status for state."""
+    """Start a compile pass that materializes pending log entries into pages.
+
+    Returns as soon as the pass is accepted; compilation runs in the
+    background. Poll `compile_status` until it reports `idle` before reading
+    the results. A pass already running for the workspace is reported as
+    `running` and re-runs afterwards rather than starting a second pass.
+
+    Fails when the workspace is unknown, when its compile is paused (resume it
+    first), or when the server is shutting down.
+
+    Args:
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+    """
     with MCP_TOOL_CALL_DURATION.labels(tool="compile").time():
         user = current_user_from_mcp()
         _ = user
@@ -161,7 +203,16 @@ async def compile_tool(workspace: str | None = None) -> CompileTriggerResponse:
 
 
 async def compile_status_tool(workspace: str | None = None) -> CompileStatusResponse:
-    """Return current compile state for a workspace."""
+    """Report the compile state of a workspace.
+
+    Returns the state (`idle`, `running` or `paused`), the id of the last log
+    entry consumed, when the last pass finished, and the pause reason when the
+    workspace is paused. Fails when the workspace is unknown.
+
+    Args:
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+    """
     with MCP_TOOL_CALL_DURATION.labels(tool="compile_status").time():
         user = current_user_from_mcp()
         _ = user

@@ -1,6 +1,6 @@
 """UDS client used by hook entry points.
 
-Hard timeouts per D-06 / 05-RESEARCH §9:
+Hard timeouts:
   - fire-and-forget: 50ms connect cap
   - session-start source=compact: 200ms connect + 800ms readline
 

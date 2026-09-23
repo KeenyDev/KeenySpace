@@ -37,10 +37,10 @@ def ensure_fs_root_layout(
             )
             shipped = _digest_tree(default_src)
         else:
-            # G-3 (Phase 4 UAT): reconcile the on-disk blueprint catalog with
-            # the image on EVERY boot. Files missing on disk are added; files
-            # still byte-identical to what the image last shipped are upgraded
-            # in place; anything an operator has edited is left alone and
+            # Reconcile the on-disk blueprint catalog with the image on
+            # EVERY boot. Files missing on disk are added; files still
+            # byte-identical to what the image last shipped are upgraded in
+            # place; anything an operator has edited is left alone and
             # reported, so drift is visible instead of silent.
             _merge_blueprint_tree(default_src, default_target, shipped)
         if shipped != manifest.get("default"):
@@ -220,12 +220,12 @@ def _merge_blueprint_tree(
 def _sweep_stale_tmp(tmp_root: Path, prefixes: tuple[str, ...]) -> None:
     """Reap stale scratch entries named ``<prefix>*`` left by killed requests.
 
-    WR-14: the in-request ``finally`` blocks in ``api/workspace_import.py``
-    and ``ws/import_.py`` only run if the worker survives long enough to
-    execute them. ``kill -9``, OOM-killer, container restart, or a stuck
+    The in-request ``finally`` blocks in ``api/workspace_import.py`` and
+    ``ws/import_.py`` only run if the worker survives long enough to execute
+    them. ``kill -9``, OOM-killer, container restart, or a stuck
     ``await file.read(...)`` mid-cancellation leave staged extractions and
-    partial uploads on disk indefinitely. v1 ships single-worker uvicorn,
-    so at startup no other process is mid-import; a sweep here is safe.
+    partial uploads on disk indefinitely. The server runs single-worker, so at
+    startup no other process is mid-import; a sweep here is safe.
 
     Best-effort: failures to remove an entry log a warning and continue
     (a stuck mount or permission issue should not block server boot).

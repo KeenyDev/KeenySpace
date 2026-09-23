@@ -1,4 +1,4 @@
-"""Phase 5 D-04 + Pitfall #7 mitigation: read-only Q&A command.
+"""Read-only Q&A command.
 
 Server returns Instructions with tool_whitelist limited to read_page /
 search_workspace / list_pages. Client refuses to run if the server-supplied
@@ -52,9 +52,9 @@ async def run_query(question: str, workspace: str | None = None) -> None:
         command="query",
         context={"question": question},
     )
-    # WHY: T-05.04-02 defence-in-depth. Server may regress and accidentally
-    # include the write tool in a read-only command whitelist; the client
-    # refuses to be the failure point.
+    # Defence-in-depth: the server may regress and accidentally include the
+    # write tool in a read-only command whitelist; the client refuses to be
+    # the failure point.
     if "append_log" in instructions.tool_whitelist:
         err.print(
             "[red]Defence-in-depth: server returned a write tool in the query "

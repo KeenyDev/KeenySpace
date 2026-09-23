@@ -12,10 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from keenyspace_server.api.workspace_dep import require_workspace
 from keenyspace_server.db.session import get_db
 from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.observability.metrics import WORKSPACE_MANIFEST_TOTAL
-from keenyspace_server.ws.registry import workspace_by_slug
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -53,10 +53,11 @@ async def workspace_manifest(
         WORKSPACE_MANIFEST_TOTAL.labels(outcome="invalid_slug").inc()
         raise HTTPException(status_code=400, detail={"error": "invalid_slug"})
 
-    ws = await workspace_by_slug(session, slug)
-    if ws is None:
+    try:
+        ws = await require_workspace(session, slug)
+    except HTTPException:
         WORKSPACE_MANIFEST_TOTAL.labels(outcome="not_found").inc()
-        raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
+        raise
 
     settings = request.app.state.settings
     ws_root = workspace_root(settings.fs.root, ws.uuid)
@@ -109,19 +110,18 @@ async def workspace_page_raw(
 ) -> FileResponse:
     """Raw bytes for a single file inside the pull-scope (.md or raw/*).
 
-    Added in Phase 5 Plan 03 Task 3 — the existing /pages/{path} endpoint
-    returns ReadPageResponse JSON (parsed frontmatter + body), which is unsuitable
-    for byte-exact dirty-pull comparison. This endpoint returns the file
-    bytes verbatim with octet-stream content-type. Scope is restricted to the
-    same set as the manifest endpoint (T-05.03-03 mitigation).
+    The /pages/{path} endpoint returns ReadPageResponse JSON (parsed
+    frontmatter + body), which cannot be compared byte-for-byte against a
+    local working copy. This endpoint returns the file bytes verbatim with an
+    octet-stream content-type. Its scope is restricted to the same set of
+    files as the manifest endpoint, so it cannot read anything the manifest
+    would not list.
     """
 
     if not _SLUG_RE.match(slug):
         raise HTTPException(status_code=400, detail={"error": "invalid_slug"})
 
-    ws = await workspace_by_slug(session, slug)
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
+    ws = await require_workspace(session, slug)
 
     settings = request.app.state.settings
     ws_root = workspace_root(settings.fs.root, ws.uuid)

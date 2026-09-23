@@ -1,6 +1,8 @@
-"""OIDC client wrapper — Authlib starlette_client + joserfc validation.
+"""OIDC client wrapper — Authlib starlette_client plus joserfc validation.
 
-D-10..D-13. Lazy discovery; JWKS validation via JwksCache; PKCE S256.
+Provider metadata is discovered lazily on first use, access tokens are
+validated against the keys served by JwksCache, and the authorization-code
+flow uses PKCE with S256.
 """
 
 from __future__ import annotations

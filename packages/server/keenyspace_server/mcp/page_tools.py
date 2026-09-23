@@ -39,9 +39,9 @@ def _validated_limit(limit: int | None) -> int:
 def _decode_search_cursor(cursor: str | None) -> tuple[str | None, int]:
     """Return `(after_path, skip)` for a search cursor.
 
-    Current cursors are keyset (`after`: last path returned). Offset cursors
-    (`o`) issued before the keyset switch are still honoured as a skip count
-    so pagination in flight across an upgrade does not break.
+    Cursors are keyset (`after`: the last path returned). Offset-style cursors
+    (`o`) are also accepted and applied as a skip count, so a pagination run
+    in flight across a server upgrade does not break.
     """
     if cursor is None:
         return None, 0
@@ -79,7 +79,20 @@ async def list_pages_tool(
     cursor: str | None = None,
     limit: int | None = None,
 ) -> ListPagesResponse:
-    """List .md pages in a workspace (MCP-04). Cursor-paginated."""
+    """List the markdown pages of a workspace, sorted by path.
+
+    Fails when the workspace does not exist, or when the prefix or the cursor
+    is malformed.
+
+    Args:
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+        prefix: Restrict the listing to one subtree, e.g. "notes/". Must be a
+            relative path without dot-segments or hidden components.
+        cursor: `next_cursor` from a previous call. Keep calling while the
+            response returns a non-null `next_cursor`.
+        limit: Page size, clamped to 1..200; defaults to 50.
+    """
     with MCP_TOOL_CALL_DURATION.labels(tool="list_pages").time():
         _ = current_user_from_mcp()
         workspace = resolve_workspace(workspace)
@@ -120,7 +133,22 @@ async def search_workspace_tool(
     limit: int | None = None,
     workspace: str | None = None,
 ) -> SearchResponse:
-    """Search workspace pages by filename + content (MCP-05). Cursor-paginated."""
+    """Search a workspace by case-insensitive literal substring of path and page content.
+
+    The query is matched literally: there is no regex, full-text or vector
+    search. Results are page paths in path order.
+
+    Fails when the workspace does not exist, when the query is empty or longer
+    than 512 characters, or when the cursor is malformed.
+
+    Args:
+        query: Substring to look for, 1..512 characters.
+        cursor: `next_cursor` from a previous call. Keep calling while the
+            response returns a non-null `next_cursor`.
+        limit: Page size, clamped to 1..200; defaults to 50.
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+    """
     with MCP_TOOL_CALL_DURATION.labels(tool="search_workspace").time():
         _ = current_user_from_mcp()
         workspace = resolve_workspace(workspace)
@@ -139,11 +167,10 @@ async def search_workspace_tool(
         if len(query) > _QUERY_MAX_LEN:
             raise ToolError(f"query exceeds maximum length of {_QUERY_MAX_LEN}")
 
-        # MCP-05 contract makes no mention of regex semantics; treat query as
-        # a case-insensitive literal substring. This eliminates the ReDoS
-        # surface that arbitrary user-supplied regex would create on a
-        # single-worker uvicorn (a pathological pattern can stall the entire
-        # process). See WR-08.
+        # The query is a case-insensitive literal substring, never a regex.
+        # Accepting caller-supplied regex would open a ReDoS surface: on a
+        # single-worker uvicorn one pathological pattern stalls the entire
+        # process.
         settings = app.state.settings
         ws_root = workspace_root(settings.fs.root, ws.uuid)
         page_size = _validated_limit(limit)

@@ -1,9 +1,8 @@
 """Token persistence + auth.json mode-0600 invariant.
 
-Per 05-RESEARCH §13 / D-01: refuse to start the CLI when auth.json has
-any group/world bit set on Unix. Mirrors server `auth/api_keys.py`
-KEY_PREFIX so the client can detect `ks_live_*` API keys versus OIDC
-bearers without a server round-trip.
+The CLI refuses to start when auth.json has any group/world bit set on Unix.
+KEY_PREFIX mirrors the server's `auth/api_keys.py` so the client can tell
+`ks_live_*` API keys from OIDC bearers without a server round-trip.
 """
 
 from __future__ import annotations
@@ -46,12 +45,12 @@ def read_auth(path: Path = AUTH_JSON) -> dict[str, Any]:
     _validate_auth_file_mode(path)
     if not path.exists():
         return {}
-    # WR-05: a corrupted or truncated auth.json (power-loss mid-write,
-    # disk-full during atomic replace, manual edit) must NOT propagate a
-    # raw JSONDecodeError stack trace out of every CLI command that
-    # touches auth state (status, doctor, ingest, query, lint, compile,
-    # backup, restore, daemon/post_compact). Surface a clean error
-    # pointing the user at `keenyspace login` to refresh.
+    # A corrupted or truncated auth.json (power-loss mid-write, disk-full
+    # during atomic replace, manual edit) must NOT propagate a raw
+    # JSONDecodeError stack trace out of every CLI command that touches auth
+    # state (status, doctor, ingest, query, lint, compile, backup, restore,
+    # daemon/post_compact). Surface a clean error pointing the user at
+    # `keenyspace login` to refresh.
     try:
         parsed = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:

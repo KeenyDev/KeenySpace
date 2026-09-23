@@ -1,9 +1,9 @@
 """Typer entry point for the keenyspace CLI.
 
-Pitfall #1: keep top-level imports minimal — only typer. Every command
-body MUST defer heavy deps (pydantic-ai, httpx, fastmcp, anthropic, yaml,
-rich) inside the function. The cold-boot test (test_cli_startup_time.py)
-asserts `keenyspace --help` exits under 600ms.
+Keep top-level imports minimal — only typer. Every command body MUST defer
+heavy deps (pydantic-ai, httpx, fastmcp, anthropic, yaml, rich) inside the
+function. The cold-boot test (test_cli_startup_time.py) asserts
+`keenyspace --help` exits under 600ms.
 """
 
 from __future__ import annotations
@@ -18,14 +18,15 @@ hook_app = typer.Typer(name="hook", help="Internal: Claude Code hook entry point
 app.add_typer(workspace_app)
 app.add_typer(hook_app, hidden=True)
 
-# WR-04: the `workspace` subcommands live in keenyspace.cli.workspace and
-# register via @workspace_app.command decorators at import time. Importing that
-# module unconditionally pays the yaml+rich import cost on every CLI call,
-# including hot-path hooks (Pitfall #1 cold-boot budget). But Click resolves the
-# subcommand name at PARSE time, before any group callback runs, so importing it
-# from @workspace_app.callback() registered the commands too late ("No such
-# command 'use'"). Import eagerly ONLY when a `workspace ...` command is actually
-# being dispatched — keeps hooks and `--help` fast while making subcommands work.
+# The `workspace` subcommands live in keenyspace.cli.workspace and register via
+# @workspace_app.command decorators at import time. Importing that module
+# unconditionally would pay the yaml+rich import cost on every CLI call,
+# including hot-path hooks. Deferring it to @workspace_app.callback() does not
+# work either: Click resolves the subcommand name at PARSE time, before any
+# group callback runs, so the commands would register too late ("No such
+# command 'use'"). Import eagerly ONLY when a `workspace ...` command is
+# actually being dispatched — hooks and `--help` stay fast and the subcommands
+# still resolve.
 import sys  # noqa: E402
 
 if len(sys.argv) > 1 and sys.argv[1] == "workspace":
@@ -53,7 +54,7 @@ def hook_post_tool() -> None:
 
 @hook_app.command("session-start")
 def hook_session_start() -> None:
-    """Claude Code SessionStart event; source=compact triggers context re-injection (F-09)."""
+    """Claude Code SessionStart event; source=compact triggers context re-injection."""
     import asyncio
 
     from keenyspace.hooks.handlers import handle_session_start
@@ -83,7 +84,7 @@ def hook_pre_compact() -> None:
 
 @hook_app.command("post-compact")
 def hook_post_compact() -> None:
-    """Claude Code PostCompact event: fire-and-forget audit (no stdout injection per F-09)."""
+    """Claude Code PostCompact event: fire-and-forget audit, never writes to stdout."""
     import asyncio
 
     from keenyspace.hooks.handlers import handle_post_compact

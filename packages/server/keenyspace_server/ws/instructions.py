@@ -18,7 +18,7 @@ log = structlog.get_logger(__name__)
 _INSTRUCTIONS_MAX_BYTES = 64 * 1024
 _OUTPUT_MAX_CHARS = 32 * 1024
 _RENDER_TIMEOUT_SECONDS = 5.0
-# Pre-render complexity bounds (WR-02): asyncio.wait_for only cancels the
+# Pre-render complexity bounds: asyncio.wait_for only cancels the
 # awaiting coroutine; the Jinja render itself runs in a worker thread that has
 # no cancellation primitive. A pathological template can pin a thread for
 # hours and exhaust the default threadpool. We mitigate by parsing first and

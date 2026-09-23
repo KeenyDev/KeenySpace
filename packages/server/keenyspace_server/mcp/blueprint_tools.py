@@ -26,6 +26,12 @@ _COMMAND_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 
 async def list_blueprints_tool() -> ListBlueprintsResponse:
+    """List the blueprints this server offers, with name, version and description.
+
+    A blueprint is the starting vault layout a workspace is pinned to; the pin
+    of a given workspace is reported by `get_workspace_info`. Takes no
+    arguments and is not scoped to a workspace.
+    """
     with MCP_TOOL_CALL_DURATION.labels(tool="list_blueprints").time():
         user = current_user_from_mcp()
         _ = user
@@ -41,6 +47,23 @@ async def get_instructions_tool(
     context: dict[str, Any],
     workspace: str | None = None,
 ) -> Instructions:
+    """Fetch the server-defined prompt for a workspace command.
+
+    Returns the rendered prompt plus the tools the command may use, its steps,
+    an optional model hint, and step/token/time budgets. Which commands exist
+    and which context keys they require is defined per workspace; the error
+    message names the missing key.
+
+    Fails with `instructions_not_found` when the workspace or the command does
+    not exist, and with `instructions_template_error` when the template cannot
+    be rendered with the given context.
+
+    Args:
+        command: Command name, lowercase, e.g. "query" or "ingest".
+        context: Values the command's template expects, e.g. {"question": ...}.
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+    """
     with MCP_TOOL_CALL_DURATION.labels(tool="get_instructions").time():
         user = current_user_from_mcp()
         _ = user

@@ -1,9 +1,9 @@
 """Typer commands for the daemon lifecycle.
 
 Top-level imports are deliberately limited to the stdlib + typer so that
-`keenyspace --help` cold-boot stays under 600ms (Pitfall #1). asyncio is
-required for asyncio.run inside `daemon start`; importing it at module
-top is acceptable — it's stdlib, fast.
+`keenyspace --help` cold-boot stays under 600ms. asyncio is required for
+asyncio.run inside `daemon start`; importing it at module top is acceptable —
+it's stdlib, fast.
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ def daemon_status() -> None:
 def _double_fork() -> None:
     # POSIX double-fork: detach from controlling terminal so the daemon
     # survives the launching shell. Acceptable as a v1 dev convenience —
-    # production deploys use launchd / systemd-user per D-07.
+    # production deploys use launchd / systemd-user.
     if os.fork() > 0:
         os._exit(0)
     os.setsid()

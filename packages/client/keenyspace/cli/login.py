@@ -1,9 +1,9 @@
 """`keenyspace login` — Authentik device-code flow (RFC 8628) + logout.
 
-Phase 3 D-14: CLI hits Authentik directly for the device flow; the
-KeenySpace server is involved only to discover the IdP issuer (via
-/v1/api/auth/discovery if it exists; falls back to .well-known on the
-server URL; final fallback is the env var KEENYSPACE_AUTHENTIK_ISSUER).
+The CLI hits Authentik directly for the device flow; the KeenySpace server is
+involved only to discover the IdP issuer (via /v1/api/auth/discovery if it
+exists; falls back to .well-known on the server URL; final fallback is the env
+var KEENYSPACE_AUTHENTIK_ISSUER).
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ REFRESH_THRESHOLD_SECONDS = 60
 
 
 async def _discover_authentik_issuer(client: httpx.AsyncClient, server_url: str) -> str:
-    # 1. Try a server-side discovery shim (Phase 3 may add /v1/api/auth/discovery).
+    # 1. Try the server-side discovery shim.
     try:
         resp = await client.get(f"{server_url}/v1/api/auth/discovery")
         if resp.status_code == 200:
@@ -92,8 +92,8 @@ async def _discover_device_endpoints(client: httpx.AsyncClient, issuer: str) -> 
 
 def _decode_sub(access_token: str) -> str:
     # JWT middle segment, base64url-decoded. We do NOT validate signature here;
-    # the server validates on every API call (Pitfall #4: token audience is
-    # the server's concern, see Phase 7 docs).
+    # the server validates on every API call, and the token audience is the
+    # server's concern.
     try:
         parts = access_token.split(".")
         if len(parts) != 3:
@@ -267,9 +267,9 @@ async def run_login(server_url: str | None) -> None:
             raise TimeoutError("Device code expired before authentication")
 
     access_token = token_payload["access_token"]
-    # Pitfall #4: we persist the access_token bytes verbatim. Audience (aud)
+    # The access_token bytes are persisted verbatim. The audience (aud)
     # invariant is enforced by the KeenySpace server's AuthMiddleware on every
-    # API call (Phase 3 D-14, Phase 7 docs). Client does NOT validate aud.
+    # API call; the client does NOT validate aud.
     auth_file.write_auth(
         {
             "access_token": access_token,

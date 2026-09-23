@@ -34,14 +34,14 @@ log = structlog.get_logger(__name__)
 
 MAX_IMPORT_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 
-# G-4: symmetric with export. Top-level components that export NEVER emits
+# Symmetric with export. Top-level components that export NEVER emits
 # are rejected on import to prevent operators from smuggling user-state
 # (.obsidian) or backup-territory (logs/) content into a freshly-imported
 # workspace. Aliasing the export constant guarantees the two policies cannot
-# drift again.
+# drift.
 IMPORT_REJECT_TOP_LEVEL_USER_STATE: frozenset[str] = EXPORT_SKIP_TOP_LEVEL
 
-# G-4: operator-smuggle denylist — top-level components that are virtually
+# Operator-smuggle denylist — top-level components that are virtually
 # never legitimate in a workspace and would be confusing or unsafe if an
 # operator pulled them in by accident. Defence-in-depth on top of path-
 # traversal / symlink / control-char guards. Nested instances of these
@@ -118,7 +118,7 @@ def _validate_zip_sync(zip_path: Path) -> _ZipValidation:
                     "path_traversal",
                     f"unsafe zip entry: {name!r}",
                 )
-            # G-4 top-level reject: drop entries whose first path component is
+            # Top-level reject: drop entries whose first path component is
             # canonical user-state (mirror of export EXPORT_SKIP_TOP_LEVEL)
             # OR operator-smuggle denylist. `.keenyspace` IS permitted (it's
             # the canonical config dir; export emits .keenyspace/config.yaml).
@@ -222,12 +222,11 @@ def _unpack_zip_sync(zip_path: Path, dest: Path) -> None:
 def _rename_and_fsync(src: Path, dst: Path) -> None:
     """Atomic rename + parent dir fsync for durability (matches write_atomic).
 
-    Uses ``os.replace`` for parity with ``fs/blueprint.py`` (WR-01 standardised
-    the fs/ layer on ``os.replace`` because it overwrites the destination
-    atomically on POSIX; ``os.rename`` raises ``OSError(EEXIST)`` on a
-    non-empty destination directory). ``final_dir`` is always a fresh UUID in
-    the import path, but matching the convention keeps the fs/ surface
-    consistent for future readers.
+    Uses ``os.replace`` for parity with ``fs/blueprint.py``: it overwrites the
+    destination atomically on POSIX, while ``os.rename`` raises
+    ``OSError(EEXIST)`` on a non-empty destination directory. ``final_dir`` is
+    always a fresh UUID in the import path, but matching the convention keeps
+    the fs/ surface consistent for future readers.
     """
     os.replace(src, dst)
     parent = dst.parent
@@ -335,7 +334,7 @@ async def import_workspace(
             },
         )
 
-        # FS-then-DB ordering (D-08): move the workspace dir into place BEFORE
+        # FS-then-DB ordering: move the workspace dir into place BEFORE
         # committing the workspaces row. If the rename fails, we rollback the
         # session and the slug is still claimable. If the commit fails after a
         # successful rename, we remove the orphaned final_dir before raising.
@@ -390,8 +389,7 @@ async def import_workspace(
             # BEFORE attempting rollback: the same failure conditions that
             # caused commit() to fail (closed connection, pool exhaustion,
             # lifespan shutdown) also cause rollback() to raise, and a raised
-            # rollback would skip the rmtree, leaving the orphan on disk and
-            # collapsing this handler back to the original CR-01 failure mode.
+            # rollback would skip the rmtree, leaving the orphan on disk.
             # Set outcome before rollback too so the metric label is correct
             # even if rollback throws.
             await asyncio.to_thread(shutil.rmtree, final_dir, ignore_errors=True)

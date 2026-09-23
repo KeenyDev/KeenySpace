@@ -1,7 +1,8 @@
-"""Pydantic schemas для API-key mint/list endpoints (D-09).
+"""Pydantic schemas for the API-key mint / list endpoints.
 
-Plaintext key (`key` field) присутствует ТОЛЬКО в ApiKeyMintResponse — нигде иначе
-(list response не возвращает plaintext; T-3-10 mitigation).
+The plaintext key (`key`) exists ONLY on ApiKeyMintResponse: the mint response
+is the single moment a caller ever sees it. The list schema has no such field,
+so a listing cannot leak keys.
 """
 
 from __future__ import annotations

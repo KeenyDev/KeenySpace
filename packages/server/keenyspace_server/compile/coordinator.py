@@ -261,7 +261,7 @@ class CompileCoordinator:
         )
 
     async def backstop_all_workspaces(self) -> None:
-        """APScheduler entry point (Plan 05). Triggers a compile pass against every active workspace."""
+        """Scheduler entry point: trigger a compile pass for every active workspace."""
         async with get_db_session() as session:
             rows = (await session.execute(
                 select(Workspace.uuid).where(Workspace.status == "active")
@@ -273,12 +273,12 @@ class CompileCoordinator:
                 log.warning("compile.backstop_failed", workspace=str(ws_uuid), error=str(exc))
 
     async def reset_daily_ceiling(self) -> None:
-        """APScheduler 00:00 UTC cron entry point (Plan 05 + D-14)."""
+        """Scheduler entry point for the 00:00 UTC cron: clear the daily token budget."""
         async with get_db_session() as session:
             # SPECIFICITY GUARD: WHERE clause MUST stay restricted to the daily-budget pause
             # reasons ('daily_ceiling', 'space_budget_exceeded') on active workspaces. NEVER
             # broaden to include 'archived' — that would erroneously resume archived workspaces
-            # on the 00:00 UTC cron tick (Phase 4 D-01, RESEARCH.md Pitfall 6).
+            # on the 00:00 UTC cron tick.
             await session.execute(
                 update(Workspace)
                 .where(
@@ -336,8 +336,8 @@ class CompileCoordinator:
         run_id: str,
         source: str,
     ) -> CompileRunResult:
-        # Compile activity is logged to compile_runs only; audit_log is reserved for
-        # security events (per CONTEXT D-16). Do NOT add audit_log entries here.
+        # Compile activity is logged to compile_runs only; audit_log is reserved
+        # for security events. Do NOT add audit_log entries here.
         started_at = datetime.now(UTC)
         if not await self._claim_running(ws_uuid):
             log.info("compile.skipped", workspace=str(ws_uuid), run_id=run_id, reason="paused")
@@ -614,7 +614,7 @@ class CompileCoordinator:
             log.warning("compile.interrupted", workspace=str(ws_uuid), run_id=run_id)
 
     async def resume(self, ws_uuid: UUID) -> None:
-        """Manual reset of a paused, active workspace. Idempotent. Per D-14.
+        """Manual reset of a paused, active workspace. Idempotent.
 
         Archived workspaces stay paused (unarchive is the only way out), and the
         per-space daily token tally is kept so resume cannot bypass the budget.

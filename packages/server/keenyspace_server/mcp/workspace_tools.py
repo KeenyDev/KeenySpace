@@ -26,7 +26,7 @@ from keenyspace_server.ws.scan import count_pages
 async def _fetch_last_compile_map(
     session: AsyncSession, ws_uuids: list[UUID]
 ) -> dict[UUID, datetime | None]:
-    """Batch-fetch last successful compile completion per workspace (WR-11)."""
+    """Batch-fetch the last successful compile completion per workspace."""
     if not ws_uuids:
         return {}
     rows = (
@@ -64,7 +64,7 @@ def _info_from_parts(
 
 
 async def _build_workspace_info(ws: Workspace, ws_dir: Path) -> WorkspaceInfo:
-    """Single-workspace info builder (still used by get_workspace_info_tool)."""
+    """Assemble the info record for a single workspace."""
     page_count = await asyncio.to_thread(count_pages, ws_dir)
     async with get_db_session() as session:
         last_compile_at = (
@@ -82,9 +82,12 @@ async def _build_workspace_info(ws: Workspace, ws_dir: Path) -> WorkspaceInfo:
 
 
 async def list_workspaces_tool(include_archived: bool = False) -> ListWorkspacesResponse:
-    """Return workspaces visible to caller (MCP-01).
+    """List the workspaces this caller can reach.
 
-    D-02: archived workspaces hidden by default; opt-in via include_archived=True.
+    Archived workspaces stay hidden unless `include_archived` is True. Each
+    entry carries the slug to pass to the other tools plus its pinned
+    blueprint, page count and compile state. The result is not paginated:
+    `next_cursor` is always null.
     """
     with MCP_TOOL_CALL_DURATION.labels(tool="list_workspaces").time():
         _ = current_user_from_mcp()
@@ -98,10 +101,9 @@ async def list_workspaces_tool(include_archived: bool = False) -> ListWorkspaces
             stmt = stmt.where(Workspace.status == "active")
         stmt = stmt.order_by(Workspace.slug)
 
-        # WR-11: do all DB work in a single session (one SELECT for workspaces
-        # + one grouped SELECT for last_compile_at), then parallelize the
-        # thread-bound count_pages calls. Avoids N+1 + session-per-row
-        # pool acquisitions that previously serialized at the asyncpg pool.
+        # Two queries in one session (workspaces, then a grouped
+        # last_compile_at), then the thread-bound count_pages calls in
+        # parallel: a session per row would serialize on the asyncpg pool.
         async with get_db_session() as session:
             rows = list((await session.execute(stmt)).scalars().all())
             last_compile_map = await _fetch_last_compile_map(
@@ -123,7 +125,14 @@ async def list_workspaces_tool(include_archived: bool = False) -> ListWorkspaces
 
 
 async def get_workspace_info_tool(workspace: str | None = None) -> WorkspaceInfo:
-    """Return metadata for a workspace (MCP-02)."""
+    """Return metadata for one workspace: status, pinned blueprint, compile state, page count.
+
+    Fails when the workspace does not exist.
+
+    Args:
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+    """
     with MCP_TOOL_CALL_DURATION.labels(tool="get_workspace_info").time():
         _ = current_user_from_mcp()
         workspace = resolve_workspace(workspace)

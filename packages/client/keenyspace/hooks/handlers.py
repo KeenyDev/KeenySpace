@@ -3,8 +3,8 @@
 Each handler:
   1. Reads JSON envelope from stdin (Claude Code passes the hook payload there)
   2. Augments with kind/ts/workspace_slug
-  3. Writes JSONL to the daemon socket (fire-and-forget OR request-response
-     for session-start source=compact per F-09)
+  3. Writes JSONL to the daemon socket (fire-and-forget, or request-response
+     for session-start with source=compact)
   4. Returns — hook MUST exit 0 even on socket/parse failure.
 
 All heavy imports stay deferred: the hook entry takes <1s wall-clock and
@@ -88,7 +88,7 @@ async def handle_session_start() -> None:
     if env is None:
         return
     if source == "compact":
-        # F-09: re-injection happens here, not on PostCompact (Claude Code spec).
+        # Re-injection happens here, not on PostCompact (Claude Code spec).
         content = await request_response(env, counter_key="session-start.compact")
         if content:
             sys.stdout.write(
@@ -121,8 +121,8 @@ async def handle_pre_compact() -> None:
 
 
 async def handle_post_compact() -> None:
-    # F-09: post-compact stays a fire-and-forget audit event; Claude Code
-    # ignores its stdout, so we never write to stdout here.
+    # Post-compact stays a fire-and-forget audit event; Claude Code ignores
+    # its stdout, so nothing is written to stdout here.
     env = _augment("post-compact", _read_stdin_envelope())
     if env is None:
         return

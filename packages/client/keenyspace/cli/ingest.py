@@ -1,12 +1,11 @@
-"""Phase 5 D-02/D-03: server-driven ingest command.
+"""Server-driven ingest command.
 
-Reads source file (or recursively concatenates .md files from a directory)
-into a single LLM prompt, fetches Instructions from server first (CLI-13),
-then runs a pydantic-ai Agent that has access to `append_log` via MCP.
+Reads a source file (or recursively concatenates .md files from a directory)
+into a single LLM prompt, fetches Instructions from the server first, then
+runs a pydantic-ai Agent that has access to `append_log` via MCP.
 
-D-03 v1 invariant: whole file in one prompt; chunking deferred to v1.5.
-Provider context-overflow surfaces as a clean error (exit 2), NOT a stack
-trace.
+The whole file goes into one prompt; there is no chunking. Provider
+context-overflow surfaces as a clean error (exit 2), NOT a stack trace.
 
 Exit codes:
   0 — success

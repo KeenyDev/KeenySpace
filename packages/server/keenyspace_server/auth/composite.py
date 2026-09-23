@@ -1,10 +1,13 @@
-"""CompositeAuthBackend — resolver chain (cookie > api_key > oidc_bearer).
+"""CompositeAuthBackend — the server's only authentication backend.
 
-D-19: единственный production auth backend Phase 3+.
+Credentials are resolved in order: session cookie, then API key, then OIDC
+bearer token.
+
 Every OIDC principal whose token carries a groups claim refreshes the owner's
 group snapshot, which is what API keys are authorized with; a token older than
-the stored snapshot is authorized with the snapshot's groups instead of its own. `required_group`
-applies to every principal: token groups for OIDC, the snapshot for API keys.
+the stored snapshot is authorized with the snapshot's groups instead of its
+own. `required_group` applies to every principal: token groups for OIDC, the
+snapshot for API keys.
 """
 
 from __future__ import annotations

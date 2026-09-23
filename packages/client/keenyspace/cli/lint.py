@@ -1,4 +1,4 @@
-"""Phase 5 D-04 + Pitfall #7: read-only wiki-health audit command.
+"""Read-only wiki-health audit command.
 
 Same defence-in-depth refusal as query.py: if server-supplied whitelist
 includes `append_log`, refuse to run.
@@ -51,7 +51,7 @@ async def run_lint(workspace: str | None = None) -> None:
         command="lint",
         context={},
     )
-    # WHY: T-05.04-02 defence-in-depth — see query.py.
+    # Defence-in-depth — see query.py.
     if "append_log" in instructions.tool_whitelist:
         err.print(
             "[red]Defence-in-depth: server returned a write tool in the lint "

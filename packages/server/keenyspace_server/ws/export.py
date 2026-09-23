@@ -18,7 +18,7 @@ _STREAM_CHUNK_BYTES = 64 * 1024
 
 MAX_EXPORT_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 
-# G-4: shared with ws/import_.py via direct import. Editing this set updates
+# Shared with ws/import_.py via direct import. Editing this set updates
 # both export's skip rule and import's top-level user-state reject rule —
 # keeping the export/import dotfile policy symmetric by construction.
 EXPORT_SKIP_TOP_LEVEL: frozenset[str] = frozenset({".obsidian", "logs"})
@@ -32,7 +32,7 @@ class ExportTooLargeError(ValueError):
 
 def iter_workspace_files(ws_dir: Path) -> Iterator[tuple[Path, Path]]:
     """Yield (absolute_path, relative_path) tuples for every file in `ws_dir`
-    that belongs in the canonical export per D-06.
+    that belongs in the canonical export.
 
     Includes: every regular file at any depth EXCEPT entries whose top-level
     relative component is in `EXPORT_SKIP_TOP_LEVEL`.

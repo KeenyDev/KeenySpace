@@ -32,10 +32,23 @@ async def get_recent_changes_tool(
     cursor: str | None = None,
     limit: int | None = None,
 ) -> RecentChangesResponse:
-    """Return pages modified since cursor or ISO timestamp (MCP-09).
+    """List recently modified pages, newest first.
 
-    Sort order: (mtime_ns DESC, path ASC). Custom cursor `(mtime_ns, path)`
-    stable across concurrent FS writes (RESEARCH §Pattern 4).
+    Ordered by modification time descending, then path ascending. The cursor
+    carries `(mtime_ns, path)` so pagination stays stable even while other
+    writers are touching the vault.
+
+    Fails when the workspace does not exist, when `since` is not a
+    timezone-aware timestamp, or when the cursor is malformed.
+
+    Args:
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+        since: ISO 8601 timestamp; only pages modified after it are returned.
+            Must carry a timezone offset (e.g. "2026-01-01T00:00:00Z").
+        cursor: `next_cursor` from a previous call. Keep calling while the
+            response returns a non-null `next_cursor`.
+        limit: Page size, clamped to 1..200; defaults to 50.
     """
     with MCP_TOOL_CALL_DURATION.labels(tool="get_recent_changes").time():
         _ = current_user_from_mcp()
@@ -58,7 +71,7 @@ async def get_recent_changes_tool(
                 raise ToolError(f"invalid since timestamp: {exc}") from exc
             # Reject naive datetimes: .timestamp() on a naive dt uses local
             # system time, producing a timezone-incoherent comparison against
-            # st_mtime_ns (always UTC). Per WR-09.
+            # st_mtime_ns (always UTC).
             if since_dt.tzinfo is None:
                 raise ToolError(
                     "since timestamp must include timezone offset "

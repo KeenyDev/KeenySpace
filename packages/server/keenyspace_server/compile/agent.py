@@ -116,7 +116,7 @@ async def _validate_compile_plan(
 ) -> CompilePlan:
     """Reject denylist paths early so they consume a model retry, not a tool budget.
 
-    Defense-in-depth: the coordinator's apply_plan denylist gate (Plan 03) is the
+    Defense-in-depth: the coordinator's apply_plan denylist gate is the
     authoritative final check; this validator catches denylist violations before
     they cost extra tool calls or reach disk.
     """

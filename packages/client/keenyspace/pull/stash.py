@@ -1,6 +1,6 @@
 """Stash dirty files to ~/.local/state/keenyspace/<slug>/conflicts/<iso>/ and
-emit a unified diff via rich.Syntax. Per 05-RESEARCH §12: splitlines(keepends=True)
-is critical — without it difflib.unified_diff produces broken output."""
+emit a unified diff via rich.Syntax. splitlines(keepends=True) is critical —
+without it difflib.unified_diff produces broken output."""
 
 from __future__ import annotations
 

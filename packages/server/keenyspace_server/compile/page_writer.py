@@ -10,7 +10,7 @@ from keenyspace_server.fs.path_safety import is_compile_writable, validate_relat
 
 
 class CompilePlanSafetyError(Exception):
-    """Raised when a CompilePlan contains a PageOp.path on the denylist (D-07)."""
+    """Raised when a CompilePlan targets a path the compile agent may not write."""
 
     def __init__(self, path: str) -> None:
         super().__init__(f"PageOp.path {path!r} violates compile denylist")
@@ -18,7 +18,7 @@ class CompilePlanSafetyError(Exception):
 
 
 def _serialize_page(frontmatter: dict[str, object], body: str) -> bytes:
-    """frontmatter (preserve agent-decided key order) + body. PyYAML sort_keys=False per D-06.
+    """Frontmatter in the agent-decided key order, then the body.
 
     IMPORTANT: sort_keys=False is REQUIRED here. The SORTED form is reserved for the
     idempotency hash in compile/hashing.py — never for on-disk frontmatter.

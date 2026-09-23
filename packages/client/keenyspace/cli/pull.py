@@ -1,4 +1,4 @@
-"""`keenyspace workspace pull <slug>` — dirty-aware pull (D-10..D-13).
+"""`keenyspace workspace pull <slug>` — dirty-aware pull.
 
 Workflow:
 1. GET /v1/api/workspaces/<slug>/manifest -> server file map. Any key that would
@@ -10,7 +10,7 @@ Workflow:
    FETCH_CONCURRENCY in flight), atomic-write into vault. The first failure
    cancels the remaining fetches and aborts before local-state.json is written.
 6. Delete in-scope local files that vanished from server canon.
-7. Write slug-marker.json (D-13 option b) + local-state.json (atomic 0o600).
+7. Write slug-marker.json + local-state.json (atomic 0o600).
 """
 
 from __future__ import annotations
@@ -82,9 +82,9 @@ async def run_pull(
             )
             sys.exit(EXIT_UNSAFE_MANIFEST)
 
-        # D-11: a target dir that does not exist yet means "first pull" — no
-        # files can be modified/added/removed relative to nothing, and the
-        # server's manifest must NOT register every file as `removed`.
+        # A target dir that does not exist yet means "first pull" — no files
+        # can be modified/added/removed relative to nothing, and the server's
+        # manifest must NOT register every file as `removed`.
         first_pull = not target_path.exists()
         local_files = hash_local_tree(target_path)
         diff = diff_manifests(local_files, server_files)
@@ -142,13 +142,13 @@ async def run_pull(
 
         changed = [rel for rel, h in server_files.items() if local_files.get(rel) != h]
         written = await map_or_abort(pull_file, changed)
-        # WR-03: record the sha256 of the bytes we actually wrote to disk,
-        # not the manifest hash captured at the start of the pull. If
-        # server canon mutates between manifest fetch and per-file fetch
-        # (compile pass produces fresh content for one of the files), the
-        # local-state.json must reflect the bytes actually on disk so the
-        # next `pull` is not falsely reported as dirty. Sorted so the file
-        # content does not depend on fetch completion order.
+        # Record the sha256 of the bytes actually written to disk, not the
+        # manifest hash captured at the start of the pull. If server canon
+        # mutates between manifest fetch and per-file fetch (a compile pass
+        # produces fresh content for one of the files), local-state.json must
+        # reflect the bytes actually on disk so the next `pull` is not falsely
+        # reported as dirty. Sorted so the file content does not depend on
+        # fetch completion order.
         actual_hashes = {
             rel: written.get(rel, server_files[rel]) for rel in sorted(server_files)
         }

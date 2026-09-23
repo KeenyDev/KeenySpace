@@ -1,9 +1,9 @@
-"""HK-11 + D-13: resolve workspace slug from cwd.
+"""Resolve the workspace slug for the current working directory.
 
 Precedence (highest -> lowest):
   1. explicit arg
   2. env var KEENYSPACE_WORKSPACE
-  3. walk-up search for .keenyspace/slug-marker.json (D-13 option b)
+  3. walk-up search for .keenyspace/slug-marker.json
   4. workspace-map.yaml longest-prefix match
   5. default_workspace from config.yaml
 

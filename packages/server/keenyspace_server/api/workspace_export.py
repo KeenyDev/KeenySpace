@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from keenyspace_server.api.workspace_dep import require_workspace
 from keenyspace_server.auth.audit import write_audit
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
@@ -17,17 +18,9 @@ from keenyspace_server.ws.export import (
     ExportTooLargeError,
     build_workspace_zip,
 )
-from keenyspace_server.ws.registry import workspace_by_slug
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
-
-
-async def _load_workspace(slug: str, session: AsyncSession) -> Workspace:
-    ws = await workspace_by_slug(session, slug)
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
-    return ws
 
 
 def _resolve_ws_dir(request: Request, ws: Workspace) -> Path:
@@ -42,7 +35,7 @@ async def export_workspace(
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> StreamingResponse:
     user = request.user
-    ws = await _load_workspace(slug, session)
+    ws = await require_workspace(session, slug)
     ws_dir = _resolve_ws_dir(request, ws)
     archived = ws.status == "archived"
 

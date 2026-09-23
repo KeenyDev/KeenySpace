@@ -66,7 +66,8 @@ class AuthSettings(BaseModel):
     cookie_samesite_ks_rt: str = "strict"
     cookie_secure: bool = True
 
-    # pepper защищает от offline rainbow-table при DB dump
+    # The pepper keeps a leaked database dump from being attacked with a
+    # precomputed rainbow table of key hashes.
     api_key_pepper: SecretStr
 
     jwks_ttl_seconds: int = 3600

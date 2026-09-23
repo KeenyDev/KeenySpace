@@ -5,10 +5,10 @@ from keenyspace_shared.mcp_contracts import AppendLogRequest, AppendLogResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
+from keenyspace_server.api.workspace_dep import require_workspace
 from keenyspace_server.db.session import get_db
 from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.wal import writer as wal_writer
-from keenyspace_server.ws.registry import workspace_by_slug
 
 router = APIRouter()
 
@@ -20,9 +20,7 @@ async def append_log_endpoint(
     request: Request,
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> AppendLogResponse:
-    ws = await workspace_by_slug(session, slug)
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
+    ws = await require_workspace(session, slug)
 
     settings = request.app.state.settings
     ws_root = workspace_root(settings.fs.root, ws.uuid)

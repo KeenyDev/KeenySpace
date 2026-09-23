@@ -1,4 +1,4 @@
-"""POST /v1/admin/backup + /v1/admin/restore endpoints (Phase 5 F-06).
+"""POST /v1/admin/backup + /v1/admin/restore endpoints.
 
 Backup builds a gzipped tarball under ``fs_root/tmp/`` and then streams it. The
 first entry is manifest.json (BackupManifest shape from
@@ -17,11 +17,11 @@ same transaction), and the parked entries are deleted only once both steps
 succeeded — any failure puts the old trees back and leaves the database as it
 was.
 
-Pitfall #8 (atomic same-volume tmp) is the reason every pg_dump/restore scratch
-directory lives under `fs_root/tmp/` rather than `/tmp` — `os.rename` between
-volumes degrades to copy+delete and breaks the atomic FS swap.
-Pitfall #3 (Python 3.14 tarfile default filter) is set explicitly to `"data"`
-so a future stdlib regression does not silently widen the attack surface.
+Every pg_dump/restore scratch directory lives under `fs_root/tmp/` rather than
+`/tmp`: `os.rename` between volumes degrades to copy+delete, which would break
+the atomic FS swap. The tarfile extraction filter is passed explicitly rather
+than relying on the stdlib default, so a future default change cannot silently
+widen the attack surface.
 """
 
 from __future__ import annotations
@@ -110,8 +110,9 @@ def _pg_dump_argv(db_url: str) -> list[str]:
         "--no-acl",
         # --clean --if-exists emits "DROP TABLE IF EXISTS ..." before every
         # CREATE so psql can replay against a target whose schema already
-        # exists (Alembic ran during server boot). D-17 wipes ROWS via DELETE,
-        # not tables — without --clean the replay collides on CREATE TABLE.
+        # exists (Alembic ran during server boot). The force wipe removes ROWS
+        # via DELETE, not tables — without --clean the replay would collide on
+        # CREATE TABLE.
         "--clean",
         "--if-exists",
     ]
@@ -545,8 +546,8 @@ async def _run_pg_dump(db_url: str, out_path: Path) -> None:
         HTTPException: 500 ``pg_dump_failed`` on a non-zero exit or timeout.
     """
 
-    # WR-02: stream pg_dump stdout to disk in chunks instead of buffering the
-    # whole dump; a multi-GB database would otherwise pin O(dump_size) RSS.
+    # Stream pg_dump stdout to disk in chunks instead of buffering the whole
+    # dump; a multi-GB database would otherwise pin O(dump_size) RSS.
     async def _drain(stdout: asyncio.StreamReader) -> None:
         with out_path.open("wb") as pg_fp:
             while pg_chunk := await stdout.read(UPLOAD_CHUNK_BYTES):
@@ -746,15 +747,14 @@ async def admin_restore(
                     break
                 await asyncio.to_thread(fp.write, chunk)
 
-        # WR-07: tar.extractall walks the entire archive synchronously
-        # (file IO + writes). Offload to a worker thread so the event
-        # loop can continue serving health probes and concurrent
-        # requests during a large restore.
+        # tar.extractall walks the entire archive synchronously (file IO +
+        # writes). Offload to a worker thread so the event loop can continue
+        # serving health probes and concurrent requests during a large restore.
         def _extract_tar() -> None:
             with tarfile.open(archive_path, "r:gz") as tar:
-                # Pitfall #3: the data filter is applied explicitly (inside
+                # The data filter is applied explicitly (inside
                 # _restore_member_filter) so a future stdlib default change
-                # cannot widen the attack surface silently.
+                # cannot silently widen the attack surface.
                 tar.extractall(path=tmp_dir, filter=_restore_member_filter)
 
         try:
@@ -946,9 +946,9 @@ async def admin_restore(
     except HTTPException:
         raise
     except Exception as exc:
-        # Without this the failure surfaced as Starlette's bare "Internal Server
-        # Error" with nothing in the logs, which is how the REL-07 drill failure
-        # stayed undiagnosable across four CI runs.
+        # Without this handler an unexpected failure surfaces as Starlette's
+        # bare "Internal Server Error" with nothing in the logs, which makes a
+        # failed restore undiagnosable.
         ADMIN_RESTORE_TOTAL.labels(outcome="unexpected_error").inc()
         log.exception("admin.restore.unexpected_error", error=str(exc))
         raise HTTPException(

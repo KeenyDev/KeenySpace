@@ -1,4 +1,4 @@
-"""Phase 5 + Phase 2 D-12/D-13: thin client over MCP `compile` + `compile_status`.
+"""Thin client over the MCP `compile` + `compile_status` tools.
 
 Default is fire-and-forget — the server queues the compile job and returns
 immediately. `--wait` polls compile_status every 2s (default) until the

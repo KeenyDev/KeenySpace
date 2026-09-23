@@ -1,4 +1,4 @@
-"""`keenyspace doctor` — read-only diagnostics (>= 7 checks per CLI-10).
+"""`keenyspace doctor` — read-only diagnostics.
 
 Checks: server /healthz, server /readyz, auth validity, config sanity,
 auth.json mode, daemon socket, dropped events, filesystem perms.

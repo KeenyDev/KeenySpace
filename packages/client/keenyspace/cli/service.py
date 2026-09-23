@@ -1,9 +1,9 @@
 """`keenyspace service install/uninstall` — register the daemon with launchd or systemd-user.
 
-Pitfall #2: `shutil.which("keenyspace")` resolves to an abs path which the
-template substitutes for `__KEENYSPACE_BIN__`. Re-run `service install`
-after `uv tool upgrade keenyspace` so the launchd / systemd unit picks up
-the new path; this is documented in Phase 7 docs.
+`shutil.which("keenyspace")` resolves to an absolute path, which the template
+substitutes for `__KEENYSPACE_BIN__`. Re-run `service install` after
+`uv tool upgrade keenyspace` so the launchd / systemd unit picks up the new
+path.
 """
 
 from __future__ import annotations
@@ -40,9 +40,9 @@ def _read_template(name: str) -> str:
 
 
 def _install_macos() -> None:
-    # WR-06: Path.home() is resilient against unset HOME (chroot, restricted
-    # shells, custom PAM) — os.environ["HOME"] would raise KeyError. The rest
-    # of this codebase already uses Path.home() in paths.py.
+    # Path.home() is resilient against unset HOME (chroot, restricted shells,
+    # custom PAM) — os.environ["HOME"] would raise KeyError. The rest of this
+    # codebase already uses Path.home() in paths.py.
     plist = (
         _read_template("launchd_com.keenyspace.daemon.plist")
         .replace("__KEENYSPACE_BIN__", str(_resolve_binary()))

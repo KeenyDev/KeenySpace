@@ -90,8 +90,7 @@ def build_app() -> FastAPI:
             try:
                 yield
             finally:
-                # APScheduler 3.x shutdown() is sync; D-11 prose "await" wording
-                # is descriptive intent, not a literal API call — see RESEARCH §2.
+                # APScheduler 3.x shutdown() is synchronous: nothing to await.
                 scheduler.shutdown(wait=True)
                 await coordinator.aclose()
                 set_coordinator(None)
@@ -143,7 +142,7 @@ def build_app() -> FastAPI:
     # BEFORE AuthenticationMiddleware so request.session is populated before
     # CompositeAuthBackend.authenticate (which delegates to OidcClient using
     # request session under /v1/api/auth). Path-scoped to /v1/api/auth so the
-    # cookie does not leak onto /v1/mcp or other surfaces (T-3-37).
+    # cookie does not leak onto /v1/mcp or other surfaces.
     app.add_middleware(
         AuthenticationMiddleware,
         backend=composite_backend,
@@ -161,10 +160,10 @@ def build_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(well_known.router)
-    # D-03 inline auto-refresh: cookie-path browser sessions get inline rotate
-    # via FastAPI dependency when ks_at exp is within refresh_threshold_seconds.
-    # NOT applied to auth router (login/callback public; refresh/logout self-manage
-    # cookies) nor to MCP mount (API-key path per D-13).
+    # Cookie-authenticated browser sessions get their access token rotated
+    # inline when ks_at expires within refresh_threshold_seconds. NOT applied
+    # to the auth router (login/callback are public; refresh/logout manage
+    # their own cookies) nor to the MCP mount, where agents use API keys.
     protected_deps = [Depends(refresh_if_needed)]
     app.include_router(
         workspaces.router,
@@ -216,7 +215,7 @@ def build_app() -> FastAPI:
         prefix="/v1/api/auth/api-keys",
         dependencies=protected_deps,
     )
-    # CR-02: admin routes (backup / restore) wipe and replace the entire
+    # Admin routes (backup / restore) wipe and replace the entire
     # deployment. They are mounted only behind an explicit server-side opt-in
     # env flag, and every route additionally requires membership in
     # auth.admin_group (auth/admin_gate.py).

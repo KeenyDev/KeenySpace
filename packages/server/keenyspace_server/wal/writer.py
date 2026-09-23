@@ -102,11 +102,11 @@ async def append_log(
         raise PayloadTooLarge(f"Entry content exceeds maximum size of {max_bytes} bytes")
     multi_worker = settings.auth.multi_worker
 
-    # D-01 / D-03: pre-flight Workspace.status check BEFORE lock acquisition. The
-    # TOCTOU window (archive flips between this check and lock acquisition) is
-    # acceptable per D-03 (DB = source of truth; one stray append after archive
-    # has negligible impact and coordinator will be paused within milliseconds).
-    # Skip when DB engine hasn't been initialized (unit-test environments without lifespan).
+    # Pre-flight Workspace.status check BEFORE acquiring the lock. The TOCTOU
+    # window (the workspace is archived between this check and the append) is
+    # accepted: the DB is the source of truth, one stray entry after an archive
+    # is harmless, and the coordinator pauses within milliseconds.
+    # Skipped when the DB engine was never initialised (unit tests without lifespan).
     from keenyspace_server.db.session import get_engine as _get_engine
     if _get_engine() is not None:
         from sqlalchemy import select as _select
@@ -159,9 +159,9 @@ async def append_log(
     from keenyspace_server.observability.metrics import WAL_APPENDS_TOTAL
     WAL_APPENDS_TOTAL.labels(workspace=str(ws_uuid), source=source).inc()
 
-    # Phase 2: notify compile coordinator outside the workspace lock scope.
-    # Lazy import avoids circular dependency at module init time and keeps
-    # Phase 1 tests passing when the compile module is not yet wired into Settings.
+    # Notify the compile coordinator outside the workspace lock scope. The
+    # lazy import breaks a circular dependency at module init time, and the
+    # settings probe keeps the WAL usable when compile is not configured.
     if hasattr(settings, "compile"):
         try:
             from keenyspace_server.compile.coordinator import get_coordinator

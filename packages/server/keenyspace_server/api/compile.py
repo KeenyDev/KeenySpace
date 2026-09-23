@@ -4,21 +4,13 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from keenyspace_server.api.workspace_dep import require_workspace
 from keenyspace_server.compile.models import CompileStatusResponse, CompileTriggerResponse
-from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
-from keenyspace_server.ws.registry import workspace_by_slug
 
 log = structlog.get_logger(__name__)
 
 router = APIRouter()
-
-
-async def _load_workspace(slug: str, session: AsyncSession) -> Workspace:
-    ws = await workspace_by_slug(session, slug)
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
-    return ws
 
 
 @router.post("/{slug}/compile", response_model=CompileTriggerResponse, status_code=202)
@@ -27,7 +19,7 @@ async def trigger_compile(
     request: Request,
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> CompileTriggerResponse:
-    ws = await _load_workspace(slug, session)
+    ws = await require_workspace(session, slug)
     if ws.compile_state == "paused":
         raise HTTPException(
             status_code=409,
@@ -53,7 +45,7 @@ async def compile_status(
     request: Request,
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> CompileStatusResponse:
-    ws = await _load_workspace(slug, session)
+    ws = await require_workspace(session, slug)
     coordinator = request.app.state.compile_coordinator
     if coordinator is None:
         raise HTTPException(status_code=503, detail="compile coordinator not initialised")
@@ -67,7 +59,7 @@ async def compile_resume(
     request: Request,
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> CompileStatusResponse:
-    ws = await _load_workspace(slug, session)
+    ws = await require_workspace(session, slug)
     if ws.status == "archived":
         raise HTTPException(
             status_code=409,

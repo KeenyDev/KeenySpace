@@ -38,8 +38,8 @@ def search_workspace_files(
     up to its last match rather than the whole vault. The first `skip`
     matches are discarded.
 
-    Per WR-08, regex semantics opened a ReDoS surface; the MCP-05 contract
-    only promises literal-substring matching.
+    The query is never treated as a regex: the contract promises literal
+    substring matching, and accepting patterns would open a ReDoS surface.
     """
     paths = list_md_paths(ws_root)
     start = 0 if after is None else bisect.bisect_right(paths, after)

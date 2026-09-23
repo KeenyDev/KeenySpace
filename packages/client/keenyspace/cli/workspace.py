@@ -1,7 +1,7 @@
 """`keenyspace workspace ...` subcommands.
 
-list / use / archive / from-cwd are thin httpx wrappers over the Phase 4
-endpoints; pull defers to keenyspace.cli.pull.run_pull.
+list / use / archive / from-cwd are thin httpx wrappers over the server's
+workspace endpoints; pull defers to keenyspace.cli.pull.run_pull.
 """
 
 from __future__ import annotations

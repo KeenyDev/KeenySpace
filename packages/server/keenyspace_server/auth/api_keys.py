@@ -1,9 +1,10 @@
-"""ApiKeyService — argon2id + sha256+pepper двойной hash для O(1) lookup.
+"""ApiKeyService — argon2id for verification plus a sha256+pepper lookup hash.
 
-Pepper защищает от offline rainbow-table при DB dump (D-08).
-Plaintext key возвращается ровно один раз через mint response; в DB
-никогда не хранится. last_used_at дебансится in-process на single-worker
-(Pitfall F + PROJECT.md Assumption A6).
+The lookup hash makes verification an O(1) indexed read; the pepper keeps a
+leaked database dump from being attacked with a precomputed rainbow table.
+The plaintext key is returned exactly once, from the mint response, and is
+never stored. last_used_at writes are debounced in-process, which is only
+correct because the server runs single-worker.
 
 A key authenticates as its owner with the owner's group snapshot (the groups
 last seen in an OIDC token, see auth/group_snapshot.py), so group gates apply

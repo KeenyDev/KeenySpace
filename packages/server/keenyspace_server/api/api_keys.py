@@ -1,8 +1,9 @@
-"""POST/GET/DELETE /v1/api/auth/api-keys — D-06/D-09.
+"""POST / GET / DELETE /v1/api/auth/api-keys.
 
-Plaintext key shown ровно один раз через POST response (T-3-10).
-List response НЕ возвращает plaintext.
-Revoke = soft (UPDATE revoked_at); cross-user revoke → 404 (T-3-12 existence-leak hide).
+The plaintext key is shown exactly once, in the POST response; the listing
+never returns it. Revocation is soft (it stamps revoked_at). Revoking a key
+that belongs to somebody else answers 404 rather than 403, so the endpoint
+does not confirm that the key id exists.
 """
 
 from __future__ import annotations

@@ -1,13 +1,10 @@
 """Tool-whitelist enforcement for client-side pydantic-ai agents.
 
-Wave 1 SUMMARY documented that pydantic-ai-slim 1.93.0's
-`MCPServerStreamableHTTP.__init__` does NOT accept a `tool_filter` kwarg
-but DOES expose a `process_tool_call` hook. We build a hook closure that
-rejects any tool whose name is not in the whitelist.
-
-`supports_tool_filter()` remains True for the `process_tool_call` path so
-callers can branch (legacy plan text referenced `tool_filter`; we provide
-the hook builder either way).
+pydantic-ai's `MCPServerStreamableHTTP` takes no `tool_filter` argument; it
+exposes a `process_tool_call` hook instead. `make_process_tool_call` builds a
+hook closure that rejects any tool outside the whitelist, and
+`supports_tool_filter` reports whether the installed version offers any such
+mechanism at all.
 """
 
 from __future__ import annotations

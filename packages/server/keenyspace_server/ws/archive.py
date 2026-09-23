@@ -57,9 +57,9 @@ async def archive_workspace(
     )
     await session.commit()
 
-    # D-03 step 3: best-effort .keenyspace/config.yaml mirror; DB is source of
-    # truth. Failures are logged and swallowed; `keenyspace doctor` (Phase 5)
-    # reconciles drift.
+    # Best-effort .keenyspace/config.yaml mirror; the DB is the source of
+    # truth. Failures are logged and swallowed; `keenyspace doctor` reconciles
+    # the drift.
     _mirror_archived_at_to_config(ws_dir, now)
 
     WORKSPACE_ARCHIVE_TOTAL.labels(action="archive").inc()
@@ -88,7 +88,7 @@ async def unarchive_workspace(
 
     # Selective compile-state reset: only clear pause if reason was 'archived'.
     # Other pause reasons (daily_ceiling, loop_abort, ...) survive unarchive and
-    # require explicit POST /compile/resume to clear (D-01 unarchive semantics).
+    # require an explicit POST /compile/resume to clear.
     await session.execute(
         update(Workspace)
         .where(

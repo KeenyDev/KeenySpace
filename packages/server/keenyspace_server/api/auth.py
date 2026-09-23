@@ -1,4 +1,4 @@
-"""OIDC HTTP endpoints — D-01..D-07 + D-16.
+"""OIDC HTTP endpoints.
 
 GET  /v1/api/auth/discovery — public; advertises the IdP issuer to the CLI
 GET  /v1/api/auth/login    — public; Authlib authorize_redirect → IdP

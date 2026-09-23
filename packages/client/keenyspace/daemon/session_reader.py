@@ -8,8 +8,8 @@ flow. Per-file byte cursors, pending text and retry state persist together in
 ``ingest-state.json`` so a delta is never ingested twice. Distillation + the actual ``append_log`` happen server-side inside
 the ingest agent; compile then materialises pages on its own debounce/backstop.
 
-This is the implicit-capture write path. The hooks remain only for post-compact
-re-injection (the read path); capture no longer depends on them.
+This is the implicit-capture write path. The hooks cover only post-compact
+re-injection (the read path); capture does not depend on them.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ DEFAULT_INTERVAL_SECONDS = 600
 # session to accumulate more rather than spend an ingest call on a tiny delta.
 MIN_DELTA_CHARS = 4_000
 # Wall-clock cap on a single ingest. Without it, one hung LLM/HTTP call would
-# block the whole poll loop indefinitely (a stuck ingest once wedged the reader
+# block the whole poll loop indefinitely (a stuck ingest can wedge the reader
 # for hours). On timeout the buffer is kept and retried on the next tick.
 INGEST_TIMEOUT_SECONDS = 180
 # Hard cap on raw bytes consumed per file per tick. Bounds a single ingest's

@@ -15,12 +15,12 @@ from pydantic_ai.messages import ToolCallPart
 class LoopDetector(AbstractCapability[Any]):
     """Aborts an agent run when (tool, args_hash) repeats max_repeats times.
 
-    Per CMP-06 + AI-SPEC §6 G4: same (tool_name, sha256(args)) triple x3 -> ModelRetry.
-    When pydantic-ai exhausts its retry budget, it raises UsageLimitExceeded; the
-    caller translates that to a loop-abort outcome.
+    The same (tool_name, sha256(args)) pair repeated max_repeats times raises
+    ModelRetry. When pydantic-ai exhausts its retry budget it raises
+    UsageLimitExceeded; the caller translates that to a loop-abort outcome.
 
     CRITICAL: instantiate per agent.run() call. Sharing across runs accumulates
-    _call_counts and produces false loop detection (RESEARCH §Pitfall 2).
+    _call_counts and produces false loop detection.
     """
 
     max_repeats: int = 3

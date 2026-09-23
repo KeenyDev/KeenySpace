@@ -1,8 +1,8 @@
 """Local sha256 manifest + diff against server manifest.
 
-Scope (D-13): .md anywhere + raw/ subtree. Files outside this scope are IGNORED —
-they MUST NEVER be reported as `removed` or `added`. Pitfall #9: a stray
-`notes.txt` in the vault root must not trigger a dirty state.
+Scope: .md anywhere plus the raw/ subtree. Files outside this scope are
+IGNORED — they MUST NEVER be reported as `removed` or `added`; a stray
+`notes.txt` in the vault root must not put the vault in a dirty state.
 """
 
 from __future__ import annotations

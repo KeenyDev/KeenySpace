@@ -1,10 +1,11 @@
-"""Audit log writer — пишет в `audit_log` без plaintext credentials (D-18, T-3-10).
+"""Audit log writer: appends to `audit_log`, never with plaintext credentials.
 
 Events: auth.login.success/failure, auth.logout, auth.token.refresh,
-auth.api_key.minted/revoked. NO auth.api_key.used (high cardinality, Pitfall F).
+auth.api_key.minted/revoked. Key USE is deliberately not audited — one event
+per request would swamp the log.
 
-`name` clipping (N-5): user-supplied free-form поле клипается до 128 chars matching
-DB column constraint `api_keys.name Mapped[String(128)]` — PII / log-injection защита.
+The user-supplied `name` payload field is clipped to 128 characters, matching
+the `api_keys.name` column, to bound what an attacker can push into the log.
 """
 
 from __future__ import annotations

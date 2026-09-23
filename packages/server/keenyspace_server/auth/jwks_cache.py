@@ -1,8 +1,8 @@
-"""JwksCache — 1h TTL + serve-stale-on-error + throttled force-refresh on unknown kid.
+"""JwksCache — 1h TTL, serve-stale-on-error, throttled force-refresh on unknown kid.
 
-D-11 + Pitfall G + Pitfall J. Используется для access_token JWT validation
-(cookie ks_at, OIDC Bearer); id_token validation в OIDC callback использует
-Authlib's internal cache (отдельный code path).
+Serves the signing keys used to validate access-token JWTs (the ks_at cookie
+and OIDC Bearer tokens). id_token validation in the OIDC callback is a
+separate code path that uses Authlib's own cache.
 """
 
 from __future__ import annotations

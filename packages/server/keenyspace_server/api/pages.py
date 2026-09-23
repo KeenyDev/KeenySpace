@@ -8,11 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from keenyspace_shared.mcp_contracts import ReadPageResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from keenyspace_server.api.workspace_dep import require_workspace
 from keenyspace_server.db.session import get_db
 from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.fs.path_safety import UnsafePath, open_workspace_page
 from keenyspace_server.ws.frontmatter import split_frontmatter
-from keenyspace_server.ws.registry import workspace_by_slug
 
 router = APIRouter()
 
@@ -24,9 +24,7 @@ async def get_page(
     request: Request,
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> ReadPageResponse:
-    ws = await workspace_by_slug(session, slug)
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
+    ws = await require_workspace(session, slug)
 
     settings = request.app.state.settings
     ws_root = workspace_root(settings.fs.root, ws.uuid)
