@@ -76,7 +76,10 @@ def test_render_says_so_when_nothing_landed() -> None:
     assert "No changes recorded" in render([], version="v0.2.0", compare_url=None)
 
 
-def test_collect_reads_first_parent_history_of_a_real_repository(tmp_path: Path) -> None:
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """A repository tagged v0.1.0, ready for branches to be merged into main."""
+
     def git(*args: str) -> None:
         subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
 
@@ -87,20 +90,60 @@ def test_collect_reads_first_parent_history_of_a_real_repository(tmp_path: Path)
     git("add", "f")
     git("commit", "-qm", "chore: first")
     git("tag", "v0.1.0")
+    return tmp_path
 
-    git("checkout", "-qb", "fix/thing")
-    (tmp_path / "f").write_text("two")
-    git("commit", "-qam", "fix: the thing")
+
+def merge_branch(repo: Path, branch: str, commits: list[str], merge_subject: str) -> None:
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+    git("checkout", "-qb", branch)
+    for index, message in enumerate(commits):
+        (repo / branch.replace("/", "-")).write_text(f"{index}")
+        git("add", "-A")
+        git("commit", "-qm", message)
     git("checkout", "-q", "main")
-    git(
-        "merge",
-        "--no-ff",
-        "-m",
-        "Merge pull request #3 from org/fix/thing\n\nfix: the thing",
+    git("merge", "--no-ff", "-m", merge_subject, branch)
+
+
+def test_collect_expands_a_merged_branch_into_its_own_commits(repo: Path) -> None:
+    merge_branch(
+        repo,
         "fix/thing",
+        ["fix: the thing", "test: cover the thing"],
+        "Merge pull request #3 from org/fix/thing\n\nfix: the thing",
     )
 
-    entries = collect("v0.1.0", "HEAD", tmp_path)
+    entries = collect("v0.1.0", "HEAD", repo)
 
-    # The branch's own commit is not first-parent history: only the merge counts.
-    assert entries == [Entry(section="fix", title="the thing", pr="3")]
+    # One branch, two changes: each keeps its own type and carries the PR number.
+    assert set(entries) == {
+        Entry(section="fix", title="the thing", pr="3"),
+        Entry(section="test", title="cover the thing", pr="3"),
+    }
+
+
+def test_collect_falls_back_to_the_merge_title_for_unlabelled_branches(repo: Path) -> None:
+    merge_branch(
+        repo,
+        "docs/guide",
+        ["wip", "more wip"],
+        "Merge pull request #4 from org/docs/guide\n\ndocs: write the guide",
+    )
+
+    entries = collect("v0.1.0", "HEAD", repo)
+
+    assert entries == [Entry(section="docs", title="write the guide", pr="4")]
+
+
+def test_collect_keeps_direct_commits_on_the_release_branch(repo: Path) -> None:
+    subprocess.run(
+        ["git", "commit", "-q", "--allow-empty", "-m", "fix: straight onto main"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    entries = collect("v0.1.0", "HEAD", repo)
+
+    assert entries == [Entry(section="fix", title="straight onto main", pr=None)]
