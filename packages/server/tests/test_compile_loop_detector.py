@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 from keenyspace_server.compile.agent import compile_agent, run_compile_agent
-from keenyspace_server.compile.loop_detector import LoopDetector
 from keenyspace_server.compile.models import CompileDeps
+from keenyspace_shared.loop_detector import LoopDetector
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel

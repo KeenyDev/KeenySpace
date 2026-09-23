@@ -10,8 +10,9 @@ from uuid import UUID
 
 import structlog
 import yaml
+from keenyspace_shared.atomic_write import write_atomic
 
-from .atomic import write_atomic
+from .layout import workspace_root
 
 log = structlog.get_logger(__name__)
 
@@ -78,7 +79,7 @@ def clone_default_blueprint(
         UnknownBlueprintError: no such blueprint directory exists.
     """
     src = _resolve_blueprint_dir(fs_root, blueprint_name)
-    final = fs_root / "workspaces" / str(ws_uuid)
+    final = workspace_root(fs_root, ws_uuid)
     tmp = final.parent / f"{ws_uuid}.tmp.{secrets.token_hex(8)}"
 
     shutil.copytree(

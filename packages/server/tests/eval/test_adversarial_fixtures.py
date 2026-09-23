@@ -8,9 +8,9 @@ from typing import Any
 import pytest
 import respx
 from keenyspace_server.compile.agent import compile_agent, run_compile_agent
-from keenyspace_server.compile.loop_detector import LoopDetector
 from keenyspace_server.compile.models import CompileDeps, CompilePlan, PageOp
 from keenyspace_server.compile.page_writer import CompilePlanSafetyError, apply_plan
+from keenyspace_shared.loop_detector import LoopDetector
 from pydantic import ValidationError
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart

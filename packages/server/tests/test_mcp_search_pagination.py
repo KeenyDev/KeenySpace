@@ -20,7 +20,7 @@ def search_ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ws_root.mkdir(parents=True)
     workspace = SimpleNamespace(uuid=ws_uuid)
     app = SimpleNamespace(
-        state=SimpleNamespace(settings=SimpleNamespace(fs=SimpleNamespace(root=str(tmp_path))))
+        state=SimpleNamespace(settings=SimpleNamespace(fs=SimpleNamespace(root=tmp_path)))
     )
 
     class _Result:

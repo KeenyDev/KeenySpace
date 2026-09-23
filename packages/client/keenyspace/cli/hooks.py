@@ -153,7 +153,7 @@ def _load_settings(path: Path) -> dict[str, Any]:
 
 
 def _write_settings(path: Path, settings: dict[str, Any]) -> None:
-    from keenyspace.fs.atomic import write_atomic
+    from keenyspace_shared.atomic_write import write_atomic
 
     write_atomic(path, (json.dumps(settings, indent=2) + "\n").encode())
 

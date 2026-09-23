@@ -11,7 +11,7 @@ from jinja2.sandbox import SandboxedEnvironment
 from keenyspace_shared.mcp_contracts import Budgets, Instructions
 from pydantic import ValidationError
 
-from keenyspace_server.mcp.tools import _split_frontmatter
+from keenyspace_server.ws.frontmatter import split_frontmatter
 
 log = structlog.get_logger(__name__)
 
@@ -123,7 +123,7 @@ async def load_and_render_instructions(
         )
     content = raw_bytes.decode("utf-8", errors="replace")
 
-    frontmatter, body = _split_frontmatter(content)
+    frontmatter, body = split_frontmatter(content)
 
     tool_whitelist = frontmatter.get("tool_whitelist", [])
     if not isinstance(tool_whitelist, list) or not all(

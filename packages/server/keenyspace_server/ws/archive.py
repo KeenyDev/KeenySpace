@@ -8,12 +8,12 @@ from uuid import UUID
 
 import structlog
 import yaml
+from keenyspace_shared.atomic_write import write_atomic
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.auth.audit import write_audit
 from keenyspace_server.db.models import Workspace
-from keenyspace_server.fs.atomic import write_atomic
 from keenyspace_server.observability.metrics import WORKSPACE_ARCHIVE_TOTAL
 
 log = structlog.get_logger(__name__)

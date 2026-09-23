@@ -10,7 +10,6 @@ from pathlib import Path
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +21,7 @@ from keenyspace_server.fs.blueprint import (
     UnknownBlueprintError,
     clone_default_blueprint,
 )
+from keenyspace_server.ws.registry import workspace_by_slug
 
 logger = structlog.get_logger(__name__)
 
@@ -55,10 +55,7 @@ async def create_workspace(
             detail="slug must be alphanumeric + hyphens, 1-64 chars",
         )
 
-    existing = await session.execute(
-        select(Workspace).where(Workspace.slug == body.slug)
-    )
-    if existing.scalar_one_or_none() is not None:
+    if await workspace_by_slug(session, body.slug) is not None:
         raise HTTPException(
             status_code=409,
             detail=f"workspace with slug {body.slug!r} already exists",

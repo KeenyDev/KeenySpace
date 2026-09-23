@@ -44,12 +44,13 @@ async def run_pull(
     force: bool = False,
     target: Path | None = None,
 ) -> None:
+    from keenyspace_shared.atomic_write import write_atomic
     from rich.console import Console
     from rich.markup import escape
     from rich.table import Table
 
     from keenyspace.clients.http import build_authed_http_client
-    from keenyspace.fs.atomic import write_atomic, write_atomic_secret
+    from keenyspace.fs.atomic import write_atomic_secret
     from keenyspace.paths import DEFAULT_PULL_ROOT, STATE_DIR
     from keenyspace.pull.manifest import (
         UnsafeManifestPathError,

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from keenyspace_shared.mcp_contracts import AppendLogRequest, AppendLogResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
-from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.wal import writer as wal_writer
+from keenyspace_server.ws.registry import workspace_by_slug
 
 router = APIRouter()
 
@@ -20,13 +20,12 @@ async def append_log_endpoint(
     request: Request,
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> AppendLogResponse:
-    result = await session.execute(select(Workspace).where(Workspace.slug == slug))
-    ws = result.scalar_one_or_none()
+    ws = await workspace_by_slug(session, slug)
     if ws is None:
         raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
 
     settings = request.app.state.settings
-    ws_root = settings.fs.root / "workspaces" / str(ws.uuid)
+    ws_root = workspace_root(settings.fs.root, ws.uuid)
     locks = request.app.state.wal_locks
 
     actor_sub = request.user.identity if request.user.is_authenticated else "anonymous"

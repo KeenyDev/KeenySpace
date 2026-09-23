@@ -137,10 +137,10 @@ async def _run_list(archived: bool) -> None:
 
 async def _run_use(slug: str) -> None:
     import yaml
+    from keenyspace_shared.atomic_write import write_atomic
 
     from keenyspace.clients.http import build_authed_http_client
     from keenyspace.config import load_config_yaml
-    from keenyspace.fs.atomic import write_atomic
     from keenyspace.paths import CONFIG_DIR, CONFIG_YAML
 
     async with await build_authed_http_client() as client:
@@ -185,9 +185,9 @@ async def _run_register(
     import json
 
     import yaml
+    from keenyspace_shared.atomic_write import write_atomic
 
     from keenyspace.clients.http import build_authed_http_client
-    from keenyspace.fs.atomic import write_atomic
     from keenyspace.paths import CONFIG_DIR, WORKSPACE_MAP_YAML
 
     abs_path = _resolve_target_path(path)
@@ -241,8 +241,8 @@ async def _run_register(
 
 def _run_unregister(path: str | None) -> None:
     import yaml
+    from keenyspace_shared.atomic_write import write_atomic
 
-    from keenyspace.fs.atomic import write_atomic
     from keenyspace.paths import WORKSPACE_MAP_YAML
 
     abs_path = _resolve_target_path(path)

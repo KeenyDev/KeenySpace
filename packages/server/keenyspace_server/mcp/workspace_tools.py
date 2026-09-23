@@ -16,15 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.db.models import CompileRun, Workspace
 from keenyspace_server.db.session import get_db_session
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
-from keenyspace_server.ws.scan import iter_md_files
-
-
-def _count_pages_sync(ws_dir: Path) -> int:
-    if not ws_dir.is_dir():
-        return 0
-    return sum(1 for _ in iter_md_files(ws_dir))
+from keenyspace_server.ws.registry import workspace_by_slug
+from keenyspace_server.ws.scan import count_pages
 
 
 async def _fetch_last_compile_map(
@@ -69,7 +65,7 @@ def _info_from_parts(
 
 async def _build_workspace_info(ws: Workspace, ws_dir: Path) -> WorkspaceInfo:
     """Single-workspace info builder (still used by get_workspace_info_tool)."""
-    page_count = await asyncio.to_thread(_count_pages_sync, ws_dir)
+    page_count = await asyncio.to_thread(count_pages, ws_dir)
     async with get_db_session() as session:
         last_compile_at = (
             await session.execute(
@@ -90,7 +86,7 @@ async def list_workspaces_tool(include_archived: bool = False) -> ListWorkspaces
 
     D-02: archived workspaces hidden by default; opt-in via include_archived=True.
     """
-    with MCP_TOOL_CALL_DURATION.labels(tool="list_workspaces_tool").time():
+    with MCP_TOOL_CALL_DURATION.labels(tool="list_workspaces").time():
         _ = current_user_from_mcp()
 
         req = get_http_request()
@@ -104,7 +100,7 @@ async def list_workspaces_tool(include_archived: bool = False) -> ListWorkspaces
 
         # WR-11: do all DB work in a single session (one SELECT for workspaces
         # + one grouped SELECT for last_compile_at), then parallelize the
-        # thread-bound _count_pages_sync calls. Avoids N+1 + session-per-row
+        # thread-bound count_pages calls. Avoids N+1 + session-per-row
         # pool acquisitions that previously serialized at the asyncpg pool.
         async with get_db_session() as session:
             rows = list((await session.execute(stmt)).scalars().all())
@@ -112,12 +108,9 @@ async def list_workspaces_tool(include_archived: bool = False) -> ListWorkspaces
                 session, [ws.uuid for ws in rows]
             )
 
-        fs_root = Path(settings.fs.root)
         page_counts = await asyncio.gather(
             *[
-                asyncio.to_thread(
-                    _count_pages_sync, fs_root / "workspaces" / str(ws.uuid)
-                )
+                asyncio.to_thread(count_pages, workspace_root(settings.fs.root, ws.uuid))
                 for ws in rows
             ]
         )
@@ -131,7 +124,7 @@ async def list_workspaces_tool(include_archived: bool = False) -> ListWorkspaces
 
 async def get_workspace_info_tool(workspace: str | None = None) -> WorkspaceInfo:
     """Return metadata for a workspace (MCP-02)."""
-    with MCP_TOOL_CALL_DURATION.labels(tool="get_workspace_info_tool").time():
+    with MCP_TOOL_CALL_DURATION.labels(tool="get_workspace_info").time():
         _ = current_user_from_mcp()
         workspace = resolve_workspace(workspace)
 
@@ -140,14 +133,10 @@ async def get_workspace_info_tool(workspace: str | None = None) -> WorkspaceInfo
         settings = app.state.settings
 
         async with get_db_session() as session:
-            ws = (
-                await session.execute(
-                    select(Workspace).where(Workspace.slug == workspace)
-                )
-            ).scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
 
-        ws_dir = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+        ws_dir = workspace_root(settings.fs.root, ws.uuid)
         return await _build_workspace_info(ws, ws_dir)

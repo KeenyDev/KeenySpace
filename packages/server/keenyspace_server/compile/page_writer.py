@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from keenyspace_shared.atomic_write import write_atomic
 
 from keenyspace_server.compile.models import CompilePlan
-from keenyspace_server.fs.atomic import write_atomic
 from keenyspace_server.fs.path_safety import is_compile_writable, validate_relative_path
 
 

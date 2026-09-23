@@ -25,6 +25,8 @@ from .api import (
     workspace_manifest,
     workspaces,
 )
+from .api import api_keys as api_keys_router
+from .api import auth as auth_router
 from .api import compile as compile_router
 from .auth.api_keys import ApiKeyService
 from .auth.composite import CompositeAuthBackend
@@ -39,8 +41,6 @@ from .mcp.server import build_mcp, build_mcp_skeleton
 from .observability.logging import configure_logging
 from .observability.metrics import build_instrumentator
 from .observability.metrics_server import metrics_server_lifespan
-from .routers import api_keys as api_keys_router
-from .routers import auth as auth_router
 from .wal.locks import WorkspaceLockRegistry
 
 

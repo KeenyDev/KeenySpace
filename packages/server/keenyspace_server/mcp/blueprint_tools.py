@@ -7,10 +7,9 @@ import structlog
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_request
 from keenyspace_shared.mcp_contracts import Instructions, ListBlueprintsResponse
-from sqlalchemy import select
 
-from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.ws.blueprints import list_blueprints_from_fs
@@ -19,6 +18,7 @@ from keenyspace_server.ws.instructions import (
     InstructionTemplateError,
     load_and_render_instructions,
 )
+from keenyspace_server.ws.registry import workspace_by_slug
 
 log = structlog.get_logger(__name__)
 
@@ -55,15 +55,12 @@ async def get_instructions_tool(
         settings = req.app.state.settings
 
         async with get_db_session() as session:
-            result = await session.execute(
-                select(Workspace).where(Workspace.slug == workspace)
-            )
-            ws = result.scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
 
-        ws_dir = settings.fs.root / "workspaces" / str(ws.uuid)
+        ws_dir = workspace_root(settings.fs.root, ws.uuid)
         workspace_meta: dict[str, Any] = {
             "uuid": str(ws.uuid),
             "slug": ws.slug,

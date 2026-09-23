@@ -7,8 +7,7 @@ import shutil
 from pathlib import Path
 
 import structlog
-
-from .atomic import write_atomic
+from keenyspace_shared.atomic_write import write_atomic
 
 log = structlog.get_logger(__name__)
 

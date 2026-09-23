@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from functools import partial
-from pathlib import Path
 
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_request
@@ -11,13 +10,13 @@ from keenyspace_shared.mcp_contracts import (
     SearchResponse,
     SearchResult,
 )
-from sqlalchemy import select
 
-from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.ws.cursor import decode_cursor, encode_cursor
+from keenyspace_server.ws.registry import workspace_by_slug
 from keenyspace_server.ws.search import (
     VAULT_SCAN_SLOTS,
     list_md_paths,
@@ -81,7 +80,7 @@ async def list_pages_tool(
     limit: int | None = None,
 ) -> ListPagesResponse:
     """List .md pages in a workspace (MCP-04). Cursor-paginated."""
-    with MCP_TOOL_CALL_DURATION.labels(tool="list_pages_tool").time():
+    with MCP_TOOL_CALL_DURATION.labels(tool="list_pages").time():
         _ = current_user_from_mcp()
         workspace = resolve_workspace(workspace)
 
@@ -89,11 +88,7 @@ async def list_pages_tool(
         app = req.app
 
         async with get_db_session() as session:
-            ws = (
-                await session.execute(
-                    select(Workspace).where(Workspace.slug == workspace)
-                )
-            ).scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
@@ -103,7 +98,7 @@ async def list_pages_tool(
             prefix_norm = _validate_prefix(prefix)
 
         settings = app.state.settings
-        ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+        ws_root = workspace_root(settings.fs.root, ws.uuid)
         all_paths = await run_in_thread_slot(
             VAULT_SCAN_SLOTS, list_md_paths, ws_root, prefix_norm
         )
@@ -126,7 +121,7 @@ async def search_workspace_tool(
     workspace: str | None = None,
 ) -> SearchResponse:
     """Search workspace pages by filename + content (MCP-05). Cursor-paginated."""
-    with MCP_TOOL_CALL_DURATION.labels(tool="search_workspace_tool").time():
+    with MCP_TOOL_CALL_DURATION.labels(tool="search_workspace").time():
         _ = current_user_from_mcp()
         workspace = resolve_workspace(workspace)
 
@@ -134,11 +129,7 @@ async def search_workspace_tool(
         app = req.app
 
         async with get_db_session() as session:
-            ws = (
-                await session.execute(
-                    select(Workspace).where(Workspace.slug == workspace)
-                )
-            ).scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
@@ -154,7 +145,7 @@ async def search_workspace_tool(
         # single-worker uvicorn (a pathological pattern can stall the entire
         # process). See WR-08.
         settings = app.state.settings
-        ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+        ws_root = workspace_root(settings.fs.root, ws.uuid)
         page_size = _validated_limit(limit)
         try:
             after, skip = _decode_search_cursor(cursor)

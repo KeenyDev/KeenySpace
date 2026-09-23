@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_request
 from keenyspace_shared.mcp_contracts import RecentChange, RecentChangesResponse
-from sqlalchemy import select
 
-from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.ws.cursor import decode_mtime_cursor, encode_mtime_cursor
 from keenyspace_server.ws.recent import scan_recent_changes
+from keenyspace_server.ws.registry import workspace_by_slug
 from keenyspace_server.ws.search import VAULT_SCAN_SLOTS
 from keenyspace_server.ws.thread_slots import run_in_thread_slot
 
@@ -38,7 +37,7 @@ async def get_recent_changes_tool(
     Sort order: (mtime_ns DESC, path ASC). Custom cursor `(mtime_ns, path)`
     stable across concurrent FS writes (RESEARCH §Pattern 4).
     """
-    with MCP_TOOL_CALL_DURATION.labels(tool="get_recent_changes_tool").time():
+    with MCP_TOOL_CALL_DURATION.labels(tool="get_recent_changes").time():
         _ = current_user_from_mcp()
         workspace = resolve_workspace(workspace)
 
@@ -46,11 +45,7 @@ async def get_recent_changes_tool(
         app = req.app
 
         async with get_db_session() as session:
-            ws = (
-                await session.execute(
-                    select(Workspace).where(Workspace.slug == workspace)
-                )
-            ).scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
@@ -72,7 +67,7 @@ async def get_recent_changes_tool(
             since_ns = int(since_dt.timestamp() * 1_000_000_000)
 
         settings = app.state.settings
-        ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+        ws_root = workspace_root(settings.fs.root, ws.uuid)
         all_items = await run_in_thread_slot(
             VAULT_SCAN_SLOTS, scan_recent_changes, ws_root, since_ns
         )

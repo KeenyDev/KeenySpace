@@ -3,23 +3,22 @@ from __future__ import annotations
 import asyncio
 import io
 from pathlib import Path
-from typing import Any
 
-import yaml
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_request
 from keenyspace_shared.mcp_contracts import AppendLogResponse, ReadPageResponse
-from sqlalchemy import select
 from ulid import ULID
 
 from keenyspace_server.compile.coordinator import get_coordinator
 from keenyspace_server.compile.models import CompileStatusResponse, CompileTriggerResponse
-from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.fs.path_safety import UnsafePath, open_workspace_page
 from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.wal import writer as wal_writer
+from keenyspace_server.ws.frontmatter import split_frontmatter
+from keenyspace_server.ws.registry import workspace_by_slug
 
 
 async def ping(message: str) -> str:
@@ -36,16 +35,13 @@ async def read_page(path: str, workspace: str | None = None) -> ReadPageResponse
         app = req.app
 
         async with get_db_session() as session:
-            result = await session.execute(
-                select(Workspace).where(Workspace.slug == workspace)
-            )
-            ws = result.scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
 
         settings = app.state.settings
-        ws_root = settings.fs.root / "workspaces" / str(ws.uuid)
+        ws_root = workspace_root(settings.fs.root, ws.uuid)
 
         try:
             return await asyncio.to_thread(_read_page_blocking, ws_root, path)
@@ -60,7 +56,7 @@ def _read_page_blocking(ws_root: Path, path: str) -> ReadPageResponse:
     with io.FileIO(fd) as f:
         raw_content = f.read()
 
-    frontmatter, body = _split_frontmatter(raw_content.decode("utf-8", errors="replace"))
+    frontmatter, body = split_frontmatter(raw_content.decode("utf-8", errors="replace"))
     return ReadPageResponse(
         path=str(resolved.relative_to(ws_root)),
         content=body,
@@ -81,16 +77,13 @@ async def append_log(
         app = req.app
 
         async with get_db_session() as session:
-            result = await session.execute(
-                select(Workspace).where(Workspace.slug == workspace)
-            )
-            ws = result.scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
 
         settings = app.state.settings
-        ws_root = settings.fs.root / "workspaces" / str(ws.uuid)
+        ws_root = workspace_root(settings.fs.root, ws.uuid)
         locks = app.state.wal_locks
 
         from keenyspace_server.auth.user import User
@@ -141,8 +134,7 @@ async def compile_tool(workspace: str | None = None) -> CompileTriggerResponse:
         workspace = resolve_workspace(workspace)
 
         async with get_db_session() as session:
-            result = await session.execute(select(Workspace).where(Workspace.slug == workspace))
-            ws = result.scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
@@ -176,8 +168,7 @@ async def compile_status_tool(workspace: str | None = None) -> CompileStatusResp
         workspace = resolve_workspace(workspace)
 
         async with get_db_session() as session:
-            result = await session.execute(select(Workspace).where(Workspace.slug == workspace))
-            ws = result.scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
@@ -187,23 +178,3 @@ async def compile_status_tool(workspace: str | None = None) -> CompileStatusResp
             raise ToolError("compile coordinator not initialised")
         status_result: CompileStatusResponse = await coordinator.status(ws.uuid)
         return status_result
-
-
-def _split_frontmatter(content: str) -> tuple[dict[str, Any], str]:
-    if not content.startswith("---\n"):
-        return {}, content
-
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return {}, content
-
-    yaml_text = content[4:end]
-    body = content[end + 5:]
-
-    try:
-        fm = yaml.safe_load(yaml_text)
-        if not isinstance(fm, dict):
-            return {}, content
-        return fm, body
-    except yaml.YAMLError:
-        return {}, content

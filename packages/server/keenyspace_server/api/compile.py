@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.compile.models import CompileStatusResponse, CompileTriggerResponse
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
+from keenyspace_server.ws.registry import workspace_by_slug
 
 log = structlog.get_logger(__name__)
 
@@ -15,8 +15,7 @@ router = APIRouter()
 
 
 async def _load_workspace(slug: str, session: AsyncSession) -> Workspace:
-    result = await session.execute(select(Workspace).where(Workspace.slug == slug))
-    ws = result.scalar_one_or_none()
+    ws = await workspace_by_slug(session, slug)
     if ws is None:
         raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
     return ws

@@ -28,7 +28,7 @@ def test_atomic_write_strace_syscall_sequence(tmp_path: Path):
             "-o", str(strace_log),
             sys.executable,
             "-c",
-            f"from keenyspace_server.fs.atomic import write_atomic; from pathlib import Path; write_atomic(Path('{dest}'), b'hello')",
+            f"from keenyspace_shared.atomic_write import write_atomic; from pathlib import Path; write_atomic(Path('{dest}'), b'hello')",
         ],
         capture_output=True,
         text=True,

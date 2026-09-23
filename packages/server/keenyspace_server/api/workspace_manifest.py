@@ -10,12 +10,12 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.observability.metrics import WORKSPACE_MANIFEST_TOTAL
+from keenyspace_server.ws.registry import workspace_by_slug
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -53,14 +53,13 @@ async def workspace_manifest(
         WORKSPACE_MANIFEST_TOTAL.labels(outcome="invalid_slug").inc()
         raise HTTPException(status_code=400, detail={"error": "invalid_slug"})
 
-    result = await session.execute(select(Workspace).where(Workspace.slug == slug))
-    ws = result.scalar_one_or_none()
+    ws = await workspace_by_slug(session, slug)
     if ws is None:
         WORKSPACE_MANIFEST_TOTAL.labels(outcome="not_found").inc()
         raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
 
     settings = request.app.state.settings
-    ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+    ws_root = workspace_root(settings.fs.root, ws.uuid)
     files = await asyncio.to_thread(_scan_workspace, ws_root)
     WORKSPACE_MANIFEST_TOTAL.labels(outcome="success").inc()
     log.info(
@@ -120,13 +119,12 @@ async def workspace_page_raw(
     if not _SLUG_RE.match(slug):
         raise HTTPException(status_code=400, detail={"error": "invalid_slug"})
 
-    result = await session.execute(select(Workspace).where(Workspace.slug == slug))
-    ws = result.scalar_one_or_none()
+    ws = await workspace_by_slug(session, slug)
     if ws is None:
         raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
 
     settings = request.app.state.settings
-    ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+    ws_root = workspace_root(settings.fs.root, ws.uuid)
     target = await asyncio.to_thread(_resolve_raw_file, ws_root, path)
     if target is None:
         raise HTTPException(status_code=404, detail=f"path {path!r} not found")

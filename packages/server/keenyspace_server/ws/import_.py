@@ -17,7 +17,6 @@ from typing import Any
 import structlog
 import yaml
 from keenyspace_shared.mcp_contracts import WorkspaceImportResponse
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +28,7 @@ from keenyspace_server.fs.blueprint import (
 )
 from keenyspace_server.observability.metrics import WORKSPACE_IMPORT_TOTAL
 from keenyspace_server.ws.export import EXPORT_SKIP_TOP_LEVEL
+from keenyspace_server.ws.registry import workspace_by_slug
 
 log = structlog.get_logger(__name__)
 
@@ -253,10 +253,7 @@ async def import_workspace(
             "slug must be alphanumeric + hyphens, 1-64 chars",
         )
 
-    existing = await session.execute(
-        select(Workspace).where(Workspace.slug == slug)
-    )
-    if existing.scalar_one_or_none() is not None:
+    if await workspace_by_slug(session, slug) is not None:
         WORKSPACE_IMPORT_TOTAL.labels(outcome="conflict").inc()
         raise WorkspaceSlugConflictError(slug)
     # Release the pooled connection before zip validation and unpack; a

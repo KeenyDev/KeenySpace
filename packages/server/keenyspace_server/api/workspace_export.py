@@ -6,25 +6,25 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.auth.audit import write_audit
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.observability.metrics import WORKSPACE_EXPORT_BYTES_TOTAL
 from keenyspace_server.ws.export import (
     ExportTooLargeError,
     build_workspace_zip,
 )
+from keenyspace_server.ws.registry import workspace_by_slug
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
 
 
 async def _load_workspace(slug: str, session: AsyncSession) -> Workspace:
-    result = await session.execute(select(Workspace).where(Workspace.slug == slug))
-    ws = result.scalar_one_or_none()
+    ws = await workspace_by_slug(session, slug)
     if ws is None:
         raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
     return ws
@@ -32,7 +32,7 @@ async def _load_workspace(slug: str, session: AsyncSession) -> Workspace:
 
 def _resolve_ws_dir(request: Request, ws: Workspace) -> Path:
     settings = request.app.state.settings
-    return Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+    return workspace_root(settings.fs.root, ws.uuid)
 
 
 @router.get("/{slug}/export")

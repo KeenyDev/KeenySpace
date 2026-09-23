@@ -39,6 +39,7 @@ from keenyspace_server.compile.settings import CompileSettings
 from keenyspace_server.compile.wal_slice import extract_wal_slice
 from keenyspace_server.db.models import CompileCursor, CompileRun, Workspace
 from keenyspace_server.db.session import get_db_session
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.observability.metrics import (
     COMPILE_DAILY_TOKENS,
     COMPILE_PAGES_WRITTEN_TOTAL,
@@ -300,7 +301,7 @@ class CompileCoordinator:
     async def _workspace_root(self, ws_uuid: UUID) -> Path | None:
         from keenyspace_server.config import get_settings
         settings = get_settings()
-        root = Path(settings.fs.root) / "workspaces" / str(ws_uuid)
+        root = workspace_root(settings.fs.root, ws_uuid)
         return root if root.is_dir() else None
 
     async def _workspace_state(self, ws_uuid: UUID) -> str:
