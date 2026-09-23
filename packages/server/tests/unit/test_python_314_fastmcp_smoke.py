@@ -1,5 +1,3 @@
-
-
 def test_fastmcp_imports() -> None:
     from fastmcp import FastMCP
     from fastmcp.server.dependencies import get_http_request

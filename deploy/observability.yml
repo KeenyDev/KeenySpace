@@ -1,18 +1,18 @@
 services:
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.12.0
     configs:
       - source: prometheus_config
         target: /etc/prometheus/prometheus.yml
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     restart: unless-stopped
 
   loki:
     image: grafana/loki:3.4
     command: -config.file=/etc/loki/local-config.yaml
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     volumes:
       - loki-data:/loki
     restart: unless-stopped
@@ -29,12 +29,12 @@ services:
   grafana:
     image: grafana/grafana:12.4.4
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
     environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: ${GF_AUTH_ANONYMOUS_ENABLED:-false}
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     depends_on:
       - loki
@@ -51,7 +51,10 @@ configs:
       global:
         scrape_interval: 15s
       scrape_configs:
+        # Internal metrics listener (KEENYSPACE_METRICS_PORT, default 9100). It is
+        # not published to the host; Prometheus reaches it over the compose network,
+        # so run this file in the same project as docker-compose.yml.
         - job_name: keenyspace
           static_configs:
-            - targets: ['keenyspace:8000']
+            - targets: ['keenyspace:9100']
           metrics_path: /metrics

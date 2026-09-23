@@ -1,8 +1,8 @@
 """Claude Code transcript tail-reader for the post-compact daemon flow.
 
-Per Phase 5 D-09: hook envelope carries `transcript_path` (a JSONL file),
-not an inline excerpt. The daemon does the heavy I/O on its own event
-loop via `asyncio.to_thread` so the hook process stays under 1s.
+The hook envelope carries `transcript_path` (a JSONL file), not an inline
+excerpt. The daemon does the heavy I/O on its own event loop via
+`asyncio.to_thread` so the hook process stays under 1s.
 
 The tail heuristic keeps the last ~3000 tokens (12000 chars at the
 4-chars/token rule of thumb). The first partial line is dropped so the
@@ -24,7 +24,7 @@ async def read_transcript_excerpt(
     path = Path(transcript_path)
     try:
         content = await asyncio.to_thread(path.read_text, encoding="utf-8")
-    except (FileNotFoundError, OSError):
+    except FileNotFoundError, OSError:
         return None
     if not content:
         return ""

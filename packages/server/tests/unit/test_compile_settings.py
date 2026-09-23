@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+import os
+from unittest.mock import patch
+
+from keenyspace_server.compile.settings import CompileSettings
+from keenyspace_server.config import Settings
+
+
+def test_compile_settings_defaults_match_d09() -> None:
+    cs = CompileSettings()
+    assert cs.debounce_seconds == 30
+    assert cs.backstop_interval_minutes == 15
+    assert cs.max_tool_calls == 20
+    assert cs.max_input_tokens == 50_000
+    assert cs.max_output_tokens_per_call == 20_000
+    assert cs.max_output_tokens_per_space == 128_000
+    assert cs.max_seconds == 180
+    assert cs.daily_token_ceiling == 500_000
+    assert cs.max_slice_bytes == 40_000
+    assert cs.model == "claude-sonnet-4-6"
+    assert not hasattr(cs, "temperature")
+
+
+def test_settings_compile_field_loads_env() -> None:
+    env = {
+        "KEENYSPACE_DB__URL": "postgresql+asyncpg://x:x@localhost/x",
+        "KEENYSPACE_COMPILE__MODEL": "claude-opus-4-7",
+        "KEENYSPACE_COMPILE__MAX_TOOL_CALLS": "10",
+        # AuthSettings required fields.
+        "KEENYSPACE_AUTH__OIDC_ISSUER_URL": "http://localhost:9999/application/o/test/",
+        "KEENYSPACE_AUTH__OIDC_CLIENT_ID": "test-client",
+        "KEENYSPACE_AUTH__OIDC_CLIENT_SECRET": "test-secret",
+        "KEENYSPACE_AUTH__OIDC_REDIRECT_URI": "http://localhost:8000/v1/api/auth/callback",
+        "KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI": "http://localhost:8000/",
+        "KEENYSPACE_AUTH__API_KEY_PEPPER": "test-pepper-32chars-padded-here!",
+        "KEENYSPACE_AUTH__SESSION_SECRET_KEY": "test-session-secret-32chars-pad!",
+    }
+    with patch.dict(os.environ, env, clear=True):
+        s = Settings()  # type: ignore[call-arg]
+        assert s.compile.model == "claude-opus-4-7"
+        assert s.compile.max_tool_calls == 10
+        assert s.compile.daily_token_ceiling == 500_000
+
+
+def test_resolve_model_id_provider_neutral() -> None:
+    """Compile must be provider-neutral (default anthropic)."""
+    from keenyspace_server.compile.agent import resolve_model_id
+
+    # bare name qualified with the default provider (anthropic)
+    assert resolve_model_id("claude-sonnet-4-6") == "anthropic:claude-sonnet-4-6"
+    # bare name qualified with an explicit provider
+    assert resolve_model_id("gpt-4o", "openai") == "openai:gpt-4o"
+    # already-qualified id passes through untouched, regardless of provider arg
+    assert resolve_model_id("openai:gpt-4o", "anthropic") == "openai:gpt-4o"
+    assert (
+        resolve_model_id("anthropic:claude-sonnet-4-6", "openai") == "anthropic:claude-sonnet-4-6"
+    )
+
+
+def test_compile_settings_provider_default_and_override() -> None:
+    from keenyspace_server.compile.settings import CompileSettings
+
+    assert CompileSettings().provider == "anthropic"
+    assert CompileSettings(provider="openai", model="gpt-4o").provider == "openai"

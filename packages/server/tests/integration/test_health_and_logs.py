@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
+import httpx
 import pytest
 import structlog
 from keenyspace_server.observability.logging import configure_logging
+from keenyspace_server.observability.metrics_server import start_metrics_server
 
 pytestmark = pytest.mark.asyncio
 
@@ -23,13 +26,25 @@ async def test_readyz_returns_200_or_503(client):
     assert "checks" in body
 
 
-async def test_metrics_returns_200_with_prometheus_format(client):
+async def test_metrics_not_served_on_api_port(client):
     resp = await client.get("/metrics")
+    assert resp.status_code in (401, 404)
+
+
+async def test_metrics_server_exposes_app_http_metrics(client):
+    await client.get("/.well-known/oauth-protected-resource")
+    server = start_metrics_server(0, "127.0.0.1")
+    try:
+        async with httpx.AsyncClient() as metrics_client:
+            resp = await metrics_client.get(f"http://127.0.0.1:{server.port}/metrics")
+    finally:
+        await asyncio.to_thread(server.stop)
     assert resp.status_code == 200
-    content_type = resp.headers.get("content-type", "")
-    assert "text/plain" in content_type
-    body = resp.text
-    assert "http_requests_total" in body or "keenyspace_" in body or "python_gc" in body
+    assert "text/plain" in resp.headers.get("content-type", "")
+    # Per-handler series depend on which app instance registered the collectors
+    # first in this process; the family itself proves the instrumentator's
+    # registry is what the side server exposes.
+    assert "# TYPE http_requests_total counter" in resp.text
 
 
 async def test_healthz_twice(client, capsys):
@@ -66,10 +81,7 @@ async def test_healthz_twice(client, capsys):
 
     rec = marker_records[0]
     missing = [k for k in ("event", "timestamp", "level") if k not in rec]
-    assert not missing, (
-        f"Structlog JSON record missing required keys: {missing}. "
-        f"Record was: {rec}"
-    )
+    assert not missing, f"Structlog JSON record missing required keys: {missing}. Record was: {rec}"
 
     for key in ("event", "timestamp", "level"):
         value = rec[key]

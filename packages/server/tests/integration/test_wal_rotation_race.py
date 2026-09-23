@@ -2,6 +2,7 @@
 WAL rotation race test: validates filename derivation inside asyncio.Lock (Pitfall #7).
 Simulates 100 concurrent appends around UTC midnight boundary.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,16 +42,6 @@ def _build_sequence(n_before: int, n_after: int) -> list[datetime]:
     return seq
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing baseline failure (NOT caused by Phase 3 Wave 2 auth cutover). "
-        "Reproducible on the Wave 1 commit head. The datetime.now mock advances each "
-        "call_count but append_log invokes datetime.now multiple times per entry, "
-        "consuming the 100-element sequence in ~25 iterations. Requires WAL writer "
-        "instrumentation rework — deferred to a dedicated WAL rotation hardening pass."
-    ),
-    strict=False,
-)
 @pytest.mark.asyncio
 @pytest.mark.timeout(60)
 async def test_wal_rotation_race(tmp_path: Path):
@@ -115,7 +106,9 @@ async def test_wal_rotation_race(tmp_path: Path):
     entries_after = parse_wal(day_after.read_text()) if day_after.exists() else []
 
     total = len(entries_before) + len(entries_after)
-    assert total == 100, f"Expected 100 entries total, got {total} ({len(entries_before)} + {len(entries_after)})"
+    assert total == 100, (
+        f"Expected 100 entries total, got {total} ({len(entries_before)} + {len(entries_after)})"
+    )
 
     all_ulids = [str(e.id) for e in entries_before + entries_after]
     assert len(set(all_ulids)) == 100, f"Expected 100 unique ULIDs, got {len(set(all_ulids))}"

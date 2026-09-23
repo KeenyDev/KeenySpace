@@ -1,0 +1,1 @@
+- [KeenySpace threat model](project_threat_model.md) — auth boundaries, group snapshot (non-monotonic), admin gate, key-mints-key, path safety, metrics bind

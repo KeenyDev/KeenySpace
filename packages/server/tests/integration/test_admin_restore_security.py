@@ -1,7 +1,7 @@
 """POST /v1/admin/restore security tests — Python 3.14 tarfile data filter.
 
-Covers T-05.07-01 (path traversal), T-05.07-02 (absolute path), T-05.07-03
-(symlink), missing manifest, and the anonymous 401 invariant.
+Covers the archive-extraction threats — path traversal, absolute member paths and
+symlink members — plus a missing manifest and the anonymous 401 invariant.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from keenyspace_server.api.admin import KS_VERSION
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -26,9 +27,7 @@ HAS_PG_DUMP = shutil.which("pg_dump") is not None and shutil.which("psql") is no
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
     pytest.mark.skipif(not HAS_PG_DUMP, reason="pg_dump/psql binary unavailable"),
 ]
 
@@ -52,7 +51,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
 
-    pepper = get_settings().auth.api_key_pepper
+    pepper = get_settings().auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
@@ -62,10 +61,11 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     async with get_db_session() as session:
         await session.execute(
             text(
-                "INSERT INTO users (sub, display_name, email, source, created_at) "
-                "VALUES (:sub, :dn, NULL, 'api_key', :now)"
+                "INSERT INTO users (sub, display_name, email, source, created_at, "
+                "groups, groups_seen_at) VALUES (:sub, :dn, NULL, 'api_key', :now, "
+                "CAST(:groups AS jsonb), :now)"
             ),
-            {"sub": user_sub, "dn": "sec", "now": now},
+            {"groups": '["keenyspace-admins"]', "sub": user_sub, "dn": "sec", "now": now},
         )
         await session.execute(
             text(
@@ -97,7 +97,7 @@ async def _current_alembic_head() -> str:
 def _minimal_manifest(head: str) -> dict[str, Any]:
     return {
         "version": 1,
-        "keenyspace_version": "0.1.0",
+        "keenyspace_version": KS_VERSION,
         "schema_version": 1,
         "alembic_head": head,
         "created_at": datetime.now(UTC).isoformat(),

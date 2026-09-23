@@ -1,10 +1,12 @@
-"""D-03 inline auto-refresh: FastAPI dependency.
+"""Inline access-token refresh for cookie-authenticated browser sessions.
 
-Wire-up в main.py::build_app через router-level `dependencies=[Depends(refresh_if_needed)]`.
-CompositeAuthBackend._try_cookie -> OidcClient.validate_access_token ставит
-`request.state.ks_at_expiring_soon = True` если exp - now < refresh_threshold_seconds.
-Эта dependency читает флаг + ks_rt cookie, делает refresh через OidcClient,
-и rotate'ает cookies в текущий response.
+Wired in main.py::build_app as a router-level
+`dependencies=[Depends(refresh_if_needed)]`. While validating the ks_at
+cookie, OidcClient.validate_access_token sets
+`request.state.ks_at_expiring_soon` when the token expires within
+refresh_threshold_seconds. This dependency reads that flag plus the ks_rt
+cookie, refreshes through OidcClient, and rotates the cookies on the response
+that is already being built, so the session never fails mid-flight.
 """
 
 from __future__ import annotations

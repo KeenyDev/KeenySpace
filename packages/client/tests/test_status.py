@@ -13,23 +13,27 @@ def _reload_and_get_app(server_url: str) -> object:
     os.environ["KEENYSPACE_SERVER_URL"] = server_url
     os.environ["COLUMNS"] = "200"
     import keenyspace.paths as paths_mod
+
     importlib.reload(paths_mod)
     import keenyspace.config as cfg
+
     importlib.reload(cfg)
     cfg.get_client_settings.cache_clear()  # type: ignore[attr-defined]
     import keenyspace.auth as auth_mod
+
     importlib.reload(auth_mod)
     import keenyspace.clients.http as http_mod
+
     importlib.reload(http_mod)
     import keenyspace.cli.status as status_mod
+
     importlib.reload(status_mod)
     import keenyspace.__main__ as main_mod
+
     return importlib.reload(main_mod)
 
 
-def test_status_unreachable_server(
-    temp_config_dir: dict[str, Path], cli_runner: CliRunner
-) -> None:
+def test_status_unreachable_server(temp_config_dir: dict[str, Path], cli_runner: CliRunner) -> None:
     # Point at a closed port — no server bound.
     main_mod = _reload_and_get_app("http://127.0.0.1:1")
     result = cli_runner.invoke(main_mod.app, ["status"])  # type: ignore[attr-defined]

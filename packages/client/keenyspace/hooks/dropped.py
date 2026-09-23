@@ -1,10 +1,10 @@
 """Atomic increment of the dropped-event counter.
 
-`fcntl.flock(LOCK_EX | LOCK_NB)` mitigates Pitfall #6: if another hook is
-holding the lock, we skip the increment rather than block — hooks MUST exit
-fast (<1s) even when concurrent hooks race for the counter. Any OS-level
-error (read-only FS, permission, etc.) is swallowed: a missed counter
-update is preferable to a hook that does not exit cleanly.
+`fcntl.flock(LOCK_EX | LOCK_NB)`: if another hook is holding the lock, the
+increment is skipped rather than blocked on — hooks MUST exit fast (<1s) even
+when concurrent hooks race for the counter. Any OS-level error (read-only FS,
+permission, etc.) is swallowed: a missed counter update is preferable to a
+hook that does not exit cleanly.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def increment(kind: str) -> None:
         return
     try:
         DROPPED_JSON.parent.mkdir(parents=True, exist_ok=True)
-        # WR-09: pre-create with mode 0o600 if the file doesn't exist.
+        # Pre-create with mode 0o600 if the file doesn't exist.
         # `open(... "a+")` on first install honours the process umask
         # (typically 0o644), exposing counter contents to other users
         # for the brief window before the atomic-replace finishes. The
@@ -43,14 +43,12 @@ def increment(kind: str) -> None:
             try:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                # Pitfall #6: another hook holds the lock; skip rather than block.
+                # Another hook holds the lock; skip rather than block.
                 return
             try:
                 f.seek(0)
                 raw = f.read()
-                parsed: object = (
-                    json.loads(raw) if raw.strip() else {"version": 1, "by_kind": {}}
-                )
+                parsed: object = json.loads(raw) if raw.strip() else {"version": 1, "by_kind": {}}
                 state: dict[str, object]
                 if isinstance(parsed, dict) and "by_kind" in parsed:
                     state = parsed
@@ -74,6 +72,6 @@ def increment(kind: str) -> None:
             finally:
                 with contextlib.suppress(OSError):
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         # Hook must always exit 0; missed increment is acceptable.
         return

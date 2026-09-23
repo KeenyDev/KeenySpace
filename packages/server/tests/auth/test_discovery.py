@@ -1,4 +1,4 @@
-"""AUTH-05 — public /v1/api/auth/discovery IdP-issuer shim.
+"""The public /v1/api/auth/discovery IdP-issuer shim.
 
 `keenyspace login` calls this first to learn the Authentik issuer; it must be
 reachable anonymously (it is the bootstrap of the auth flow) and return the

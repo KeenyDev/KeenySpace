@@ -11,14 +11,14 @@ from jinja2.sandbox import SandboxedEnvironment
 from keenyspace_shared.mcp_contracts import Budgets, Instructions
 from pydantic import ValidationError
 
-from keenyspace_server.mcp.tools import _split_frontmatter
+from keenyspace_server.ws.frontmatter import split_frontmatter
 
 log = structlog.get_logger(__name__)
 
 _INSTRUCTIONS_MAX_BYTES = 64 * 1024
 _OUTPUT_MAX_CHARS = 32 * 1024
 _RENDER_TIMEOUT_SECONDS = 5.0
-# Pre-render complexity bounds (WR-02): asyncio.wait_for only cancels the
+# Pre-render complexity bounds: asyncio.wait_for only cancels the
 # awaiting coroutine; the Jinja render itself runs in a worker thread that has
 # no cancellation primitive. A pathological template can pin a thread for
 # hours and exhaust the default threadpool. We mitigate by parsing first and
@@ -118,25 +118,18 @@ async def load_and_render_instructions(
     raw_bytes = instructions_path.read_bytes()
     if len(raw_bytes) > _INSTRUCTIONS_MAX_BYTES:
         raise InstructionTemplateError(
-            f"instructions file too large: {len(raw_bytes)} bytes "
-            f"(max {_INSTRUCTIONS_MAX_BYTES})"
+            f"instructions file too large: {len(raw_bytes)} bytes (max {_INSTRUCTIONS_MAX_BYTES})"
         )
     content = raw_bytes.decode("utf-8", errors="replace")
 
-    frontmatter, body = _split_frontmatter(content)
+    frontmatter, body = split_frontmatter(content)
 
     tool_whitelist = frontmatter.get("tool_whitelist", [])
-    if not isinstance(tool_whitelist, list) or not all(
-        isinstance(t, str) for t in tool_whitelist
-    ):
-        raise InstructionTemplateError(
-            "frontmatter.tool_whitelist must be a list of strings"
-        )
+    if not isinstance(tool_whitelist, list) or not all(isinstance(t, str) for t in tool_whitelist):
+        raise InstructionTemplateError("frontmatter.tool_whitelist must be a list of strings")
 
     steps_raw = frontmatter.get("steps", [])
-    if not isinstance(steps_raw, list) or not all(
-        isinstance(s, str) for s in steps_raw
-    ):
+    if not isinstance(steps_raw, list) or not all(isinstance(s, str) for s in steps_raw):
         raise InstructionTemplateError("frontmatter.steps must be a list of strings")
 
     model_raw = frontmatter.get("model")

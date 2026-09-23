@@ -1,4 +1,4 @@
-"""POST /v1/admin/backup streaming tarball integration tests (Phase 5 ADMIN-01).
+"""POST /v1/admin/backup streaming tarball integration tests.
 
 Real Postgres; pg_dump invoked via subprocess. If pg_dump is unavailable in the
 test environment the tests skip cleanly.
@@ -25,9 +25,7 @@ HAS_PG_DUMP = shutil.which("pg_dump") is not None
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
     pytest.mark.skipif(not HAS_PG_DUMP, reason="pg_dump binary unavailable"),
 ]
 
@@ -51,7 +49,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
 
-    pepper = get_settings().auth.api_key_pepper
+    pepper = get_settings().auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
@@ -61,10 +59,11 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     async with get_db_session() as session:
         await session.execute(
             text(
-                "INSERT INTO users (sub, display_name, email, source, created_at) "
-                "VALUES (:sub, :dn, NULL, 'api_key', :now)"
+                "INSERT INTO users (sub, display_name, email, source, created_at, "
+                "groups, groups_seen_at) VALUES (:sub, :dn, NULL, 'api_key', :now, "
+                "CAST(:groups AS jsonb), :now)"
             ),
-            {"sub": user_sub, "dn": "admin", "now": now},
+            {"groups": '["keenyspace-admins"]', "sub": user_sub, "dn": "admin", "now": now},
         )
         await session.execute(
             text(
@@ -87,9 +86,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
 
 async def _seed_workspace(client: AsyncClient) -> str:
     slug = f"backup-{uuid4().hex[:8]}"
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
     assert resp.status_code == 201, resp.text
     return slug
 
@@ -157,9 +154,7 @@ async def test_admin_backup_manifest_shape(app: Any, pg_url: str) -> None:
             assert "workspaces" in manifest.pg_tables_dumped
 
 
-async def test_admin_backup_excludes_obsidian(
-    app: Any, pg_url: str, fs_root: Any
-) -> None:
+async def test_admin_backup_excludes_obsidian(app: Any, pg_url: str, fs_root: Any) -> None:
     from pathlib import Path
 
     await _reset_schema(pg_url)
@@ -181,9 +176,7 @@ async def test_admin_backup_excludes_obsidian(
 
             async with get_db_session() as session:
                 ws = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug))
                 ).scalar_one()
                 ws_uuid = str(ws.uuid)
             ws_dir = Path(fs_root) / "workspaces" / ws_uuid
@@ -197,9 +190,7 @@ async def test_admin_backup_excludes_obsidian(
             assert all(".obsidian" not in n.split("/") for n in names), names
 
 
-async def test_admin_backup_increments_counters(
-    app: Any, pg_url: str
-) -> None:
+async def test_admin_backup_increments_counters(app: Any, pg_url: str) -> None:
     from keenyspace_server.observability.metrics import (
         ADMIN_BACKUP_BYTES,
         ADMIN_BACKUP_TOTAL,
@@ -252,12 +243,14 @@ async def test_admin_backup_audit_log_row(app: Any, pg_url: str) -> None:
 
             async with get_db_session() as session:
                 rows = (
-                    await session.execute(
-                        select(AuditLog).where(
-                            AuditLog.action == "admin.backup.requested"
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "admin.backup.requested")
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert rows
             row = rows[0]
             assert row.actor_sub == user_sub

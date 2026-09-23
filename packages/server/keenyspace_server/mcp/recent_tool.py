@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
-from pathlib import Path
 
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_request
 from keenyspace_shared.mcp_contracts import RecentChange, RecentChangesResponse
-from sqlalchemy import select
 
-from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db_session
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.mcp.auth_bridge import current_user_from_mcp, resolve_workspace
 from keenyspace_server.observability.metrics import MCP_TOOL_CALL_DURATION
 from keenyspace_server.ws.cursor import decode_mtime_cursor, encode_mtime_cursor
 from keenyspace_server.ws.recent import scan_recent_changes
+from keenyspace_server.ws.registry import workspace_by_slug
+from keenyspace_server.ws.search import VAULT_SCAN_SLOTS
+from keenyspace_server.ws.thread_slots import run_in_thread_slot
 
 _PAGE_SIZE_DEFAULT = 50
 _PAGE_SIZE_MAX = 200
@@ -32,12 +32,25 @@ async def get_recent_changes_tool(
     cursor: str | None = None,
     limit: int | None = None,
 ) -> RecentChangesResponse:
-    """Return pages modified since cursor or ISO timestamp (MCP-09).
+    """List recently modified pages, newest first.
 
-    Sort order: (mtime_ns DESC, path ASC). Custom cursor `(mtime_ns, path)`
-    stable across concurrent FS writes (RESEARCH §Pattern 4).
+    Ordered by modification time descending, then path ascending. The cursor
+    carries `(mtime_ns, path)` so pagination stays stable even while other
+    writers are touching the vault.
+
+    Fails when the workspace does not exist, when `since` is not a
+    timezone-aware timestamp, or when the cursor is malformed.
+
+    Args:
+        workspace: Workspace slug. Required unless the MCP connection URL pins
+            one as `?workspace=<slug>`; an explicit value always wins.
+        since: ISO 8601 timestamp; only pages modified after it are returned.
+            Must carry a timezone offset (e.g. "2026-01-01T00:00:00Z").
+        cursor: `next_cursor` from a previous call. Keep calling while the
+            response returns a non-null `next_cursor`.
+        limit: Page size, clamped to 1..200; defaults to 50.
     """
-    with MCP_TOOL_CALL_DURATION.labels(tool="get_recent_changes_tool").time():
+    with MCP_TOOL_CALL_DURATION.labels(tool="get_recent_changes").time():
         _ = current_user_from_mcp()
         workspace = resolve_workspace(workspace)
 
@@ -45,11 +58,7 @@ async def get_recent_changes_tool(
         app = req.app
 
         async with get_db_session() as session:
-            ws = (
-                await session.execute(
-                    select(Workspace).where(Workspace.slug == workspace)
-                )
-            ).scalar_one_or_none()
+            ws = await workspace_by_slug(session, workspace)
 
         if ws is None:
             raise ToolError(f"workspace {workspace!r} not found")
@@ -62,17 +71,18 @@ async def get_recent_changes_tool(
                 raise ToolError(f"invalid since timestamp: {exc}") from exc
             # Reject naive datetimes: .timestamp() on a naive dt uses local
             # system time, producing a timezone-incoherent comparison against
-            # st_mtime_ns (always UTC). Per WR-09.
+            # st_mtime_ns (always UTC).
             if since_dt.tzinfo is None:
                 raise ToolError(
-                    "since timestamp must include timezone offset "
-                    "(e.g. 'Z' or '+00:00')"
+                    "since timestamp must include timezone offset (e.g. 'Z' or '+00:00')"
                 )
             since_ns = int(since_dt.timestamp() * 1_000_000_000)
 
         settings = app.state.settings
-        ws_root = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
-        all_items = await asyncio.to_thread(scan_recent_changes, ws_root, since_ns)
+        ws_root = workspace_root(settings.fs.root, ws.uuid)
+        all_items = await run_in_thread_slot(
+            VAULT_SCAN_SLOTS, scan_recent_changes, ws_root, since_ns
+        )
 
         if cursor is not None:
             try:
@@ -80,9 +90,7 @@ async def get_recent_changes_tool(
             except ValueError as exc:
                 raise ToolError(f"malformed cursor: {exc}") from exc
             cursor_key = (-cursor_mtime_ns, cursor_path)
-            all_items = [
-                (m, p) for (m, p) in all_items if (-m, p) > cursor_key
-            ]
+            all_items = [(m, p) for (m, p) in all_items if (-m, p) > cursor_key]
 
         page_size = _validated_limit(limit)
         page = all_items[:page_size]

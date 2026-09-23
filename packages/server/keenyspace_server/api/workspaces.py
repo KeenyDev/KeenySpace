@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import shutil
 import uuid
@@ -8,14 +9,19 @@ from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
-from sqlalchemy import select
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
-from keenyspace_server.fs.blueprint import clone_default_blueprint
+from keenyspace_server.fs.blueprint import (
+    BLUEPRINT_NAME_PATTERN,
+    InvalidBlueprintNameError,
+    UnknownBlueprintError,
+    clone_default_blueprint,
+)
+from keenyspace_server.ws.registry import workspace_by_slug
 
 logger = structlog.get_logger(__name__)
 
@@ -26,7 +32,7 @@ _SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}[a-zA-Z0-9]$|^[a-zA-Z0-9]
 
 class WorkspaceCreateRequest(BaseModel):
     slug: str
-    blueprint: str = "default"
+    blueprint: str = Field(default="default", pattern=BLUEPRINT_NAME_PATTERN)
 
 
 class WorkspaceResponse(BaseModel):
@@ -49,27 +55,34 @@ async def create_workspace(
             detail="slug must be alphanumeric + hyphens, 1-64 chars",
         )
 
-    existing = await session.execute(
-        select(Workspace).where(Workspace.slug == body.slug)
-    )
-    if existing.scalar_one_or_none() is not None:
+    if await workspace_by_slug(session, body.slug) is not None:
         raise HTTPException(
             status_code=409,
             detail=f"workspace with slug {body.slug!r} already exists",
         )
+    # Release the pooled connection before the slow blueprint clone; a
+    # concurrent create of the same slug is caught by UNIQUE(slug) below.
+    await session.rollback()
 
     settings = request.app.state.settings
     fs_root: Path = settings.fs.root
     ws_uuid = uuid.uuid4()
     blueprint_ref = f"{body.blueprint}@v0.1"
 
-    ws_dir = clone_default_blueprint(
-        fs_root,
-        body.blueprint,
-        ws_uuid,
-        slug=body.slug,
-        display_name=body.slug,
-    )
+    try:
+        ws_dir = await asyncio.to_thread(
+            clone_default_blueprint,
+            fs_root,
+            body.blueprint,
+            ws_uuid,
+            slug=body.slug,
+            display_name=body.slug,
+        )
+    except (InvalidBlueprintNameError, UnknownBlueprintError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown blueprint {body.blueprint!r}",
+        ) from exc
 
     now = datetime.now(UTC)
     ws = Workspace(
@@ -87,7 +100,7 @@ async def create_workspace(
     except IntegrityError as exc:
         await session.rollback()
         try:
-            shutil.rmtree(ws_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, ws_dir, ignore_errors=True)
         except Exception as cleanup_exc:
             logger.error(
                 "failed to clean up orphaned workspace dir",

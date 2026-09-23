@@ -4,14 +4,20 @@ import asyncio
 import fcntl
 import hashlib
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from ulid import ULID
 
 from .framing import format_entry
 from .locks import WorkspaceLockRegistry
+from .parser import parse_wal
+
+if TYPE_CHECKING:
+    from keenyspace_server.config import Settings
 
 
 class PayloadTooLargeError(ValueError):
@@ -23,6 +29,34 @@ PayloadTooLarge = PayloadTooLargeError
 
 class WorkspaceArchivedError(ValueError):
     pass
+
+
+class EmptyContentError(ValueError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class AppendResult:
+    entry_id: ULID
+    ts: datetime
+
+
+def _newest_logged_id(logs_dir: Path) -> ULID | None:
+    log_files = sorted(logs_dir.glob("*.md"))
+    if not log_files:
+        return None
+    entries = parse_wal(log_files[-1].read_text(encoding="utf-8"))
+    return max((e.id for e in entries), key=int, default=None)
+
+
+def _next_entry_id(ts: datetime, last_id: ULID | None) -> ULID:
+    # Compile advances its cursor with `id > last_wal_id`; a same-millisecond
+    # append (random low bits) or a backward clock step must never mint an id
+    # below one already issued, or that entry is silently never compiled.
+    candidate = ULID.from_datetime(ts)
+    if last_id is not None and int(candidate) <= int(last_id):
+        return ULID.from_int(int(last_id) + 1)
+    return candidate
 
 
 def _blocking_append(wal_file: Path, payload: bytes, multi_worker: bool) -> None:
@@ -51,27 +85,40 @@ async def append_log(
     source: str,
     client_version: str | None,
     parent_id: ULID | None = None,
-    settings: object,
+    settings: Settings,
     locks: WorkspaceLockRegistry,
-) -> ULID:
-    max_bytes: int = getattr(getattr(settings, "wal", settings), "max_entry_bytes", 256 * 1024)
-    multi_worker: bool = getattr(getattr(settings, "auth", settings), "multi_worker", False)
+) -> AppendResult:
+    """Append one framed entry to the workspace's daily WAL file.
 
-    # D-01 / D-03: pre-flight Workspace.status check BEFORE lock acquisition. The
-    # TOCTOU window (archive flips between this check and lock acquisition) is
-    # acceptable per D-03 (DB = source of truth; one stray append after archive
-    # has negligible impact and coordinator will be paused within milliseconds).
-    # Skip when DB engine hasn't been initialized (unit-test environments without lifespan).
+    Entry ids are strictly increasing per workspace within the process, so a
+    compile cursor filtering `id > last_wal_id` never skips an entry.
+
+    Raises EmptyContentError, PayloadTooLargeError or WorkspaceArchivedError.
+    """
+    if not content.strip():
+        raise EmptyContentError("WAL entry content must not be empty")
+    max_bytes = settings.wal.max_entry_bytes
+    if len(content.encode()) > max_bytes:
+        raise PayloadTooLarge(f"Entry content exceeds maximum size of {max_bytes} bytes")
+    multi_worker = settings.auth.multi_worker
+
+    # Pre-flight Workspace.status check BEFORE acquiring the lock. The TOCTOU
+    # window (the workspace is archived between this check and the append) is
+    # accepted: the DB is the source of truth, one stray entry after an archive
+    # is harmless, and the coordinator pauses within milliseconds.
+    # Skipped when the DB engine was never initialised (unit tests without lifespan).
     from keenyspace_server.db.session import get_engine as _get_engine
+
     if _get_engine() is not None:
         from sqlalchemy import select as _select
 
         from keenyspace_server.db.models import Workspace as _Workspace
         from keenyspace_server.db.session import get_db_session as _get_db_session
+
         async with _get_db_session() as _session:
-            _status = (await _session.execute(
-                _select(_Workspace.status).where(_Workspace.uuid == ws_uuid)
-            )).scalar_one_or_none()
+            _status = (
+                await _session.execute(_select(_Workspace.status).where(_Workspace.uuid == ws_uuid))
+            ).scalar_one_or_none()
         if _status == "archived":
             raise WorkspaceArchivedError(
                 f"workspace {ws_uuid} is archived; unarchive before appending"
@@ -79,9 +126,15 @@ async def append_log(
 
     ws_lock = await locks.for_workspace(ws_uuid)
     async with ws_lock:
-        wal_path = ws_root / "logs" / f"{datetime.now(UTC).date().isoformat()}.md"
         ts = datetime.now(UTC)
-        entry_id = ULID.from_datetime(ts)
+        logs_dir = ws_root / "logs"
+        last_id = locks.last_id(ws_uuid)
+        if last_id is None:
+            last_id = await asyncio.to_thread(_newest_logged_id, logs_dir)
+        entry_id = _next_entry_id(ts, last_id)
+        # Named by the id's date, not the wall clock: after a backward clock step
+        # the id runs ahead of `ts`, and compile prunes files by cursor-id date.
+        wal_path = logs_dir / f"{entry_id.datetime.date().isoformat()}.md"
         content_hash = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
 
         payload = format_entry(
@@ -96,20 +149,18 @@ async def append_log(
         )
 
         if len(payload) > max_bytes:
-            raise PayloadTooLarge(
-                f"Serialised entry exceeds maximum size of {max_bytes} bytes"
-            )
+            raise PayloadTooLarge(f"Serialised entry exceeds maximum size of {max_bytes} bytes")
 
-        await asyncio.to_thread(
-            _blocking_append, wal_path, payload, multi_worker
-        )
+        await asyncio.to_thread(_blocking_append, wal_path, payload, multi_worker)
+        locks.record_id(ws_uuid, entry_id)
 
     from keenyspace_server.observability.metrics import WAL_APPENDS_TOTAL
+
     WAL_APPENDS_TOTAL.labels(workspace=str(ws_uuid), source=source).inc()
 
-    # Phase 2: notify compile coordinator outside the workspace lock scope.
-    # Lazy import avoids circular dependency at module init time and keeps
-    # Phase 1 tests passing when the compile module is not yet wired into Settings.
+    # Notify the compile coordinator outside the workspace lock scope. The
+    # lazy import breaks a circular dependency at module init time, and the
+    # settings probe keeps the WAL usable when compile is not configured.
     if hasattr(settings, "compile"):
         try:
             from keenyspace_server.compile.coordinator import get_coordinator
@@ -120,4 +171,4 @@ async def append_log(
             if coordinator is not None:
                 coordinator.notify_dirty(ws_uuid)
 
-    return entry_id
+    return AppendResult(entry_id=entry_id, ts=ts)

@@ -16,6 +16,27 @@ metadata:
   labels:
     blueprints.goauthentik.io/instance: keenyspace-test-seed
 entries:
+  # Declared here as well (identical to keenyspace.yaml) because blueprint files
+  # apply independently and in no guaranteed order; !KeyOf below needs them.
+  - model: authentik_core.group
+    id: ks-test-users-group
+    state: present
+    identifiers:
+      name: keenyspace-users
+    attrs:
+      name: keenyspace-users
+      is_superuser: false
+  - model: authentik_core.group
+    id: ks-test-admins-group
+    state: present
+    identifiers:
+      name: keenyspace-admins
+    attrs:
+      name: keenyspace-admins
+      is_superuser: false
+
+  # Admin membership: the drill calls /v1/admin/backup and /v1/admin/restore
+  # with a key minted by this account.
   - model: authentik_core.user
     id: ks-test-user
     identifiers:
@@ -24,6 +45,9 @@ entries:
       name: KeenySpace Test Service Account
       type: service_account
       is_active: true
+      groups:
+        - !KeyOf ks-test-users-group
+        - !KeyOf ks-test-admins-group
 
   - model: authentik_core.token
     id: ks-test-token

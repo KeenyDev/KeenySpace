@@ -8,7 +8,7 @@ from datetime import datetime
 from ulid import ULID
 
 _ENTRY_RE = re.compile(
-    r"<wal_entry ([^>]+)>(.+?)</wal_entry>",
+    r"<wal_entry ([^>]+)>(.*?)</wal_entry>",
     re.DOTALL,
 )
 # Invariant: framing.py escapes all attribute values with html.escape(x, quote=True),

@@ -18,12 +18,41 @@ metadata:
     blueprints.goauthentik.io/instance: keenyspace-dogfood-oidc
 entries:
   - model: authentik_core.group
+    id: keenyspace-users-group
     state: present
     identifiers:
       name: keenyspace-users
     attrs:
       name: keenyspace-users
       is_superuser: false
+  # Membership grants /v1/admin/* (backup, restore, key revocation) — the
+  # server's auth.admin_group default.
+  - model: authentik_core.group
+    id: keenyspace-admins-group
+    state: present
+    identifiers:
+      name: keenyspace-admins
+    attrs:
+      name: keenyspace-admins
+      is_superuser: false
+  # Bootstrap admin joins both KeenySpace groups. The update is partial (only
+  # `groups` is written; name/email/password stay as they are) but `groups` is
+  # a full set, so it keeps "authentik Admins" in it. The condition only matches
+  # an existing akadmin that is still in "authentik Admins": the entry never
+  # creates akadmin (a password-less akadmin would reopen the initial-setup
+  # flow) and never re-grants superuser to an akadmin an operator demoted.
+  # Other groups added to akadmin by hand are dropped on each re-apply.
+  - model: authentik_core.user
+    state: present
+    conditions:
+      - !Find [authentik_core.user, [username, akadmin], [groups__name, "authentik Admins"]]
+    identifiers:
+      username: akadmin
+    attrs:
+      groups:
+        - !Find [authentik_core.group, [name, "authentik Admins"]]
+        - !KeyOf keenyspace-users-group
+        - !KeyOf keenyspace-admins-group
   - model: authentik_providers_oauth2.scopemapping
     state: present
     identifiers:

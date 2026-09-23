@@ -4,7 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 
 def build_scheduler() -> AsyncIOScheduler:
-    """AsyncIOScheduler with conservative defaults for single-worker uvicorn (D-11).
+    """AsyncIOScheduler with conservative defaults for single-worker uvicorn.
 
     - misfire_grace_time=30 lets a job that fires while a previous run is still
       executing (rare for our 15-min backstop interval) wait up to 30s before

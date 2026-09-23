@@ -16,9 +16,11 @@ from keenyspace_shared.mcp_contracts import (
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from keenyspace_server.api.workspace_dep import require_workspace
 from keenyspace_server.db.models import CompileRun, Workspace
 from keenyspace_server.db.session import get_db
-from keenyspace_server.ws.scan import iter_md_files
+from keenyspace_server.fs.layout import workspace_root
+from keenyspace_server.ws.scan import count_pages
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -33,16 +35,10 @@ def _validated_limit(limit: int | None) -> int:
     return min(max(1, limit), _PAGE_SIZE_MAX)
 
 
-def _count_pages_sync(ws_dir: Path) -> int:
-    if not ws_dir.is_dir():
-        return 0
-    return sum(1 for _ in iter_md_files(ws_dir))
-
-
 async def _build_workspace_info(
     ws: Workspace, ws_dir: Path, session: AsyncSession
 ) -> WorkspaceInfo:
-    page_count = await asyncio.to_thread(_count_pages_sync, ws_dir)
+    page_count = await asyncio.to_thread(count_pages, ws_dir)
     last_compile_at = (
         await session.execute(
             select(CompileRun.completed_at)
@@ -69,9 +65,9 @@ async def _build_workspace_info(
 async def _fetch_last_compile_map(
     session: AsyncSession, ws_uuids: list[UUID]
 ) -> dict[UUID, datetime | None]:
-    """Batch-fetch last successful compile completion per workspace.
+    """Batch-fetch the last successful compile completion per workspace.
 
-    Replaces N+1 SELECT-per-workspace with one grouped query (WR-10/WR-11).
+    One grouped query for the whole page instead of a SELECT per workspace.
     """
     if not ws_uuids:
         return {}
@@ -132,18 +128,15 @@ async def list_workspaces_http(
         raise HTTPException(status_code=422, detail=f"malformed cursor: {exc}") from exc
 
     settings = request.app.state.settings
-    # WR-10/WR-11: batch the last_compile_at SELECT (one query for the whole
-    # page instead of N+1) and parallelize the per-workspace FS scans. We do
-    # the DB query OUTSIDE of asyncio.gather because AsyncSession is not safe
-    # for concurrent use; only the thread-bound _count_pages_sync calls run
+    # Batch the last_compile_at SELECT (one query for the whole page instead
+    # of one per workspace) and parallelize the per-workspace FS scans. The
+    # DB query runs OUTSIDE asyncio.gather because AsyncSession is not safe
+    # for concurrent use; only the thread-bound count_pages calls run
     # in parallel.
-    last_compile_map = await _fetch_last_compile_map(
-        session, [ws.uuid for ws in page_rows]
-    )
-    fs_root = Path(settings.fs.root)
+    last_compile_map = await _fetch_last_compile_map(session, [ws.uuid for ws in page_rows])
     page_counts = await asyncio.gather(
         *[
-            asyncio.to_thread(_count_pages_sync, fs_root / "workspaces" / str(ws.uuid))
+            asyncio.to_thread(count_pages, workspace_root(settings.fs.root, ws.uuid))
             for ws in page_rows
         ]
     )
@@ -161,11 +154,7 @@ async def get_workspace_http(
     request: Request,
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> WorkspaceInfo:
-    ws = (
-        await session.execute(select(Workspace).where(Workspace.slug == slug))
-    ).scalar_one_or_none()
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
+    ws = await require_workspace(session, slug)
     settings = request.app.state.settings
-    ws_dir = Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+    ws_dir = workspace_root(settings.fs.root, ws.uuid)
     return await _build_workspace_info(ws, ws_dir, session)

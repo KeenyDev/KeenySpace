@@ -1,4 +1,4 @@
-"""POST /v1/admin/restore happy-path + version/schema/target checks (Phase 5 ADMIN-02)."""
+"""POST /v1/admin/restore happy-path plus version, schema and target checks."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from keenyspace_server.api.admin import KS_VERSION
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -21,9 +22,7 @@ HAS_PG_DUMP = shutil.which("pg_dump") is not None and shutil.which("psql") is no
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
     pytest.mark.skipif(not HAS_PG_DUMP, reason="pg_dump/psql binary unavailable"),
 ]
 
@@ -47,7 +46,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
 
-    pepper = get_settings().auth.api_key_pepper
+    pepper = get_settings().auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
@@ -57,10 +56,11 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     async with get_db_session() as session:
         await session.execute(
             text(
-                "INSERT INTO users (sub, display_name, email, source, created_at) "
-                "VALUES (:sub, :dn, NULL, 'api_key', :now)"
+                "INSERT INTO users (sub, display_name, email, source, created_at, "
+                "groups, groups_seen_at) VALUES (:sub, :dn, NULL, 'api_key', :now, "
+                "CAST(:groups AS jsonb), :now)"
             ),
-            {"sub": user_sub, "dn": "admin-restore", "now": now},
+            {"groups": '["keenyspace-admins"]', "sub": user_sub, "dn": "admin-restore", "now": now},
         )
         await session.execute(
             text(
@@ -99,9 +99,7 @@ async def _capture_backup(
 
 async def _seed_workspace(client: AsyncClient) -> str:
     slug = f"restore-{uuid4().hex[:8]}"
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
     assert resp.status_code == 201, resp.text
     return slug
 
@@ -154,7 +152,7 @@ async def test_restore_version_mismatch_returns_422(app: Any, pg_url: str) -> No
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
         head = await _current_alembic_head()
-        manifest = _default_manifest(keenyspace_version="0.2.0", alembic_head=head)
+        manifest = _default_manifest(keenyspace_version="9.9.0", alembic_head=head)
         tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(
@@ -178,9 +176,7 @@ async def test_restore_schema_mismatch_returns_422(app: Any, pg_url: str) -> Non
     await _reset_schema(pg_url)
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
-        manifest = _default_manifest(
-            keenyspace_version="0.1.0", alembic_head="0001_bogus"
-        )
+        manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head="0001_bogus")
         tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(
@@ -215,9 +211,7 @@ async def test_restore_target_not_empty_returns_409(app: Any, pg_url: str) -> No
                 pytest.skip("server not ready")
             await _seed_workspace(client)
             head = await _current_alembic_head()
-            manifest = _default_manifest(
-                keenyspace_version="0.1.0", alembic_head=head
-            )
+            manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head=head)
             tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
             resp = await client.post(
                 "/v1/admin/restore",
@@ -247,9 +241,7 @@ async def test_restore_force_wipes_existing(app: Any, pg_url: str) -> None:
                 pytest.skip("server not ready")
             await _seed_workspace(client)
             head = await _current_alembic_head()
-            manifest = _default_manifest(
-                keenyspace_version="0.1.0", alembic_head=head
-            )
+            manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head=head)
             tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
             resp = await client.post(
                 "/v1/admin/restore",
@@ -282,9 +274,7 @@ async def test_restore_force_wipe_audit_log_row(app: Any, pg_url: str) -> None:
                 pytest.skip("server not ready")
             await _seed_workspace(client)
             head = await _current_alembic_head()
-            manifest = _default_manifest(
-                keenyspace_version="0.1.0", alembic_head=head
-            )
+            manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head=head)
             tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
             resp = await client.post(
                 "/v1/admin/restore",
@@ -295,19 +285,23 @@ async def test_restore_force_wipe_audit_log_row(app: Any, pg_url: str) -> None:
 
             async with get_db_session() as session:
                 wipe_rows = (
-                    await session.execute(
-                        select(AuditLog).where(
-                            AuditLog.action == "admin.restore.wipe"
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "admin.restore.wipe")
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 applied_rows = (
-                    await session.execute(
-                        select(AuditLog).where(
-                            AuditLog.action == "admin.restore.applied"
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "admin.restore.applied")
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert wipe_rows, "admin.restore.wipe row missing"
             assert applied_rows, "admin.restore.applied row missing"
             assert wipe_rows[0].actor_sub == user_sub
@@ -319,7 +313,7 @@ async def test_restore_happy_path_empty_target(app: Any, pg_url: str) -> None:
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
         head = await _current_alembic_head()
-        manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head=head)
+        manifest = _default_manifest(keenyspace_version=KS_VERSION, alembic_head=head)
         manifest["workspaces"] = {"count": 0, "uuids": []}
         tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
         transport = ASGITransport(app=app, raise_app_exceptions=False)

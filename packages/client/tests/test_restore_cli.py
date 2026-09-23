@@ -66,9 +66,7 @@ def test_restore_uploads_multipart(
         captured["body_len"] = len(request.get_data())
         return Response(json.dumps({"ok": True, "workspaces_restored": 0}), status=200)
 
-    httpserver.expect_request("/v1/admin/restore", method="POST").respond_with_handler(
-        handler
-    )
+    httpserver.expect_request("/v1/admin/restore", method="POST").respond_with_handler(handler)
     _seed_auth(temp_config_dir["config_dir"])
     server_url = httpserver.url_for("").replace("localhost", "127.0.0.1")
     main_mod = _reload_and_get_app(server_url)
@@ -97,9 +95,7 @@ def test_restore_force_passes_query_param(
         captured["query"] = request.args.to_dict()
         return Response(json.dumps({"ok": True}), status=200)
 
-    httpserver.expect_request("/v1/admin/restore", method="POST").respond_with_handler(
-        handler
-    )
+    httpserver.expect_request("/v1/admin/restore", method="POST").respond_with_handler(handler)
     _seed_auth(temp_config_dir["config_dir"])
     server_url = httpserver.url_for("").replace("localhost", "127.0.0.1")
     main_mod = _reload_and_get_app(server_url)

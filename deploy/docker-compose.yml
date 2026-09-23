@@ -1,19 +1,22 @@
 services:
   keenyspace:
+    # `build:` builds from source when the image is missing; KEENYSPACE_IMAGE lets CI
+    # (or an operator) run a prebuilt image instead of rebuilding.
+    image: ${KEENYSPACE_IMAGE:-keenyspace:local}
     build:
       context: ..
       dockerfile: deploy/Dockerfile
     ports:
-      - "8000:8000"
-    # Optional local overrides + secrets (gitignored). Any KEENYSPACE_* var here
-    # (e.g. KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS_PER_SPACE for the daily per-workspace
-    # output budget, or KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS_PER_CALL for the single-call cap)
-    # is injected into the container. Lower precedence than `environment:` below.
+      - "127.0.0.1:8000:8000"
+    # Optional app-only overrides (gitignored, see keenyspace.env.example), e.g.
+    # KEENYSPACE_COMPILE__MAX_OUTPUT_TOKENS_PER_SPACE. Lower precedence than
+    # `environment:` below. deploy/.env is NOT loaded into the container: it holds
+    # the Postgres and Authentik secrets and is only used for ${...} interpolation.
     env_file:
-      - path: .env
+      - path: keenyspace.env
         required: false
     environment:
-      KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:${POSTGRES_PASSWORD:-devpw}@postgres/keenyspace
+      KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:${POSTGRES_PASSWORD:?run deploy/gen-secrets.sh}@postgres/keenyspace
       KEENYSPACE_FS__ROOT: /var/lib/keenyspace
       # OIDC contract — Authentik wired in this branch (DEP-06 pulled forward for Phase 6 dogfood).
       # client_id MUST match the CLI device-flow client (keenyspace-cli) so token aud validates.
@@ -25,16 +28,24 @@ services:
       KEENYSPACE_AUTH__OIDC_ISSUER_URL: http://localhost:9000/application/o/keenyspace/
       KEENYSPACE_AUTH__OIDC_INTERNAL_ISSUER_URL: http://authentik:9000/application/o/keenyspace/
       KEENYSPACE_AUTH__OIDC_CLIENT_ID: keenyspace-cli
-      KEENYSPACE_AUTH__OIDC_CLIENT_SECRET: ${KEENYSPACE_OIDC_CLIENT_SECRET:-client-secret-replace-me}
+      KEENYSPACE_AUTH__OIDC_CLIENT_SECRET: ${KEENYSPACE_OIDC_CLIENT_SECRET:?run deploy/gen-secrets.sh}
       KEENYSPACE_AUTH__OIDC_REDIRECT_URI: http://localhost:8000/v1/api/auth/callback
       KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI: http://localhost:8000/
-      KEENYSPACE_AUTH__SESSION_SECRET_KEY: ${KEENYSPACE_SESSION_SECRET_KEY:-session-secret-replace-me-min-32-bytes-xxxxxx}
-      KEENYSPACE_AUTH__API_KEY_PEPPER: ${KEENYSPACE_API_KEY_PEPPER:-api-key-pepper-replace-me-min-32-bytes-xxxxxx}
-      KEENYSPACE_AUTH__REQUIRED_GROUP: ${KEENYSPACE_AUTH__REQUIRED_GROUP:-}
+      KEENYSPACE_AUTH__SESSION_SECRET_KEY: ${KEENYSPACE_SESSION_SECRET_KEY:?run deploy/gen-secrets.sh}
+      KEENYSPACE_AUTH__API_KEY_PEPPER: ${KEENYSPACE_API_KEY_PEPPER:?run deploy/gen-secrets.sh}
+      KEENYSPACE_AUTH__REQUIRED_GROUP: ${KEENYSPACE_AUTH__REQUIRED_GROUP:-keenyspace-users}
+      KEENYSPACE_AUTH__ADMIN_GROUP: ${KEENYSPACE_AUTH__ADMIN_GROUP:-keenyspace-admins}
+      KEENYSPACE_AUTH__API_KEY_GROUP_SNAPSHOT_MAX_AGE_DAYS: ${KEENYSPACE_AUTH__API_KEY_GROUP_SNAPSHOT_MAX_AGE_DAYS:-}
       # Destructive admin backup/restore endpoints stay off by default (CR-02);
       # the backup-restore drill exports KEENYSPACE_ADMIN_API_ENABLED=1 for its run.
       KEENYSPACE_ADMIN_API_ENABLED: ${KEENYSPACE_ADMIN_API_ENABLED:-0}
       KEENYSPACE_AUTO_MIGRATE: "true"
+      # Prometheus metrics on an internal listener, deliberately NOT in `ports:`
+      # (series carry workspace slugs and token usage). 0 disables it.
+      # deploy/observability.yml scrapes keenyspace:9100.
+      KEENYSPACE_METRICS_PORT: ${KEENYSPACE_METRICS_PORT:-9100}
+      # The listener defaults to loopback; the scraper is a sibling container.
+      KEENYSPACE_METRICS_ADDR: 0.0.0.0
       # Compile is provider-neutral (pydantic-ai). Anthropic stays the default
       # (D-04); override provider/model + supply the matching key via deploy/.env
       # (gitignored) for OpenAI/etc. Keys default to empty so the image is safe
@@ -60,11 +71,11 @@ services:
     restart: unless-stopped
 
   authentik-postgresql:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine
     environment:
       POSTGRES_USER: authentik
       POSTGRES_DB: authentik
-      POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-authentik-db-password-replace-me}
+      POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:?run deploy/gen-secrets.sh}
     volumes:
       - authentik-postgresql:/var/lib/postgresql/data
     healthcheck:
@@ -75,32 +86,18 @@ services:
       start_period: 20s
     restart: unless-stopped
 
-  authentik-redis:
-    image: redis:alpine
-    command: --save 60 1 --loglevel warning
-    volumes:
-      - authentik-redis:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
-    restart: unless-stopped
-
   authentik:
-    image: ghcr.io/goauthentik/server:2026.2
+    image: ghcr.io/goauthentik/server:2026.2.7
     command: server
     environment:
-      AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-authentik-db-password-replace-me}
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-authentik-secret-key-replace-me-50-bytes-padding-padding-padding}
-      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-authentik-admin-replace-me}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:?run deploy/gen-secrets.sh}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?run deploy/gen-secrets.sh}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:?run deploy/gen-secrets.sh}
       AUTHENTIK_BOOTSTRAP_EMAIL: admin@keenyspace.local
-      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-authentik-bootstrap-token-replace-me-32-bytes-padding}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:?run deploy/gen-secrets.sh}
     volumes:
       - authentik-media:/data/media
       - authentik-templates:/templates
@@ -114,9 +111,10 @@ services:
       # and the serializer prepends public/ itself. The validator rejects leading
       # slashes / absolute paths, so values stay relative under MEDIA_ROOT.
       - ./authentik/blueprints/branding:/data/media/public/keeny:ro
+    # Loopback only: remote clients reach Authentik through the reverse proxy.
     ports:
-      - "9000:9000"
-      - "9443:9443"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9443:9443"
     healthcheck:
       test: ["CMD", "ak", "healthcheck"]
       interval: 30s
@@ -126,20 +124,17 @@ services:
     depends_on:
       authentik-postgresql:
         condition: service_healthy
-      authentik-redis:
-        condition: service_healthy
     restart: unless-stopped
 
   authentik-worker:
-    image: ghcr.io/goauthentik/server:2026.2
+    image: ghcr.io/goauthentik/server:2026.2.7
     command: worker
     environment:
-      AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgresql
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-authentik-db-password-replace-me}
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-authentik-secret-key-replace-me-50-bytes-padding-padding-padding}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:?run deploy/gen-secrets.sh}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?run deploy/gen-secrets.sh}
     volumes:
       - authentik-media:/data/media
       - authentik-templates:/templates
@@ -151,8 +146,6 @@ services:
     depends_on:
       authentik-postgresql:
         condition: service_healthy
-      authentik-redis:
-        condition: service_healthy
     restart: unless-stopped
 
   postgres:
@@ -160,11 +153,13 @@ services:
     environment:
       POSTGRES_DB: keenyspace
       POSTGRES_USER: keenyspace
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run deploy/gen-secrets.sh}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    # Loopback only: the app reaches Postgres over compose DNS and backups use
+    # in-container pg_dump; host access is for local debugging.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keenyspace -d keenyspace"]
       interval: 5s
@@ -173,7 +168,7 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.11.4-alpine
     ports:
       - "80:80"
       - "443:443"
@@ -194,7 +189,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.test-linux
     environment:
-      KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:devpw@postgres/keenyspace
+      KEENYSPACE_DB__URL: postgresql+asyncpg://keenyspace:${POSTGRES_PASSWORD:?run deploy/gen-secrets.sh}@postgres/keenyspace
       KEENYSPACE_FS__ROOT: /tmp/keenyspace
       # OIDC contract — test profile uses placeholders; tests inject pytest-httpserver-backed values.
       KEENYSPACE_AUTH__OIDC_ISSUER_URL: http://authentik:9000/application/o/keenyspace/
@@ -214,7 +209,6 @@ volumes:
   keenyspace-fs:
   postgres-data:
   authentik-postgresql:
-  authentik-redis:
   authentik-media:
   authentik-templates:
   authentik-certs:

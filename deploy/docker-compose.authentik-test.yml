@@ -4,8 +4,9 @@
 #   "docker-compose.authentik-test.yml"]) in test_real_authentik_e2e.py.
 #
 # Contract:
-#   - Disables keenyspace + postgres (KeenySpace runs in-process via OidcClient direct call).
-#   - Pins Authentik host port to FIXED 9000:9000. The test's static base_url
+#   - Disables keenyspace + postgres + caddy (KeenySpace runs in-process via OidcClient direct call).
+#   - Pins Authentik host port to FIXED 127.0.0.1:9000:9000 (same binding as the base
+#     file so compose dedupes the entries instead of binding 9000 twice). The test's static base_url
 #     "http://localhost:9000" depends on this binding. A random mapped port would
 #     change the per_provider token iss and break the D-22 trailing-slash assertion.
 #   - Mounts the test seed blueprint from ./authentik/blueprints-test/ at a SEPARATE
@@ -14,6 +15,9 @@
 #     ./authentik/blueprints, NOT blueprints-test/ — so a plain `docker compose up`
 #     never sees the test seed. This is real directory isolation, not isolation by
 #     filename inside a shared mount (security T-03.1-06).
+#   - The base file fails closed on missing secrets, so this lane interpolates from
+#     ./authentik-test.env (throwaway test-only values, passed via --env-file). The
+#     bootstrap token there must match _TEST_BOOTSTRAP_TOKEN in the test.
 #   - Test-only credentials live ONLY in ./authentik/blueprints-test/keenyspace-test.yaml
 #     and this override, NEVER in the production blueprint keenyspace.yaml.
 services:
@@ -23,10 +27,14 @@ services:
   postgres:
     profiles: ["disabled"]
 
+  # caddy depends_on keenyspace; with keenyspace disabled the project is invalid.
+  caddy:
+    profiles: ["disabled"]
+
   authentik:
     ports:
-      - "9000:9000"
-      - "9443:9443"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9443:9443"
     volumes:
       - authentik-media:/media
       - authentik-templates:/templates

@@ -1,4 +1,4 @@
-"""Phase 5 D-04 + Pitfall #7: read-only wiki-health audit command.
+"""Read-only wiki-health audit command.
 
 Same defence-in-depth refusal as query.py: if server-supplied whitelist
 includes `append_log`, refuse to run.
@@ -40,9 +40,7 @@ async def run_lint(workspace: str | None = None) -> None:
         err.print("[red]Not logged in. Run `keenyspace login`.[/red]")
         sys.exit(EXIT_CONFIG)
     if not os.environ.get(settings.llm.api_key_env):
-        err.print(
-            f"[red]LLM API key env var {settings.llm.api_key_env} is not set.[/red]"
-        )
+        err.print(f"[red]LLM API key env var {settings.llm.api_key_env} is not set.[/red]")
         sys.exit(EXIT_CONFIG)
     instructions = await get_instructions(
         settings.server_url,
@@ -51,7 +49,7 @@ async def run_lint(workspace: str | None = None) -> None:
         command="lint",
         context={},
     )
-    # WHY: T-05.04-02 defence-in-depth — see query.py.
+    # Defence-in-depth — see query.py.
     if "append_log" in instructions.tool_whitelist:
         err.print(
             "[red]Defence-in-depth: server returned a write tool in the lint "

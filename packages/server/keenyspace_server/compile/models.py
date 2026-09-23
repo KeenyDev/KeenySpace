@@ -26,9 +26,7 @@ class PageOp(BaseModel):
     @classmethod
     def no_traversal(cls, v: str) -> str:
         if v.startswith("/") or ".." in v:
-            raise ValueError(
-                f"path must be workspace-relative and non-traversing, got {v!r}"
-            )
+            raise ValueError(f"path must be workspace-relative and non-traversing, got {v!r}")
         return v
 
     @field_validator("path")
@@ -75,6 +73,7 @@ class CompileRunResult:
     status: Literal["success", "idempotent_noop", "paused"]
     pages_written: int
     plan_hash: str | None = None
+    backlog_remaining: bool = False
 
 
 class CompileTriggerResponse(BaseModel):

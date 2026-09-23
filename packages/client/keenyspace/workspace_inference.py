@@ -1,9 +1,9 @@
-"""HK-11 + D-13: resolve workspace slug from cwd.
+"""Resolve the workspace slug for the current working directory.
 
 Precedence (highest -> lowest):
   1. explicit arg
   2. env var KEENYSPACE_WORKSPACE
-  3. walk-up search for .keenyspace/slug-marker.json (D-13 option b)
+  3. walk-up search for .keenyspace/slug-marker.json
   4. workspace-map.yaml longest-prefix match
   5. default_workspace from config.yaml
 
@@ -57,7 +57,7 @@ def _walk_up_slug_marker(cwd: Path) -> str | None:
             continue
         try:
             data: Any = json.loads(marker.read_text())
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             continue
         if isinstance(data, dict):
             slug = data.get("slug")
@@ -85,7 +85,7 @@ def _lookup_workspace_map(cwd: Path) -> str | None:
             continue
         try:
             expanded = Path(os.path.expanduser(prefix_str)).resolve()
-        except (OSError, RuntimeError):
+        except OSError, RuntimeError:
             continue
         try:
             cwd.relative_to(expanded)

@@ -1,4 +1,4 @@
-"""Client settings — D-01 LLM provider config + YAML + env override.
+"""Client settings — LLM provider config from YAML with env overrides.
 
 Precedence (highest → lowest):
 init kwargs → env vars (KEENYSPACE_*) → ~/.config/keenyspace/config.yaml → defaults.

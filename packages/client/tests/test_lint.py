@@ -1,4 +1,4 @@
-"""Tests for cli/lint.py — CLI-13 + Pitfall #7 defence + read-only whitelist."""
+"""Tests for cli/lint.py — instructions-first, the read-only whitelist and its defence."""
 
 from __future__ import annotations
 

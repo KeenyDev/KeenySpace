@@ -18,7 +18,5 @@ def on_auth_error(conn: HTTPConnection, exc: Exception) -> JSONResponse:
             public_url = ""
         if public_url:
             resource_metadata = f"{public_url}/.well-known/oauth-protected-resource"
-            headers["WWW-Authenticate"] = (
-                f'Bearer resource_metadata="{resource_metadata}"'
-            )
+            headers["WWW-Authenticate"] = f'Bearer resource_metadata="{resource_metadata}"'
     return JSONResponse({"error": str(exc)}, status_code=401, headers=headers)

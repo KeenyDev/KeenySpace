@@ -1,8 +1,7 @@
 """asyncio UDS daemon — JSONL dispatch with mode-0600 socket + kill switch.
 
-Per Phase 5 D-06/D-07/D-09 + 05-RESEARCH §9. The umask manipulation + chmod
-combo guarantees socket file mode 0o600 even under user umasks that would
-otherwise leave it world-readable (T-05.05-02 mitigation).
+The umask manipulation + chmod combo guarantees socket file mode 0o600 even
+under user umasks that would otherwise leave it world-readable.
 """
 
 from __future__ import annotations
@@ -80,7 +79,7 @@ async def serve() -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         # Windows / restricted runtime: signal handlers may be unavailable;
-        # the daemon is out of scope on those platforms per CONTEXT.md.
+        # the daemon is not supported on those platforms.
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop_event.set)
     try:
@@ -105,9 +104,7 @@ async def serve() -> None:
         log.info("daemon.stopped")
 
 
-async def _handle(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-) -> None:
+async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     from keenyspace.daemon.handlers import dispatch
 
     try:

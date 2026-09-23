@@ -1,14 +1,14 @@
-"""Daemon-side post-compact context assembly (Phase 5 D-09).
+"""Daemon-side post-compact context assembly.
 
 Flow:
   1. Read transcript_path off the loop via daemon/transcript.read_transcript_excerpt.
   2. MCP get_instructions(workspace, "post-compact", {transcript_excerpt}) FIRST.
-  3. Defence-in-depth: refuse if tool_whitelist contains append_log (T-05.06-07).
+  3. Defence-in-depth: refuse if tool_whitelist contains append_log.
   4. clients.llm.run_server_driven_command with output_type=PostCompactInjection.
-  5. Return {ok, content, error} per F-09 response shape.
+  5. Return the {ok, content, error} response shape the hook expects.
 
 Logged metadata is intentionally narrow (workspace, page count, text length).
-Transcript content and assembled text are NEVER logged (T-05.06-05).
+Transcript content and assembled text are NEVER logged.
 """
 
 from __future__ import annotations
@@ -64,9 +64,7 @@ async def assemble_context(envelope: dict[str, Any]) -> dict[str, Any]:
 
     excerpt = await read_transcript_excerpt(transcript_path)
     if excerpt is None:
-        log.warning(
-            "post_compact.transcript_unavailable", workspace=workspace_slug
-        )
+        log.warning("post_compact.transcript_unavailable", workspace=workspace_slug)
         return {
             "ok": False,
             "content": None,

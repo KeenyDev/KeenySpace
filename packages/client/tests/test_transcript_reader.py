@@ -49,9 +49,7 @@ async def test_read_empty_file_returns_empty_string(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_uses_asyncio_to_thread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_read_uses_asyncio_to_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     f = tmp_path / "obs.jsonl"
     f.write_text("line\n", encoding="utf-8")
 
@@ -62,9 +60,7 @@ async def test_read_uses_asyncio_to_thread(
         calls["n"] += 1
         return await real_to_thread(func, *args, **kwargs)
 
-    monkeypatch.setattr(
-        "keenyspace.daemon.transcript.asyncio.to_thread", wrapper
-    )
+    monkeypatch.setattr("keenyspace.daemon.transcript.asyncio.to_thread", wrapper)
     await read_transcript_excerpt(f)
     assert calls["n"] == 1
 

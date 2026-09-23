@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import typer
 import yaml
+from keenyspace_shared.atomic_write import write_atomic
 from rich.console import Console
 
-from keenyspace.fs.atomic import write_atomic
 from keenyspace.paths import CONFIG_DIR, CONFIG_YAML
 
 

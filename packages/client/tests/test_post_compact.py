@@ -2,7 +2,7 @@
 
 We stub get_instructions and run_server_driven_command at the
 keenyspace.daemon.post_compact module to keep the test deterministic and
-free of network/LLM dependencies. The CLI-13 + HK-12 invariant
+free of network/LLM dependencies. The instructions-first invariant
 (get_instructions called BEFORE the agent run) is asserted via a shared
 call-order list.
 """
@@ -29,8 +29,7 @@ def _make_instructions(
 ) -> Instructions:
     return Instructions(
         prompt="You select workspace context after compaction.",
-        tool_whitelist=tool_whitelist
-        or ["search_workspace", "read_page", "list_pages"],
+        tool_whitelist=tool_whitelist or ["search_workspace", "read_page", "list_pages"],
         steps=["read", "search", "assemble"],
         model=None,
         budgets=Budgets(max_steps=10, max_tokens=20_000, max_seconds=45),
@@ -39,9 +38,7 @@ def _make_instructions(
 
 @pytest.fixture
 def auth_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        pc_mod, "read_auth", lambda: {"api_key": "ks_live_test"}
-    )
+    monkeypatch.setattr(pc_mod, "read_auth", lambda: {"api_key": "ks_live_test"})
 
 
 @pytest.fixture
@@ -137,9 +134,7 @@ async def test_assemble_context_happy_path(
 
 @pytest.mark.asyncio
 async def test_assemble_context_no_workspace_slug() -> None:
-    response = await pc_mod.assemble_context(
-        {"transcript_path": "/tmp/anything.jsonl"}
-    )
+    response = await pc_mod.assemble_context({"transcript_path": "/tmp/anything.jsonl"})
     assert response["ok"] is False
     assert response["error"] == "no_workspace_slug"
     assert response["content"] is None
@@ -261,14 +256,12 @@ async def test_server_driven_post_compact_calls_get_instructions_first(
     fake_transcript: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CLI-13 + HK-12 invariant: get_instructions BEFORE agent run."""
+    """Instructions-first invariant: get_instructions is called BEFORE the agent run."""
     order: list[str] = []
     _install_stubs(
         monkeypatch,
         instructions=_make_instructions(),
-        agent_output=PostCompactInjection(
-            base_layer="b", selected_pages=[], assembled_text="ok"
-        ),
+        agent_output=PostCompactInjection(base_layer="b", selected_pages=[], assembled_text="ok"),
         call_order=order,
     )
     await pc_mod.assemble_context(
@@ -340,7 +333,7 @@ async def test_response_shape_serialisable(
     fake_transcript: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """F-09 JSONL response shape must survive json.dumps round-trip."""
+    """The JSONL response shape must survive a json.dumps round-trip."""
     _install_stubs(
         monkeypatch,
         instructions=_make_instructions(),

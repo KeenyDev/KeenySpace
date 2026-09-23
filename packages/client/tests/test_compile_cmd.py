@@ -162,9 +162,7 @@ async def test_compile_wait_timeout_exits_5(
     monkeypatch.setattr(mod, "call_compile", _fake_compile)
     monkeypatch.setattr(mod, "call_compile_status", _fake_status)
     with pytest.raises(SystemExit) as excinfo:
-        await mod.run_compile_cmd(
-            None, wait=True, wait_timeout=0.01, poll_interval=0.0
-        )
+        await mod.run_compile_cmd(None, wait=True, wait_timeout=0.01, poll_interval=0.0)
     assert excinfo.value.code == 5
 
 
@@ -175,7 +173,12 @@ async def test_compile_no_workspace_resolved_exits_2(
     # config without default_workspace + clear env
     config_dir = temp_config_dir["config_dir"]
     (config_dir / "config.yaml").write_text(
-        "server_url: http://localhost:8000\nllm:\n  provider: anthropic\n  model: claude-sonnet-4-6\n  api_key_env: ANTHROPIC_API_KEY\n  timeout_seconds: 120\n"
+        "server_url: http://localhost:8000\n"
+        "llm:\n"
+        "  provider: anthropic\n"
+        "  model: claude-sonnet-4-6\n"
+        "  api_key_env: ANTHROPIC_API_KEY\n"
+        "  timeout_seconds: 120\n"
     )
     _seed_auth(temp_config_dir["config_dir"])
     monkeypatch.delenv("KEENYSPACE_WORKSPACE", raising=False)

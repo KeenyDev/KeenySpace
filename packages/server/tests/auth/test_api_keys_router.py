@@ -1,9 +1,8 @@
-"""AUTH-03/09 router-level integration tests (P-9 ASGITransport).
+"""API-key CRUD router tests, driven end-to-end through ASGITransport.
 
-Tests run via `api_key_client` fixture которая инжектит test-only AuthenticationBackend
-(заменяет CompositeAuthBackend на authenticated stub). Wave 1 первоначально использовал
-этот fixture как middleware-bypass поверх переходного backend; Wave 2 cutover оставил
-fixture для router-level изоляции (быстрая обратная связь без полной chain).
+The `api_key_client` fixture swaps CompositeAuthBackend for a test-only authenticated
+AuthenticationBackend, so these tests isolate the router from the full resolver chain;
+the chain itself is covered by integration/test_auth_bypass.py.
 """
 
 from __future__ import annotations
@@ -70,14 +69,14 @@ async def test_delete_random_id_returns_404(api_key_client) -> None:
 
 
 def test_admin_stub_removed(app) -> None:
-    """F-02: /v1/admin/api-keys убран из main.py (T-3-15)."""
+    """The superseded /v1/admin/api-keys stub is no longer mounted on the app."""
     paths = {r.path for r in app.routes if hasattr(r, "path")}
     assert "/v1/admin/api-keys" not in paths
 
 
 @pytest.mark.asyncio
 async def test_audit_log_minted_no_plaintext(api_key_client, pg_url) -> None:
-    """T-3-10: audit_log payload не содержит plaintext."""
+    """The mint audit_log payload contains neither the plaintext key nor its body."""
     import sqlalchemy as sa
     from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -100,11 +99,17 @@ async def test_audit_log_minted_no_plaintext(api_key_client, pg_url) -> None:
 
 @pytest.mark.asyncio
 async def test_audit_log_revoked_payload_shape(api_key_client, pg_url) -> None:
-    """T-3-16: revoke audit payload содержит только key_id."""
+    """The revoke audit row carries the key_id and nothing else.
+
+    Pinning the exact key set, not just the presence of key_id, is what makes this a
+    regression test: a future payload that also recorded the prefix, last4 or the key
+    material itself would still "name the key_id" and would pass a laxer assertion.
+    """
     import sqlalchemy as sa
     from sqlalchemy.ext.asyncio import create_async_engine
 
     minted = (await api_key_client.post("/v1/api/auth/api-keys", json={"name": "r"})).json()
+    plaintext = minted["key"]
     resp = await api_key_client.delete(f"/v1/api/auth/api-keys/{minted['id']}")
     assert resp.status_code == 204
     engine = create_async_engine(pg_url)
@@ -114,4 +119,9 @@ async def test_audit_log_revoked_payload_shape(api_key_client, pg_url) -> None:
         )
         payloads = [row[0] for row in r]
     await engine.dispose()
-    assert any(p.get("key_id") == minted["id"] for p in payloads)
+
+    assert len(payloads) == 1, f"expected exactly one revoke audit row, got {payloads}"
+    payload = payloads[0]
+    assert set(payload) == {"key_id"}, f"revoke payload grew new fields: {sorted(payload)}"
+    assert payload["key_id"] == minted["id"]
+    assert plaintext[len("ks_live_") :] not in str(payload)

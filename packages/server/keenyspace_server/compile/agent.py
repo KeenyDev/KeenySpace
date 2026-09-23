@@ -46,6 +46,7 @@ def resolve_model_id(model_name: str, provider: str = "anthropic") -> str:
     """
     return model_name if ":" in model_name else f"{provider}:{model_name}"
 
+
 compile_agent: Agent[CompileDeps, CompilePlan] = Agent(
     DEFAULT_MODEL,
     output_type=CompilePlan,
@@ -59,9 +60,7 @@ compile_agent: Agent[CompileDeps, CompilePlan] = Agent(
 async def read_page(ctx: RunContext[CompileDeps], path: str) -> str:
     """Read an existing vault page. Returns full markdown content including frontmatter."""
     try:
-        fd, _resolved = await asyncio.to_thread(
-            open_workspace_page, ctx.deps.ws_root, path
-        )
+        fd, _resolved = await asyncio.to_thread(open_workspace_page, ctx.deps.ws_root, path)
     except (UnsafePath, FileNotFoundError) as exc:
         raise ModelRetry(
             f"Page not found or unsafe: {path!r}. Use search() to find existing pages."
@@ -111,12 +110,10 @@ _COMPILE_DENYLIST_EXACT: frozenset[str] = frozenset({"CLAUDE.md"})
 
 
 @compile_agent.output_validator
-async def _validate_compile_plan(
-    ctx: RunContext[CompileDeps], plan: CompilePlan
-) -> CompilePlan:
+async def _validate_compile_plan(ctx: RunContext[CompileDeps], plan: CompilePlan) -> CompilePlan:
     """Reject denylist paths early so they consume a model retry, not a tool budget.
 
-    Defense-in-depth: the coordinator's apply_plan denylist gate (Plan 03) is the
+    Defense-in-depth: the coordinator's apply_plan denylist gate is the
     authoritative final check; this validator catches denylist violations before
     they cost extra tool calls or reach disk.
     """
@@ -130,9 +127,7 @@ async def _validate_compile_plan(
                     "_templates/, raw/, and CLAUDE.md are writable."
                 )
         if path_lower in {e.casefold() for e in _COMPILE_DENYLIST_EXACT}:
-            raise ModelRetry(
-                f"PageOp.path {op.path!r} targets a protected file (CLAUDE.md)."
-            )
+            raise ModelRetry(f"PageOp.path {op.path!r} targets a protected file (CLAUDE.md).")
     return plan
 
 

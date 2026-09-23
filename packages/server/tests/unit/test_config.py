@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 
 def _set_auth_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Wave 0 introduced required AuthSettings fields (OIDC + pepper + session secret).
+    """AuthSettings requires the OIDC fields, the API-key pepper and the session secret.
     Tests that build Settings() must populate the full contract."""
     monkeypatch.setenv(
         "KEENYSPACE_AUTH__OIDC_ISSUER_URL",
@@ -126,3 +126,50 @@ def test_auto_migrate_truthy_one(monkeypatch):
         assert s.auto_migrate is True
     finally:
         cfg.get_settings.cache_clear()
+
+
+def _auth_settings(**overrides: str):
+    from keenyspace_server.config import AuthSettings
+
+    base = {
+        "oidc_issuer_url": "http://localhost:9999/application/o/test/",
+        "oidc_client_id": "test-client",
+        "oidc_client_secret": "client-secret-32-bytes-long-padded-xxxx",
+        "oidc_redirect_uri": "http://localhost:8000/v1/api/auth/callback",
+        "oidc_post_logout_redirect_uri": "http://localhost:8000/",
+        "session_secret_key": "test-session-secret-32chars-pad!",
+        "api_key_pepper": "test-pepper-32chars-padded-here!",
+    }
+    base.update(overrides)
+    return AuthSettings(**base)
+
+
+def test_secrets_are_masked_in_repr() -> None:
+    auth = _auth_settings()
+    assert "test-pepper" not in repr(auth)
+    assert auth.api_key_pepper.get_secret_value() == "test-pepper-32chars-padded-here!"
+
+
+def test_strong_secrets_emit_no_warning() -> None:
+    import structlog.testing
+
+    with structlog.testing.capture_logs() as logs:
+        _auth_settings()
+    assert [e for e in logs if e["event"].startswith("config.secret")] == []
+
+
+def test_placeholder_and_short_secrets_warn_without_leaking_value() -> None:
+    import structlog.testing
+
+    with structlog.testing.capture_logs() as logs:
+        auth = _auth_settings(
+            session_secret_key="session-secret-replace-me-min-32-bytes-xxxxxx",
+            api_key_pepper="short",
+        )
+    assert auth.api_key_pepper.get_secret_value() == "short"
+    events = {(e["event"], e["setting"]) for e in logs if e["event"].startswith("config.secret")}
+    assert events == {
+        ("config.secret.placeholder", "session_secret_key"),
+        ("config.secret.too_short", "api_key_pepper"),
+    }
+    assert all(v != "short" and "replace-me" not in str(v) for e in logs for v in e.values())

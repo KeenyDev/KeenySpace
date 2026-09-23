@@ -12,19 +12,26 @@ from pytest_httpserver import HTTPServer
 
 def _reload() -> object:
     import keenyspace.paths as paths_mod
+
     importlib.reload(paths_mod)
     import keenyspace.config as cfg
+
     importlib.reload(cfg)
     cfg.get_client_settings.cache_clear()  # type: ignore[attr-defined]
     import keenyspace.auth as auth_mod
+
     importlib.reload(auth_mod)
     import keenyspace.clients.http as http_mod
+
     importlib.reload(http_mod)
     import keenyspace.pull.manifest as mf
+
     importlib.reload(mf)
     import keenyspace.pull.stash as st
+
     importlib.reload(st)
     import keenyspace.cli.pull as pull_mod
+
     return importlib.reload(pull_mod)
 
 
@@ -62,9 +69,7 @@ async def test_force_stashes_modified_files_with_unified_diff(
     (target / "concepts" / "foo.md").write_bytes(local_body)
 
     server_manifest = {"concepts/foo.md": _sha256(server_body)}
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": server_manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
     httpserver.expect_request(
@@ -102,9 +107,7 @@ async def test_force_applies_server_canon(
     (target / "concepts" / "foo.md").write_bytes(b"# stale local bytes\n")
 
     server_manifest = {"concepts/foo.md": _sha256(server_body)}
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": server_manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
     httpserver.expect_request(
@@ -136,9 +139,7 @@ async def test_force_does_not_erase_out_of_scope_files(
     (target / "gone.md").write_bytes(b"# local-only md\n")  # in scope; not on server
 
     server_manifest: dict[str, str] = {}
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": server_manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
 
@@ -166,14 +167,12 @@ async def test_force_writes_slug_marker_and_local_state(
     target.mkdir(parents=True)
     server_body = b"# only file\n"
     server_manifest = {"index.md": _sha256(server_body)}
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": server_manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/pages-raw/index.md"
-    ).respond_with_data(server_body, content_type="application/octet-stream")
+    httpserver.expect_request("/v1/api/workspaces/demo/pages-raw/index.md").respond_with_data(
+        server_body, content_type="application/octet-stream"
+    )
 
     pull_mod = _reload()
     await pull_mod.run_pull("demo", force=True, target=target)  # type: ignore[attr-defined]

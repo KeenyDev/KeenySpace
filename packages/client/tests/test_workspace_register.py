@@ -61,9 +61,9 @@ def test_register_writes_map_entry(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/myws", method="GET"
-    ).respond_with_json({"slug": "myws", "status": "active"})
+    httpserver.expect_request("/v1/api/workspaces/myws", method="GET").respond_with_json(
+        {"slug": "myws", "status": "active"}
+    )
     server_url = _ipv4(httpserver.url_for(""))
     main_mod = _reload_and_get_app(server_url)
     target = str(temp_config_dir["home"] / "projects" / "repo")
@@ -84,9 +84,9 @@ def test_register_preserves_existing_keys(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/ws2", method="GET"
-    ).respond_with_json({"slug": "ws2", "status": "active"})
+    httpserver.expect_request("/v1/api/workspaces/ws2", method="GET").respond_with_json(
+        {"slug": "ws2", "status": "active"}
+    )
     server_url = _ipv4(httpserver.url_for(""))
     existing_path = str(temp_config_dir["home"] / "old")
     map_path = temp_config_dir["config_dir"] / "workspace-map.yaml"
@@ -109,9 +109,9 @@ def test_register_idempotent_same_slug(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/myws", method="GET"
-    ).respond_with_json({"slug": "myws", "status": "active"})
+    httpserver.expect_request("/v1/api/workspaces/myws", method="GET").respond_with_json(
+        {"slug": "myws", "status": "active"}
+    )
     server_url = _ipv4(httpserver.url_for(""))
     target = str(temp_config_dir["home"] / "repo")
     map_path = temp_config_dir["config_dir"] / "workspace-map.yaml"
@@ -132,9 +132,9 @@ def test_register_refuses_different_slug_without_force(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/new-ws", method="GET"
-    ).respond_with_json({"slug": "new-ws", "status": "active"})
+    httpserver.expect_request("/v1/api/workspaces/new-ws", method="GET").respond_with_json(
+        {"slug": "new-ws", "status": "active"}
+    )
     server_url = _ipv4(httpserver.url_for(""))
     target = str(temp_config_dir["home"] / "repo")
     map_path = temp_config_dir["config_dir"] / "workspace-map.yaml"
@@ -155,9 +155,9 @@ def test_register_force_overwrites(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/new-ws", method="GET"
-    ).respond_with_json({"slug": "new-ws", "status": "active"})
+    httpserver.expect_request("/v1/api/workspaces/new-ws", method="GET").respond_with_json(
+        {"slug": "new-ws", "status": "active"}
+    )
     server_url = _ipv4(httpserver.url_for(""))
     target = str(temp_config_dir["home"] / "repo")
     map_path = temp_config_dir["config_dir"] / "workspace-map.yaml"
@@ -178,9 +178,9 @@ def test_register_marker_writes_json_not_map(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/myws", method="GET"
-    ).respond_with_json({"slug": "myws", "status": "active"})
+    httpserver.expect_request("/v1/api/workspaces/myws", method="GET").respond_with_json(
+        {"slug": "myws", "status": "active"}
+    )
     server_url = _ipv4(httpserver.url_for(""))
     target = temp_config_dir["home"] / "repo"
     target.mkdir(parents=True, exist_ok=True)
@@ -224,9 +224,9 @@ def test_register_404_exits_2_no_write(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/ghost", method="GET"
-    ).respond_with_json({"detail": "not found"}, status=404)
+    httpserver.expect_request("/v1/api/workspaces/ghost", method="GET").respond_with_json(
+        {"detail": "not found"}, status=404
+    )
     server_url = _ipv4(httpserver.url_for(""))
     target = str(temp_config_dir["home"] / "repo")
     main_mod = _reload_and_get_app(server_url)
@@ -246,9 +246,9 @@ def test_register_uses_git_toplevel_when_no_path(
     tmp_path: Path,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/myws", method="GET"
-    ).respond_with_json({"slug": "myws", "status": "active"})
+    httpserver.expect_request("/v1/api/workspaces/myws", method="GET").respond_with_json(
+        {"slug": "myws", "status": "active"}
+    )
     server_url = _ipv4(httpserver.url_for(""))
     git_root = tmp_path / "myrepo"
     git_root.mkdir()

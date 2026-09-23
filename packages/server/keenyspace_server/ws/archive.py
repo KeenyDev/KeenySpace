@@ -8,12 +8,12 @@ from uuid import UUID
 
 import structlog
 import yaml
+from keenyspace_shared.atomic_write import write_atomic
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from keenyspace_server.auth.audit import write_audit
 from keenyspace_server.db.models import Workspace
-from keenyspace_server.fs.atomic import write_atomic
 from keenyspace_server.observability.metrics import WORKSPACE_ARCHIVE_TOTAL
 
 log = structlog.get_logger(__name__)
@@ -45,9 +45,7 @@ async def archive_workspace(
         .returning(Workspace.uuid)
     )
     if result.scalar_one_or_none() is None:
-        raise ArchiveConflictError(
-            f"workspace {slug!r} not found or already archived"
-        )
+        raise ArchiveConflictError(f"workspace {slug!r} not found or already archived")
     await write_audit(
         session,
         actor_sub=actor_sub,
@@ -57,9 +55,9 @@ async def archive_workspace(
     )
     await session.commit()
 
-    # D-03 step 3: best-effort .keenyspace/config.yaml mirror; DB is source of
-    # truth. Failures are logged and swallowed; `keenyspace doctor` (Phase 5)
-    # reconciles drift.
+    # Best-effort .keenyspace/config.yaml mirror; the DB is the source of
+    # truth. Failures are logged and swallowed; `keenyspace doctor` reconciles
+    # the drift.
     _mirror_archived_at_to_config(ws_dir, now)
 
     WORKSPACE_ARCHIVE_TOTAL.labels(action="archive").inc()
@@ -82,13 +80,11 @@ async def unarchive_workspace(
         .returning(Workspace.uuid)
     )
     if status_result.scalar_one_or_none() is None:
-        raise ArchiveConflictError(
-            f"workspace {slug!r} not found or not archived"
-        )
+        raise ArchiveConflictError(f"workspace {slug!r} not found or not archived")
 
     # Selective compile-state reset: only clear pause if reason was 'archived'.
     # Other pause reasons (daily_ceiling, loop_abort, ...) survive unarchive and
-    # require explicit POST /compile/resume to clear (D-01 unarchive semantics).
+    # require an explicit POST /compile/resume to clear.
     await session.execute(
         update(Workspace)
         .where(
@@ -120,9 +116,7 @@ def _mirror_archived_at_to_config(ws_dir: Path, archived_at: datetime | None) ->
     config_path = ws_dir / ".keenyspace" / "config.yaml"
     try:
         if not config_path.exists():
-            log.warning(
-                "workspace.config_yaml_missing", path=str(config_path)
-            )
+            log.warning("workspace.config_yaml_missing", path=str(config_path))
             return
         with contextlib.suppress(Exception):
             existing_text = config_path.read_text()

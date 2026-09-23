@@ -1,4 +1,4 @@
-"""AUTH-02 JwksCache unit tests — TTL + stale + force-refresh."""
+"""JwksCache: TTL expiry, serving stale keys on failure, throttled force-refresh."""
 
 from __future__ import annotations
 
@@ -14,7 +14,13 @@ SAMPLE_JWKS = {
             "kid": "k1",
             "use": "sig",
             "alg": "RS256",
-            "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+            "n": (
+                "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhD"
+                "R1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6C"
+                "f0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1"
+                "n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1"
+                "jF44-csFCur-kEgU8awapJzKnqDKgw"
+            ),
             "e": "AQAB",
         }
     ]
@@ -42,7 +48,7 @@ async def test_get_fetches_on_cache_miss() -> None:
 
 @pytest.mark.asyncio
 async def test_ttl_expiry_triggers_refetch() -> None:
-    """AUTH-02: TTL 1h — после "истечения" — refetch."""
+    """Inside the 1h TTL the cached keyset is reused; past it, the JWKS is refetched."""
     provider = AsyncMock(return_value="https://idp/jwks")
     cache = JwksCache(provider, ttl_seconds=3600, min_retry_interval_seconds=30)
     fake_resp = MagicMock()
@@ -91,13 +97,42 @@ async def test_force_refresh_on_unknown_kid() -> None:
     with patch("keenyspace_server.auth.jwks_cache.httpx.AsyncClient") as mock_cli:
         mock_cli.return_value.__aenter__.return_value.get = AsyncMock(return_value=fake_resp)
         await cache.get()
+        cache._last_attempt_at -= 31
         await cache.force_refresh()
         assert mock_cli.call_count == 2
 
 
 @pytest.mark.asyncio
+async def test_force_refresh_throttled_within_min_retry_interval() -> None:
+    provider = AsyncMock(return_value="https://idp/jwks")
+    cache = JwksCache(provider, ttl_seconds=3600, min_retry_interval_seconds=30)
+    fake_resp = MagicMock()
+    fake_resp.json.return_value = SAMPLE_JWKS
+    fake_resp.raise_for_status = MagicMock()
+    with patch("keenyspace_server.auth.jwks_cache.httpx.AsyncClient") as mock_cli:
+        mock_cli.return_value.__aenter__.return_value.get = AsyncMock(return_value=fake_resp)
+        first = await cache.get()
+        results = [await cache.force_refresh() for _ in range(20)]
+        assert mock_cli.call_count == 1
+    assert all(r is first for r in results)
+
+
+@pytest.mark.asyncio
+async def test_force_refresh_throttled_after_failure() -> None:
+    provider = AsyncMock(return_value="https://idp/jwks")
+    cache = JwksCache(provider, ttl_seconds=3600, min_retry_interval_seconds=30)
+    with patch("keenyspace_server.auth.jwks_cache.httpx.AsyncClient") as mock_cli:
+        mock_cli.return_value.__aenter__.return_value.get = AsyncMock(
+            side_effect=Exception("idp down")
+        )
+        assert await cache.force_refresh() is None
+        assert await cache.force_refresh() is None
+        assert mock_cli.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_empty_cache_and_idp_down_returns_none() -> None:
-    """D-17: cold boot + IdP down → 401 path (None for OIDC bearer)."""
+    """Cold boot with the IdP unreachable returns None, so the OIDC bearer path 401s."""
     provider = AsyncMock(return_value="https://idp/jwks")
     cache = JwksCache(provider, ttl_seconds=3600, min_retry_interval_seconds=30)
     with patch("keenyspace_server.auth.jwks_cache.httpx.AsyncClient") as mock_cli:

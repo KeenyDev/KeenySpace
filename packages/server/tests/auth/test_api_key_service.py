@@ -1,7 +1,8 @@
-"""AUTH-03 ApiKeyService — unit tests (P-13 + P-9).
+"""ApiKeyService module surface: key-generation helpers and constructor.
 
-RED gate: imports + pure-fn helpers ДОЛЖНЫ существовать перед service GREEN.
-Полные unit tests (mint/verify/list/revoke/debounce) добавляются task 03-02-04.
+Pins the key shape produced by the pure helpers — a 43-char body, the ks_live_ prefix,
+and a SHA-256 lookup hash over body+pepper. Behavioural mint/verify/list/revoke coverage
+lives in test_api_keys_router.py and test_api_key_authz.py.
 """
 
 from __future__ import annotations

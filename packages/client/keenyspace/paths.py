@@ -1,10 +1,9 @@
 """XDG-respecting filesystem layout for the keenyspace CLI.
 
-Per 05-RESEARCH §8 Option B: ignore `platformdirs` on macOS to keep the
-Linux-style `~/.config/keenyspace` / `~/.local/state/keenyspace` layout
-locked by PROJECT.md. The XDG env-var helpers exist so the test fixture
-`temp_config_dir` (Plan 01) can isolate the layout without monkeypatching
-`Path.home`.
+`platformdirs` is deliberately not used: the same Linux-style
+`~/.config/keenyspace` / `~/.local/state/keenyspace` layout applies on every
+platform, macOS included. The XDG env-var helpers exist so the test fixture
+`temp_config_dir` can isolate the layout without monkeypatching `Path.home`.
 """
 
 from __future__ import annotations
@@ -39,6 +38,6 @@ DAEMON_SOCK = STATE_DIR / "daemon.sock"
 DAEMON_LOG = STATE_DIR / "daemon.log"
 DAEMON_PID = STATE_DIR / "daemon.pid"
 DROPPED_JSON = STATE_DIR / "dropped.json"
-INGEST_CURSORS = STATE_DIR / "ingest-cursors.json"
+INGEST_STATE = STATE_DIR / "ingest-state.json"
 
 DEFAULT_PULL_ROOT = Path.home() / "keenyspace"

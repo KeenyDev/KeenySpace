@@ -57,8 +57,7 @@ async def run_restore(archive: Path, force: bool) -> None:
         console.print(json.dumps(_error_payload(response), indent=2))
         if not force:
             console.print(
-                "\nUse [yellow]--force[/yellow] to override "
-                "(irreversible — wipes existing data)."
+                "\nUse [yellow]--force[/yellow] to override (irreversible — wipes existing data)."
             )
         sys.exit(EXIT_REFUSED)
     if response.status_code >= 400:

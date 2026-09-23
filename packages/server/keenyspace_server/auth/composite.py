@@ -1,10 +1,18 @@
-"""CompositeAuthBackend — resolver chain (cookie > api_key > oidc_bearer).
+"""CompositeAuthBackend — the server's only authentication backend.
 
-D-19: единственный production auth backend Phase 3+.
-Wave 2: только api_key resolver активен; cookie + oidc_bearer заполняются в Wave 3.
+Credentials are resolved in order: session cookie, then API key, then OIDC
+bearer token.
+
+Every OIDC principal whose token carries a groups claim refreshes the owner's
+group snapshot, which is what API keys are authorized with; a token older than
+the stored snapshot is authorized with the snapshot's groups instead of its
+own. `required_group` applies to every principal: token groups for OIDC, the
+snapshot for API keys.
 """
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 import structlog
 from starlette.authentication import (
@@ -15,6 +23,7 @@ from starlette.authentication import (
 from starlette.requests import HTTPConnection
 
 from keenyspace_server.auth.api_keys import ApiKeyService
+from keenyspace_server.auth.group_snapshot import GroupSnapshotStore
 from keenyspace_server.auth.oidc import OidcClient
 from keenyspace_server.auth.user import User
 
@@ -23,7 +32,6 @@ log = structlog.get_logger(__name__)
 PUBLIC_PREFIXES = (
     "/healthz",
     "/readyz",
-    "/metrics",
     "/.well-known/oauth-protected-resource",
     "/v1/api/auth/discovery",
     "/v1/api/auth/login",
@@ -38,10 +46,12 @@ class CompositeAuthBackend(AuthenticationBackend):
         oidc_client: OidcClient | None,
         api_key_service: ApiKeyService,
         required_group: str = "",
+        group_snapshots: GroupSnapshotStore | None = None,
     ) -> None:
         self._oidc: OidcClient | None = oidc_client
         self._keys = api_key_service
         self._required_group = required_group
+        self._snapshots = group_snapshots
 
     async def authenticate(self, conn: HTTPConnection) -> tuple[AuthCredentials, User] | None:
         path = conn.url.path
@@ -55,8 +65,25 @@ class CompositeAuthBackend(AuthenticationBackend):
         )
         if user is None:
             raise AuthenticationError("no valid credentials")
-        if self._required_group and user.source == "oidc" and self._required_group not in user.groups:
-            log.warning("auth.group_gate.denied", sub=user.sub)
+        if (
+            self._snapshots is not None
+            and user.source == "oidc"
+            and user.groups_seen_at is not None
+        ):
+            snapshot, wrote = await self._snapshots.observe(user)
+            if wrote:
+                self._keys.forget_user(user.sub)
+            if snapshot.seen_at > user.groups_seen_at:
+                # A newer IdP assertion (or an admin revoke-all) supersedes the
+                # groups this still-valid older token carries.
+                user = replace(user, groups=list(snapshot.groups), groups_seen_at=snapshot.seen_at)
+        if self._required_group and self._required_group not in user.groups:
+            log.warning(
+                "auth.group_gate.denied",
+                sub=user.sub,
+                source=user.source,
+                reason=_group_denial_reason(user),
+            )
             raise AuthenticationError("forbidden")
         return (AuthCredentials(["authenticated"]), user)
 
@@ -87,3 +114,9 @@ class CompositeAuthBackend(AuthenticationBackend):
         if token.startswith("ks_live_"):
             return None
         return await self._oidc.validate_access_token(token, conn=None)
+
+
+def _group_denial_reason(user: User) -> str:
+    if user.groups_seen_at is not None:
+        return "not_in_group"
+    return "no_group_snapshot" if user.source == "api_key" else "no_groups_claim"

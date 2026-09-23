@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 
 import uvicorn
@@ -24,9 +25,12 @@ from .api import (
     workspace_manifest,
     workspaces,
 )
+from .api import api_keys as api_keys_router
+from .api import auth as auth_router
 from .api import compile as compile_router
 from .auth.api_keys import ApiKeyService
 from .auth.composite import CompositeAuthBackend
+from .auth.group_snapshot import GroupSnapshotStore
 from .auth.middleware import on_auth_error
 from .auth.oidc import OidcClient, build_oauth
 from .auth.refresh_dep import refresh_if_needed
@@ -36,8 +40,7 @@ from .fs.bootstrap import ensure_fs_root_layout
 from .mcp.server import build_mcp, build_mcp_skeleton
 from .observability.logging import configure_logging
 from .observability.metrics import build_instrumentator
-from .routers import api_keys as api_keys_router
-from .routers import auth as auth_router
+from .observability.metrics_server import metrics_server_lifespan
 from .wal.locks import WorkspaceLockRegistry
 
 
@@ -60,6 +63,7 @@ def build_app() -> FastAPI:
             from .compile.scheduler import build_scheduler
 
             coordinator = CompileCoordinator(settings=settings.compile)
+            await coordinator.reconcile_interrupted()
             app.state.compile_coordinator = coordinator
             set_coordinator(coordinator)
 
@@ -86,16 +90,16 @@ def build_app() -> FastAPI:
             try:
                 yield
             finally:
-                # APScheduler 3.x shutdown() is sync; D-11 prose "await" wording
-                # is descriptive intent, not a literal API call — see RESEARCH §2.
+                # APScheduler 3.x shutdown() is synchronous: nothing to await.
                 scheduler.shutdown(wait=True)
+                await coordinator.aclose()
                 set_coordinator(None)
                 app.state.compile_coordinator = None
                 app.state.scheduler = None
 
     app = FastAPI(
         title="KeenySpace",
-        lifespan=combine_lifespans(app_lifespan, mcp_app.lifespan),
+        lifespan=combine_lifespans(metrics_server_lifespan, app_lifespan, mcp_app.lifespan),
     )
 
     app.state.settings = settings
@@ -106,12 +110,21 @@ def build_app() -> FastAPI:
     # mount-level request resolves the same attributes (out-of-scope baseline gap).
     mcp_app.state.settings = settings
     mcp_app.state.wal_locks = app.state.wal_locks
+    snapshot_max_age_days = settings.auth.api_key_group_snapshot_max_age_days
     api_key_service = ApiKeyService(
-        pepper=settings.auth.api_key_pepper,
+        pepper=settings.auth.api_key_pepper.get_secret_value(),
+        db_factory=get_db_session,
+        debounce_seconds=settings.auth.api_key_last_used_debounce_seconds,
+        group_snapshot_max_age=(
+            timedelta(days=snapshot_max_age_days) if snapshot_max_age_days is not None else None
+        ),
+    )
+    app.state.api_key_service = api_key_service
+    group_snapshots = GroupSnapshotStore(
         db_factory=get_db_session,
         debounce_seconds=settings.auth.api_key_last_used_debounce_seconds,
     )
-    app.state.api_key_service = api_key_service
+    app.state.group_snapshots = group_snapshots
 
     oauth = build_oauth(settings)
     app.state.oauth = oauth
@@ -122,13 +135,14 @@ def build_app() -> FastAPI:
         oidc_client=oidc_client,
         api_key_service=api_key_service,
         required_group=settings.auth.required_group,
+        group_snapshots=group_snapshots,
     )
     # Middleware order — Starlette wraps in reverse-add order; LAST add_middleware
     # = OUTERMOST = runs first on inbound request. SessionMiddleware must run
     # BEFORE AuthenticationMiddleware so request.session is populated before
     # CompositeAuthBackend.authenticate (which delegates to OidcClient using
     # request session under /v1/api/auth). Path-scoped to /v1/api/auth so the
-    # cookie does not leak onto /v1/mcp or other surfaces (T-3-37).
+    # cookie does not leak onto /v1/mcp or other surfaces.
     app.add_middleware(
         AuthenticationMiddleware,
         backend=composite_backend,
@@ -136,7 +150,7 @@ def build_app() -> FastAPI:
     )
     app.add_middleware(
         SessionMiddleware,
-        secret_key=settings.auth.session_secret_key,
+        secret_key=settings.auth.session_secret_key.get_secret_value(),
         session_cookie="ks_oidc_session",
         max_age=900,
         same_site="lax",
@@ -146,10 +160,10 @@ def build_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(well_known.router)
-    # D-03 inline auto-refresh: cookie-path browser sessions get inline rotate
-    # via FastAPI dependency when ks_at exp is within refresh_threshold_seconds.
-    # NOT applied to auth router (login/callback public; refresh/logout self-manage
-    # cookies) nor to MCP mount (API-key path per D-13).
+    # Cookie-authenticated browser sessions get their access token rotated
+    # inline when ks_at expires within refresh_threshold_seconds. NOT applied
+    # to the auth router (login/callback are public; refresh/logout manage
+    # their own cookies) nor to the MCP mount, where agents use API keys.
     protected_deps = [Depends(refresh_if_needed)]
     app.include_router(
         workspaces.router,
@@ -201,14 +215,10 @@ def build_app() -> FastAPI:
         prefix="/v1/api/auth/api-keys",
         dependencies=protected_deps,
     )
-    # CR-02: admin routes (backup / restore) wipe and replace the entire
-    # deployment. Even though Phase 3 AUTH-09 framed v1 as "all authed see
-    # all", the destructive-write half is qualitatively different — any
-    # leaked ks_live_* token would let an attacker DELETE FROM workspaces /
-    # users / api_keys and rmtree the fs_root. Until users.is_admin lands
-    # (deferred to v1.5 multi-tenant work), require an explicit server-side
-    # opt-in env flag so misconfigured self-hosts don't expose /v1/admin/*
-    # by default. Disabled-by-default reduces blast radius.
+    # Admin routes (backup / restore) wipe and replace the entire
+    # deployment. They are mounted only behind an explicit server-side opt-in
+    # env flag, and every route additionally requires membership in
+    # auth.admin_group (auth/admin_gate.py).
     if os.environ.get("KEENYSPACE_ADMIN_API_ENABLED") == "1":
         app.include_router(
             admin.router,
@@ -219,7 +229,7 @@ def build_app() -> FastAPI:
 
     app.mount("/v1/mcp", mcp_app)
 
-    build_instrumentator().instrument(app).expose(app)
+    build_instrumentator().instrument(app)
 
     return app
 

@@ -13,9 +13,10 @@ Three rules govern every upgrade:
 | Component | Pin | Notes |
 |-----------|-----|-------|
 | KeenySpace | SemVer release tag (`ghcr.io/keenydev/keenyspace:0.1.0-alpha.1`, or built from a tagged source checkout) | Pre-release tags are never published as `latest` |
-| Authentik | `ghcr.io/goauthentik/server:2026.2` | Server and worker must always run the same tag |
+| Authentik | `ghcr.io/goauthentik/server:2026.2.7` | Server and worker must always run the same tag |
 | Postgres (KeenySpace) | `postgres:17.2-alpine` | Major Postgres upgrades require a dump/restore cycle, not just a tag bump |
-| Postgres (Authentik) | `postgres:16-alpine` | Same caveat |
+| Postgres (Authentik) | `postgres:16.15-alpine` | Same caveat |
+| Caddy | `caddy:2.11.4-alpine` | |
 
 Never switch any of these to `:latest`. An unattended `docker compose pull` against
 `latest` is how self-hosted stacks break overnight.
@@ -71,7 +72,8 @@ Before ANY image tag change:
 keenyspace backup --output pre-upgrade-$(date +%Y%m%d).tar.gz
 ```
 
-This requires the admin API flag and a logged-in session — full procedure in
+This requires the admin API flag, a logged-in session and, on servers that include the
+admin group check, membership in `keenyspace-admins` — full procedure in
 [docs/backup-restore.md](backup-restore.md). Store the tarball off-host before
 proceeding. If the upgrade goes wrong, this tarball is your only way back across a
 schema migration.
@@ -79,3 +81,49 @@ schema migration.
 If you want the gate rehearsed end-to-end (backup, full wipe, restore, assert),
 run the drill described in [docs/backup-restore.md](backup-restore.md) against a
 throwaway environment.
+
+## Upgrading an existing install: secrets, env split, group-gated API keys
+
+This release makes compose fail closed on missing secrets, stops loading `deploy/.env`
+into the KeenySpace container, removes Redis, and gates API keys and the admin API on
+Authentik groups. Work through the list in order; details live in the linked sections.
+
+1. **Back up** with the old version still running (gate above). The old server does not
+   check the admin group yet, so the admin API flag and a login are enough.
+2. **Carry over existing secret values into `deploy/.env` before running
+   `gen-secrets.sh`.** `POSTGRES_PASSWORD`, `AUTHENTIK_DB_PASSWORD` and
+   `AUTHENTIK_SECRET_KEY` are baked into the existing volumes; new values lock the stack
+   out of its own data. Changing `KEENYSPACE_API_KEY_PEPPER` invalidates every
+   `ks_live_*` key. Old default values and the per-secret consequences: "Existing
+   installs" in [docs/install.md](install.md#existing-installs-upgrading-from-a-compose-file-with-replace-me-defaults).
+3. **Run `./deploy/gen-secrets.sh`** to fill in only the keys that are still missing.
+4. **Move app overrides.** Every `KEENYSPACE_*` override other than the secrets and the
+   variables in the `deploy/.env` table of [docs/install.md](install.md#3-configure)
+   moves to `deploy/keenyspace.env`; left in `deploy/.env` it is silently ignored.
+5. **Prepare Authentik groups.** The gate is on by default
+   (`KEENYSPACE_AUTH__REQUIRED_GROUP=keenyspace-users`). Add every user to
+   `keenyspace-users`, and the operators who run backups, restores and offboarding to
+   `keenyspace-admins` (the blueprint creates both groups and adds `akadmin`; see
+   [docs/oidc-authentik-setup.md](oidc-authentik-setup.md#group-entry-gate)).
+6. **Pull and start** with orphan cleanup, which removes the old `authentik-redis`
+   container:
+
+   ```bash
+   docker compose -f deploy/docker-compose.yml up -d --build --remove-orphans
+   ```
+
+   Alembic migration `0004` runs automatically on boot. It adds `users.groups` /
+   `users.groups_seen_at` (the group snapshot) and `api_keys.expires_at`. It does not
+   touch existing keys.
+7. **Owners re-authenticate once.** Existing API keys have no group snapshot after the
+   upgrade. With the entry gate on (the default) they are rejected with 401, and the
+   admin API refuses them with 403 regardless, until their owner makes one OIDC request
+   whose token carries the `groups` claim: `keenyspace login` followed by any command,
+   or an MCP client signing in via OAuth. The key itself stays
+   the same; nothing needs to be re-minted.
+8. **Update monitoring.** Prometheus metrics moved off the API port to an internal
+   listener on `keenyspace:9100` (`KEENYSPACE_METRICS_PORT`, `0` disables it);
+   `/metrics` on port 8000 is no longer public. `deploy/observability.yml` already
+   scrapes the new target; adjust any external scraper.
+9. **Verify** `curl http://localhost:8000/healthz`, `keenyspace workspace list`, and one
+   MCP call with an existing key.

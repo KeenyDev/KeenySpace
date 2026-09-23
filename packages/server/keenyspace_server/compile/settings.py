@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CompileSettings(BaseModel):
@@ -16,13 +16,20 @@ class CompileSettings(BaseModel):
     # Daily OUTPUT-token budget per workspace ("space"). Compile pauses with reason
     # 'space_budget_exceeded' once a workspace's summed compile output for the current
     # UTC day crosses this; the 00:00 UTC reset (reset_daily_ceiling) clears the tally
-    # and resumes, and manual resume() clears it too. NO per-compile-run output throttle.
+    # and resumes; manual resume() does NOT clear it. NO per-compile-run output throttle.
     max_output_tokens_per_space: int = 128_000
+    # Upper bound on the serialized WAL fed to one pass (always at least one entry);
+    # a larger backlog is compiled in consecutive chunks so it never exceeds the
+    # per-pass token budget and pauses the workspace in a loop.
+    max_slice_bytes: int = 40_000
     max_seconds: int = 180
+    # Server-wide cap on compile agents running at once; the backstop otherwise fans
+    # out one LLM call per active workspace simultaneously.
+    max_concurrent_passes: int = Field(default=2, ge=1)
     daily_token_ceiling: int = 500_000
     # Provider is pydantic-ai's provider id (anthropic | openai | google-gla | ...).
     # `model` is the bare model name; the agent joins them as "<provider>:<model>".
-    # A fully-qualified `model` ("openai:gpt-4o") overrides `provider`. Anthropic
-    # stays the default (D-04); other providers are opt-in via KEENYSPACE_COMPILE__*.
+    # A fully-qualified `model` ("openai:gpt-4o") overrides `provider`. Other
+    # providers are opt-in via KEENYSPACE_COMPILE__*.
     provider: str = "anthropic"
     model: str = "claude-sonnet-4-6"

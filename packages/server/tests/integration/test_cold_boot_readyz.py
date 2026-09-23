@@ -1,8 +1,8 @@
-"""AUTH-02 Success Criterion #5 + D-15 + Pitfall 12 + T-3-40.
+"""Readiness must not depend on the IdP being up.
 
-`/readyz` остаётся 200 при unreachable Authentik. Discovery — lazy
-(`Authlib.load_server_metadata` НЕ вызывается из `/readyz`). respx подтверждает
-zero HTTP egress на oidc_issuer_url во время readiness probe.
+`/readyz` stays 200 while Authentik is unreachable, because OIDC discovery is lazy:
+`Authlib.load_server_metadata` is never called from the probe. respx confirms zero HTTP
+egress to oidc_issuer_url for the duration of a readiness probe.
 """
 
 from __future__ import annotations
@@ -15,11 +15,11 @@ from httpx import ASGITransport, AsyncClient
 
 @pytest_asyncio.fixture
 async def app_with_unreachable_authentik(fs_root, pg_url, monkeypatch):
-    """App fixture с oidc_issuer_url, указывающим на NONEXISTENT host.
+    """App whose oidc_issuer_url points at a host that does not exist.
 
-    Postgres reachable (pg_url из conftest), FS root writeable (tmp_path),
-    IdP — заведомо мёртвый. /readyz должен возвращать 200, потому что D-15
-    запрещает touch'ить IdP в health/readiness probe path.
+    Postgres is reachable (pg_url from conftest) and the FS root is writeable (tmp_path);
+    only the IdP is dead. /readyz must still answer 200, because the health and readiness
+    probe paths are forbidden from touching the IdP at all.
     """
     monkeypatch.setenv("KEENYSPACE_DB__URL", pg_url)
     monkeypatch.setenv("KEENYSPACE_FS__ROOT", str(fs_root))
@@ -62,7 +62,7 @@ async def app_with_unreachable_authentik(fs_root, pg_url, monkeypatch):
 async def test_readyz_green_when_idp_unreachable(
     app_with_unreachable_authentik,
 ) -> None:
-    """Success Criterion #5: cold boot, /readyz 200 даже если Authentik dead."""
+    """Cold boot with Authentik dead: /readyz is still 200."""
     transport = ASGITransport(app=app_with_unreachable_authentik, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         resp = await c.get("/readyz")
@@ -76,10 +76,10 @@ async def test_readyz_green_when_idp_unreachable(
 async def test_readyz_makes_no_oidc_http_call(
     app_with_unreachable_authentik,
 ) -> None:
-    """T-3-40 + Open Question #8 ratification.
+    """A readiness probe makes no HTTP call to the IdP.
 
-    respx mocks любой HTTP request к oidc_issuer_url. /readyz НЕ должен
-    trigger discovery (lazy) → respx route НЕ должен быть called.
+    respx intercepts any request to oidc_issuer_url; because discovery is lazy, /readyz
+    must never trigger it, so the respx route must stay uncalled.
     """
     route = respx.get(url__startswith="http://nonexistent-idp.invalid/").mock()
     transport = ASGITransport(app=app_with_unreachable_authentik, raise_app_exceptions=False)
@@ -94,7 +94,7 @@ async def test_readyz_makes_no_oidc_http_call(
 async def test_healthz_green_when_idp_unreachable(
     app_with_unreachable_authentik,
 ) -> None:
-    """Sanity: /healthz (liveness) тоже green — independent of IdP."""
+    """Sanity: /healthz (liveness) is green too — independent of the IdP."""
     transport = ASGITransport(app=app_with_unreachable_authentik, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         resp = await c.get("/healthz")

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import os
+import secrets
 import zipfile
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from typing import BinaryIO
 
 import structlog
+
+from keenyspace_server.ws.thread_slots import LoopLocalSemaphore, run_in_thread_slot
 
 log = structlog.get_logger(__name__)
 
@@ -15,10 +18,12 @@ _STREAM_CHUNK_BYTES = 64 * 1024
 
 MAX_EXPORT_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 
-# G-4: shared with ws/import_.py via direct import. Editing this set updates
+# Shared with ws/import_.py via direct import. Editing this set updates
 # both export's skip rule and import's top-level user-state reject rule —
 # keeping the export/import dotfile policy symmetric by construction.
 EXPORT_SKIP_TOP_LEVEL: frozenset[str] = frozenset({".obsidian", "logs"})
+
+_EXPORT_BUILD_SLOTS = LoopLocalSemaphore(2)
 
 
 class ExportTooLargeError(ValueError):
@@ -27,7 +32,7 @@ class ExportTooLargeError(ValueError):
 
 def iter_workspace_files(ws_dir: Path) -> Iterator[tuple[Path, Path]]:
     """Yield (absolute_path, relative_path) tuples for every file in `ws_dir`
-    that belongs in the canonical export per D-06.
+    that belongs in the canonical export.
 
     Includes: every regular file at any depth EXCEPT entries whose top-level
     relative component is in `EXPORT_SKIP_TOP_LEVEL`.
@@ -57,24 +62,48 @@ def _total_uncompressed_bytes(ws_dir: Path) -> int:
     return total
 
 
-def _build_zip_sync(ws_dir: Path) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(
-        buf, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
-    ) as zf:
-        for absolute, rel in iter_workspace_files(ws_dir):
-            zf.write(absolute, rel.as_posix())
-    return buf.getvalue()
+def _build_zip_sync(ws_dir: Path, tmp_root: Path) -> tuple[BinaryIO, int]:
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    path = tmp_root / f"export_{secrets.token_hex(8)}.zip"
+    fh = path.open("x+b")
+    try:
+        # Unlink while the handle is open: the inode lives exactly as long as
+        # the handle, so a crash, cancelled build, or client disconnect can
+        # never leave a stray zip behind under fs_root.
+        path.unlink()
+        with zipfile.ZipFile(fh, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            for absolute, rel in iter_workspace_files(ws_dir):
+                zf.write(absolute, rel.as_posix())
+        size = fh.tell()
+        fh.seek(0)
+    except BaseException:
+        fh.close()
+        raise
+    return fh, size
+
+
+async def _stream_and_close(fh: BinaryIO) -> AsyncIterator[bytes]:
+    try:
+        while chunk := await asyncio.to_thread(fh.read, _STREAM_CHUNK_BYTES):
+            yield chunk
+    finally:
+        fh.close()
+
+
+def _close_built_zip(built: tuple[BinaryIO, int]) -> None:
+    built[0].close()
 
 
 async def build_workspace_zip(
-    ws_dir: Path, *, enforce_size_cap: bool = True
+    ws_dir: Path, *, tmp_root: Path, enforce_size_cap: bool = True
 ) -> AsyncIterator[bytes]:
     """Build the workspace zip and yield it as 64 KB chunks.
 
-    Building runs inside `asyncio.to_thread` to avoid blocking the event loop
-    during `zipfile.ZIP_DEFLATED` compression (RESEARCH §Pitfall 2, §Anti-
-    Patterns). When `enforce_size_cap` is true, raises `ExportTooLargeError`
+    The zip is built inside `asyncio.to_thread` into an anonymous temp file
+    under `tmp_root`, so memory stays flat regardless of workspace size. At
+    most two builds run concurrently per event loop; a build whose caller is
+    cancelled keeps its slot until the thread finishes, then closes its
+    handle. When `enforce_size_cap` is true, raises `ExportTooLargeError`
     BEFORE building if the uncompressed total exceeds
     `MAX_EXPORT_UNCOMPRESSED_BYTES`.
     """
@@ -86,18 +115,17 @@ async def build_workspace_zip(
                 f"export cap {MAX_EXPORT_UNCOMPRESSED_BYTES} bytes"
             )
 
-    data = await asyncio.to_thread(_build_zip_sync, ws_dir)
-
-    async def _generate() -> AsyncIterator[bytes]:
-        offset = 0
-        length = len(data)
-        while offset < length:
-            yield data[offset : offset + _STREAM_CHUNK_BYTES]
-            offset += _STREAM_CHUNK_BYTES
+    fh, zip_bytes = await run_in_thread_slot(
+        _EXPORT_BUILD_SLOTS,
+        _build_zip_sync,
+        ws_dir,
+        tmp_root,
+        on_abandoned=_close_built_zip,
+    )
 
     log.info(
         "workspace.export.zip_built",
         ws_dir=str(ws_dir),
-        zip_bytes=len(data),
+        zip_bytes=zip_bytes,
     )
-    return _generate()
+    return _stream_and_close(fh)

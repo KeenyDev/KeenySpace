@@ -12,7 +12,7 @@ def hash_plan(wal_first_id: str, wal_last_id: str, plan: CompilePlan) -> str:
     Frontmatter keys are sorted before hashing so dict-insertion-order variation across
     agent retries does not break idempotency. Use `model_dump(mode='json')` +
     `json.dumps(sort_keys=True)` — never `model_dump_json()` which does not sort nested
-    `dict[str, Any]` fields. See RESEARCH.md §Pattern 4.
+    `dict[str, Any]` fields.
     """
     plan_dict = plan.model_dump(mode="json")
     for op in plan_dict.get("ops", []):

@@ -24,8 +24,8 @@ async def _probe_healthz(client: httpx.AsyncClient) -> str:
 
 
 async def _probe_identity(client: httpx.AsyncClient) -> str:
-    # No /v1/api/auth/me endpoint on the server (Phase 3 — see 05-02-SUMMARY);
-    # GET /v1/api/auth/api-keys returns 200 if authed, 401 otherwise.
+    # The server has no /v1/api/auth/me endpoint; GET /v1/api/auth/api-keys
+    # returns 200 when authenticated and 401 otherwise.
     try:
         resp = await client.get("/v1/api/auth/api-keys")
     except httpx.RequestError as exc:

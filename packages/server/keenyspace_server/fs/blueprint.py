@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import shutil
 from datetime import UTC, datetime
@@ -9,10 +10,38 @@ from uuid import UUID
 
 import structlog
 import yaml
+from keenyspace_shared.atomic_write import write_atomic
 
-from .atomic import write_atomic
+from .layout import workspace_root
 
 log = structlog.get_logger(__name__)
+
+BLUEPRINT_NAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
+_BLUEPRINT_NAME_RE = re.compile(BLUEPRINT_NAME_PATTERN)
+
+
+class InvalidBlueprintNameError(ValueError):
+    """The blueprint name is not a single safe path segment."""
+
+
+class UnknownBlueprintError(LookupError):
+    """No blueprint directory with the requested name exists under fs_root."""
+
+
+def _resolve_blueprint_dir(fs_root: Path, blueprint_name: str) -> Path:
+    if not _BLUEPRINT_NAME_RE.fullmatch(blueprint_name):
+        raise InvalidBlueprintNameError(blueprint_name)
+    blueprints_root = (fs_root / "blueprints").resolve()
+    src = (blueprints_root / blueprint_name).resolve()
+    if not src.is_relative_to(blueprints_root) or not src.is_dir():
+        raise UnknownBlueprintError(blueprint_name)
+    return src
+
+
+def _ignore_symlinks(directory: str, names: list[str]) -> set[str]:
+    # copytree(symlinks=False) would copy a link's target, letting a link planted
+    # in a blueprint (e.g. via restore) pull files from outside it into a vault.
+    return {name for name in names if os.path.islink(os.path.join(directory, name))}
 
 
 def _move_instructions_to_keenyspace(ws_dir: Path) -> None:
@@ -43,8 +72,14 @@ def clone_default_blueprint(
     slug: str = "",
     display_name: str = "",
 ) -> Path:
-    src = fs_root / "blueprints" / blueprint_name
-    final = fs_root / "workspaces" / str(ws_uuid)
+    """Copy blueprint ``blueprint_name`` into a new workspace directory.
+
+    Raises:
+        InvalidBlueprintNameError: the name is not a single ``[a-z0-9_-]`` segment.
+        UnknownBlueprintError: no such blueprint directory exists.
+    """
+    src = _resolve_blueprint_dir(fs_root, blueprint_name)
+    final = workspace_root(fs_root, ws_uuid)
     tmp = final.parent / f"{ws_uuid}.tmp.{secrets.token_hex(8)}"
 
     shutil.copytree(
@@ -52,7 +87,7 @@ def clone_default_blueprint(
         tmp,
         symlinks=False,
         dirs_exist_ok=False,
-        ignore_dangling_symlinks=True,
+        ignore=_ignore_symlinks,
     )
     os.replace(tmp, final)
     # Write workspace config BEFORE moving _instructions/ so that a failure

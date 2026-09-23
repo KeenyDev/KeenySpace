@@ -12,13 +12,17 @@ from pytest_httpserver import HTTPServer
 
 def _reload() -> object:
     import keenyspace.paths as paths_mod
+
     importlib.reload(paths_mod)
     import keenyspace.config as cfg
+
     importlib.reload(cfg)
     cfg.get_client_settings.cache_clear()  # type: ignore[attr-defined]
     import keenyspace.auth as auth_mod
+
     importlib.reload(auth_mod)
     import keenyspace.cli.login as login_mod
+
     return importlib.reload(login_mod)
 
 
@@ -43,9 +47,7 @@ def _setup_server(
     url = server_url or _ipv4(httpserver.url_for(""))
     root = url.rstrip("/")
     issuer = f"{root}/application/o/keenyspace"
-    httpserver.expect_request("/v1/api/auth/discovery").respond_with_json(
-        {"issuer": issuer}
-    )
+    httpserver.expect_request("/v1/api/auth/discovery").respond_with_json({"issuer": issuer})
     httpserver.expect_request(
         "/application/o/keenyspace/.well-known/openid-configuration"
     ).respond_with_json(
@@ -77,9 +79,7 @@ async def test_login_happy_path(
     monkeypatch.setenv("KEENYSPACE_SERVER_URL", server_url)
     login_mod = _reload()
 
-    httpserver.expect_request(
-        "/application/o/device/", method="POST"
-    ).respond_with_json(
+    httpserver.expect_request("/application/o/device/", method="POST").respond_with_json(
         {
             "device_code": "dev",
             "user_code": "ABCD-1234",
@@ -110,9 +110,9 @@ async def test_login_happy_path(
             status=200,
         )
 
-    httpserver.expect_request(
-        "/application/o/token/", method="POST"
-    ).respond_with_handler(_token_handler)
+    httpserver.expect_request("/application/o/token/", method="POST").respond_with_handler(
+        _token_handler
+    )
 
     await login_mod.run_login(server_url=None)  # type: ignore[attr-defined]
 
@@ -140,9 +140,7 @@ async def test_login_slow_down_increases_interval(
 
     monkeypatch.setattr("keenyspace.cli.login.asyncio.sleep", _record_sleep)
 
-    httpserver.expect_request(
-        "/application/o/device/", method="POST"
-    ).respond_with_json(
+    httpserver.expect_request("/application/o/device/", method="POST").respond_with_json(
         {
             "device_code": "dev",
             "user_code": "U-X",
@@ -164,9 +162,9 @@ async def test_login_slow_down_increases_interval(
             json.dumps({"access_token": "tok", "expires_in": 60}), status=200
         )
 
-    httpserver.expect_request(
-        "/application/o/token/", method="POST"
-    ).respond_with_handler(_token_handler)
+    httpserver.expect_request("/application/o/token/", method="POST").respond_with_handler(
+        _token_handler
+    )
 
     await login_mod.run_login(server_url=None)  # type: ignore[attr-defined]
 
@@ -183,9 +181,7 @@ async def test_login_access_denied_raises(
     monkeypatch.setenv("KEENYSPACE_SERVER_URL", server_url)
     login_mod = _reload()
 
-    httpserver.expect_request(
-        "/application/o/device/", method="POST"
-    ).respond_with_json(
+    httpserver.expect_request("/application/o/device/", method="POST").respond_with_json(
         {
             "device_code": "dev",
             "user_code": "U",
@@ -194,9 +190,9 @@ async def test_login_access_denied_raises(
             "interval": 1,
         }
     )
-    httpserver.expect_request(
-        "/application/o/token/", method="POST"
-    ).respond_with_json({"error": "access_denied"}, status=400)
+    httpserver.expect_request("/application/o/token/", method="POST").respond_with_json(
+        {"error": "access_denied"}, status=400
+    )
 
     with pytest.raises(RuntimeError, match="access_denied"):
         await login_mod.run_login(server_url=None)  # type: ignore[attr-defined]
@@ -211,9 +207,7 @@ async def test_login_expired_token_raises(
     monkeypatch.setenv("KEENYSPACE_SERVER_URL", server_url)
     login_mod = _reload()
 
-    httpserver.expect_request(
-        "/application/o/device/", method="POST"
-    ).respond_with_json(
+    httpserver.expect_request("/application/o/device/", method="POST").respond_with_json(
         {
             "device_code": "dev",
             "user_code": "U",
@@ -222,9 +216,9 @@ async def test_login_expired_token_raises(
             "interval": 1,
         }
     )
-    httpserver.expect_request(
-        "/application/o/token/", method="POST"
-    ).respond_with_json({"error": "expired_token"}, status=400)
+    httpserver.expect_request("/application/o/token/", method="POST").respond_with_json(
+        {"error": "expired_token"}, status=400
+    )
 
     with pytest.raises(RuntimeError, match="expired_token"):
         await login_mod.run_login(server_url=None)  # type: ignore[attr-defined]
@@ -247,13 +241,9 @@ async def test_login_deadline_exceeded_raises_timeout(
             step_state["ticks"] += 1
             return 100.0 if step_state["ticks"] > 2 else 0.0
 
-    monkeypatch.setattr(
-        "keenyspace.cli.login.asyncio.get_event_loop", lambda: _FakeLoop()
-    )
+    monkeypatch.setattr("keenyspace.cli.login.asyncio.get_event_loop", lambda: _FakeLoop())
 
-    httpserver.expect_request(
-        "/application/o/device/", method="POST"
-    ).respond_with_json(
+    httpserver.expect_request("/application/o/device/", method="POST").respond_with_json(
         {
             "device_code": "dev",
             "user_code": "U",
@@ -262,9 +252,9 @@ async def test_login_deadline_exceeded_raises_timeout(
             "interval": 1,
         }
     )
-    httpserver.expect_request(
-        "/application/o/token/", method="POST"
-    ).respond_with_json({"error": "authorization_pending"}, status=400)
+    httpserver.expect_request("/application/o/token/", method="POST").respond_with_json(
+        {"error": "authorization_pending"}, status=400
+    )
 
     with pytest.raises(TimeoutError, match="expired"):
         await login_mod.run_login(server_url=None)  # type: ignore[attr-defined]
@@ -291,9 +281,9 @@ async def test_logout_clears_auth_json_and_calls_server(
         captured["auth"] = request.headers.get("Authorization", "")  # type: ignore[attr-defined]
         return Response(json.dumps({"ok": True}), status=200)  # type: ignore[return-value]
 
-    httpserver.expect_request(
-        "/v1/api/auth/logout", method="POST"
-    ).respond_with_handler(_logout_handler)
+    httpserver.expect_request("/v1/api/auth/logout", method="POST").respond_with_handler(
+        _logout_handler
+    )
 
     await login_mod.run_logout()  # type: ignore[attr-defined]
 

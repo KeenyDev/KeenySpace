@@ -1,8 +1,8 @@
 """Local sha256 manifest + diff against server manifest.
 
-Scope (D-13): .md anywhere + raw/ subtree. Files outside this scope are IGNORED —
-they MUST NEVER be reported as `removed` or `added`. Pitfall #9: a stray
-`notes.txt` in the vault root must not trigger a dirty state.
+Scope: .md anywhere plus the raw/ subtree. Files outside this scope are
+IGNORED — they MUST NEVER be reported as `removed` or `added`; a stray
+`notes.txt` in the vault root must not put the vault in a dirty state.
 """
 
 from __future__ import annotations
@@ -38,13 +38,34 @@ def hash_local_tree(root: Path) -> dict[str, str]:
             continue
         if not (rel.endswith(".md") or parts[0] == "raw"):
             continue
-        out[rel] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        with path.open("rb") as fh:
+            out[rel] = "sha256:" + hashlib.file_digest(fh, "sha256").hexdigest()
     return out
 
 
-def diff_manifests(
-    local: dict[str, str], server: dict[str, str]
-) -> ManifestDiff:
+class UnsafeManifestPathError(ValueError):
+    """A manifest key that would resolve outside the vault root."""
+
+
+def resolve_vault_path(root: Path, rel: str) -> Path:
+    """Map a server-supplied manifest key to a path strictly inside ``root``.
+
+    Manifest keys are untrusted input (malicious server / MITM): an absolute key
+    or a ``..`` segment would otherwise let a pull overwrite arbitrary files such
+    as ``~/.zshrc``. Resolving both sides also refuses writes through a symlink
+    that points outside the vault.
+    """
+    if not rel or "\\" in rel or "\x00" in rel or rel.startswith("/"):
+        raise UnsafeManifestPathError(rel)
+    if any(part in ("", ".", "..") for part in rel.split("/")):
+        raise UnsafeManifestPathError(rel)
+    candidate = root / rel
+    if not candidate.resolve().is_relative_to(root.resolve()):
+        raise UnsafeManifestPathError(rel)
+    return candidate
+
+
+def diff_manifests(local: dict[str, str], server: dict[str, str]) -> ManifestDiff:
     diff = ManifestDiff()
     for path, server_hash in server.items():
         if path not in local:

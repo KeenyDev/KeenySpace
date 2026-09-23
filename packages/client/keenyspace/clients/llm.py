@@ -1,12 +1,13 @@
 """Server-driven pydantic-ai Agent runner.
 
-Phase 5 D-02/D-04/D-05: a CLI command pulls Instructions from the server
-(prompt + tool_whitelist + budgets), then runs a pydantic-ai Agent against
-the configured provider (Anthropic default). The agent's MCP toolset is
-exposed via MCPServerStreamableHTTP — `process_tool_call` enforces the
-tool_whitelist client-side (Pitfall #7 defence-in-depth).
+A CLI command pulls Instructions from the server (prompt + tool_whitelist +
+budgets), then runs a pydantic-ai Agent against the configured provider
+(Anthropic default). The agent's MCP toolset is exposed via
+MCPServerStreamableHTTP — `process_tool_call` enforces the tool_whitelist
+client-side as well, so a server-side mistake cannot widen what the agent may
+call.
 
-Budget triple-guard mirrors the Phase 2 compile pattern:
+Budget triple-guard, mirroring the server-side compile agent:
   - UsageLimits (request_limit + total_tokens_limit)
   - asyncio.wait_for (wall-clock seconds)
   - LoopDetector capability (same tool+args_hash 3x → ModelRetry → abort)

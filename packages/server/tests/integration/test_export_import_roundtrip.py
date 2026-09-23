@@ -1,8 +1,9 @@
-"""Phase 4 export->import roundtrip + import error-path integration tests
-(WS-06 / D-07 / D-08).
+"""Workspace export -> import roundtrip, plus the import error paths.
 
-Full lifespan + real Postgres; uses ASGITransport with API-key Bearer auth.
+Full lifespan against a real Postgres, driven over ASGITransport with API-key Bearer
+auth.
 """
+
 from __future__ import annotations
 
 import io
@@ -20,9 +21,7 @@ PG_URL = os.environ.get("KEENYSPACE_DB__URL")
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
 ]
 
 
@@ -45,7 +44,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
 
-    pepper = get_settings().auth.api_key_pepper
+    pepper = get_settings().auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
@@ -81,9 +80,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
 
 async def _seed_workspace(client: AsyncClient) -> str:
     slug = f"src-{uuid4().hex[:8]}"
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
     assert resp.status_code == 201, resp.text
     return slug
 
@@ -97,7 +94,11 @@ def _make_zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
 
 
 async def test_export_import_roundtrip_preserves_pages(app, pg_url) -> None:  # type: ignore[no-untyped-def]
-    """Source-of-truth test for ROADMAP Phase 4 success criterion #4."""
+    """Export a workspace, import it under a new slug: file bytes and audit trail survive.
+
+    The imported workspace gets a fresh uuid, sample.md comes back byte-identical, and
+    both workspace.exported and workspace.imported land in the audit log.
+    """
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.models import Workspace
     from keenyspace_server.db.session import get_db_session
@@ -118,9 +119,7 @@ async def test_export_import_roundtrip_preserves_pages(app, pg_url) -> None:  # 
             slug_a = await _seed_workspace(client)
             async with get_db_session() as session:
                 ws_a = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug_a)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug_a))
                 ).scalar_one()
             settings = get_settings()
             ws_a_dir = settings.fs.root / "workspaces" / str(ws_a.uuid)
@@ -147,9 +146,7 @@ async def test_export_import_roundtrip_preserves_pages(app, pg_url) -> None:  # 
 
             async with get_db_session() as session:
                 ws_b = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug_b)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug_b))
                 ).scalar_one()
             ws_b_dir = settings.fs.root / "workspaces" / str(ws_b.uuid)
             assert (ws_b_dir / "sample.md").read_bytes() == sample_body
@@ -158,10 +155,7 @@ async def test_export_import_roundtrip_preserves_pages(app, pg_url) -> None:  # 
 
             async with get_db_session() as session:
                 actions = {
-                    r.action
-                    for r in (
-                        await session.execute(select(AuditLog))
-                    ).scalars().all()
+                    r.action for r in (await session.execute(select(AuditLog))).scalars().all()
                 }
             assert "workspace.exported" in actions
             assert "workspace.imported" in actions
@@ -181,9 +175,7 @@ async def test_import_path_traversal_returns_422(app, pg_url) -> None:  # type: 
             if health.status_code in (500, 503):
                 pytest.skip("server not ready")
 
-            zb = _make_zip_bytes(
-                [("../../../etc/passwd", b"x"), ("index.md", b"# x")]
-            )
+            zb = _make_zip_bytes([("../../../etc/passwd", b"x"), ("index.md", b"# x")])
             resp = await client.post(
                 "/v1/api/workspaces/import",
                 data={"slug": "trav"},
@@ -234,9 +226,7 @@ async def test_import_bad_zip_returns_422(app, pg_url) -> None:  # type: ignore[
             resp = await client.post(
                 "/v1/api/workspaces/import",
                 data={"slug": "bogus"},
-                files={
-                    "file": ("bad.zip", b"not a zip", "application/zip")
-                },
+                files={"file": ("bad.zip", b"not a zip", "application/zip")},
             )
             assert resp.status_code == 422
             assert resp.json()["detail"]["code"] == "bad_zip"
@@ -267,6 +257,63 @@ async def test_import_slug_conflict_returns_409(app, pg_url) -> None:  # type: i
             assert resp.json()["detail"]["code"] == "workspace_slug_conflict"
 
 
+async def test_import_releases_db_connection_and_reaps_dir_on_slug_race(  # type: ignore[no-untyped-def]
+    app, pg_url, monkeypatch
+) -> None:
+    import keenyspace_server.ws.import_ as import_mod
+    from keenyspace_server.config import get_settings
+    from keenyspace_server.db.models import Workspace
+    from keenyspace_server.db.session import get_db_session, get_engine
+
+    await _reset_schema(pg_url)
+    async with app.router.lifespan_context(app):
+        _, plaintext = await _seed_api_key_post_lifespan()
+        engine = get_engine()
+        assert engine is not None
+        workspaces_dir = get_settings().fs.root / "workspaces"
+        real_validate = import_mod.validate_import_zip
+        checked_out_during_validation: list[int] = []
+        slug = f"race-{uuid4().hex[:8]}"
+
+        async def _racing_validate(zip_path):  # type: ignore[no-untyped-def]
+            checked_out_during_validation.append(engine.pool.checkedout())
+            async with get_db_session() as session:
+                session.add(
+                    Workspace(
+                        uuid=uuid4(),
+                        slug=slug,
+                        display_name=slug,
+                        blueprint_ref="default@v0.1",
+                        status="active",
+                        created_at=datetime.now(UTC),
+                        archived_at=None,
+                    )
+                )
+                await session.commit()
+            return await real_validate(zip_path)
+
+        monkeypatch.setattr(import_mod, "validate_import_zip", _racing_validate)
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
+            before = set(workspaces_dir.iterdir()) if workspaces_dir.exists() else set()
+            resp = await client.post(
+                "/v1/api/workspaces/import",
+                data={"slug": slug},
+                files={
+                    "file": ("a.zip", _make_zip_bytes([("index.md", b"# x")]), "application/zip")
+                },
+            )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"]["code"] == "workspace_slug_conflict"
+        assert checked_out_during_validation == [0]
+        assert set(workspaces_dir.iterdir()) == before
+
+
 async def test_import_assigns_new_uuid_ignoring_source(app, pg_url) -> None:  # type: ignore[no-untyped-def]
     from keenyspace_server.db.models import Workspace
     from keenyspace_server.db.session import get_db_session
@@ -285,14 +332,8 @@ async def test_import_assigns_new_uuid_ignoring_source(app, pg_url) -> None:  # 
                 pytest.skip("server not ready")
 
             source_uuid = "11111111-1111-1111-1111-111111111111"
-            cfg = (
-                f"uuid: {source_uuid}\n"
-                "slug: original\n"
-                "blueprint: custom-bp@v0.2\n"
-            ).encode()
-            zb = _make_zip_bytes(
-                [(".keenyspace/config.yaml", cfg), ("index.md", b"# x")]
-            )
+            cfg = (f"uuid: {source_uuid}\nslug: original\nblueprint: custom-bp@v0.2\n").encode()
+            zb = _make_zip_bytes([(".keenyspace/config.yaml", cfg), ("index.md", b"# x")])
             slug = f"new-{uuid4().hex[:8]}"
             resp = await client.post(
                 "/v1/api/workspaces/import",
@@ -306,9 +347,7 @@ async def test_import_assigns_new_uuid_ignoring_source(app, pg_url) -> None:  # 
 
             async with get_db_session() as session:
                 ws = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug))
                 ).scalar_one()
             assert ws.blueprint_ref == "custom-bp@v0.2"
 
@@ -332,14 +371,14 @@ async def test_import_unauthenticated_401(app, pg_url) -> None:  # type: ignore[
 
 
 async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> None:  # type: ignore[no-untyped-def]
-    """G-4 regression: the canonical default-blueprint workspace roundtrips.
+    """Regression: an untouched default-blueprint workspace roundtrips unchanged.
 
-    Reproduces UAT Test 13. Before the G-4 fix, this test returns 422
-    hidden_entry on raw/.gitkeep. After the fix, it returns 201 and the
-    nested dotfile survives.
+    Import used to reject any dotfile entry outright, which made the canonical blueprint
+    fail its own roundtrip with 422 hidden_entry on raw/.gitkeep. The rule is now scoped
+    to top-level dotfiles, so the nested .gitkeep survives and import answers 201.
 
-    Uses pytest.fail on non-200 health (NOT pytest.skip) -- the original UAT
-    bug was hidden by tests that skipped past 5xx responses.
+    Fails (rather than skips) on a non-200 /healthz: the original bug stayed hidden
+    because the surrounding tests skipped past 5xx responses.
     """
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.models import AuditLog, Workspace
@@ -356,24 +395,19 @@ async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> No
         ) as client:
             health = await client.get("/healthz")
             if health.status_code != 200:
-                pytest.fail(
-                    f"/healthz not green: status={health.status_code} "
-                    f"body={health.text}"
-                )
+                pytest.fail(f"/healthz not green: status={health.status_code} body={health.text}")
 
             slug_a = await _seed_workspace(client)
 
             async with get_db_session() as session:
                 ws_a = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug_a)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug_a))
                 ).scalar_one()
             settings = get_settings()
             ws_a_dir = settings.fs.root / "workspaces" / str(ws_a.uuid)
             assert (ws_a_dir / "raw" / ".gitkeep").exists(), (
                 "default blueprint clone did not produce raw/.gitkeep -- "
-                "G-4 test prerequisite missing; investigate clone_default_blueprint"
+                "this test's prerequisite is missing; investigate clone_default_blueprint"
             )
 
             exp = await client.get(f"/v1/api/workspaces/{slug_a}/export")
@@ -386,17 +420,17 @@ async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> No
                     f"have regressed; namelist={sorted(names)}"
                 )
 
-            slug_b = f"g4-dst-{uuid4().hex[:8]}"
+            slug_b = f"blueprint-dst-{uuid4().hex[:8]}"
             imp = await client.post(
                 "/v1/api/workspaces/import",
                 data={"slug": slug_b},
                 files={"file": ("a.zip", zip_bytes, "application/zip")},
             )
             assert imp.status_code == 201, (
-                f"G-4 regression: import returned {imp.status_code} "
+                f"roundtrip regression: import returned {imp.status_code} "
                 f"body={imp.text}. Expected 201. The canonical default-"
-                f"blueprint zip contains raw/.gitkeep which was rejected by "
-                f"the pre-G-4 blanket hidden_entry rule."
+                f"blueprint zip contains raw/.gitkeep, which a blanket "
+                f"hidden_entry rule would reject."
             )
 
             payload = imp.json()
@@ -414,10 +448,48 @@ async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> No
 
             async with get_db_session() as session:
                 actions = {
-                    r.action
-                    for r in (
-                        await session.execute(select(AuditLog))
-                    ).scalars().all()
+                    r.action for r in (await session.execute(select(AuditLog))).scalars().all()
                 }
             assert "workspace.exported" in actions
             assert "workspace.imported" in actions
+
+
+async def test_import_rejects_oversized_content_length_before_reading_body(  # type: ignore[no-untyped-def]
+    app, pg_url, monkeypatch
+) -> None:
+    from starlette.requests import Request
+
+    async def _form_must_not_run(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("multipart body parsed despite oversized Content-Length")
+
+    await _reset_schema(pg_url)
+    async with app.router.lifespan_context(app):
+        _, plaintext = await _seed_api_key_post_lifespan()
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
+            health = await client.get("/healthz")
+            if health.status_code in (500, 503):
+                pytest.skip("server not ready")
+
+            from keenyspace_server.api import workspace_import
+
+            declared = (
+                workspace_import._MAX_COMPRESSED_UPLOAD_BYTES
+                + workspace_import._MULTIPART_OVERHEAD_BYTES
+                + 1
+            )
+            monkeypatch.setattr(Request, "form", _form_must_not_run)
+            resp = await client.post(
+                "/v1/api/workspaces/import",
+                content=b"--x--\r\n",
+                headers={
+                    "content-type": "multipart/form-data; boundary=x",
+                    "content-length": str(declared),
+                },
+            )
+            assert resp.status_code == 413, resp.text
+            assert resp.json()["detail"]["code"] == "upload_too_large"

@@ -1,12 +1,15 @@
-"""OIDC client wrapper — Authlib starlette_client + joserfc validation.
+"""OIDC client wrapper — Authlib starlette_client plus joserfc validation.
 
-D-10..D-13. Lazy discovery; JWKS validation via JwksCache; PKCE S256.
+Provider metadata is discovered lazily on first use, access tokens are
+validated against the keys served by JwksCache, and the authorization-code
+flow uses PKCE with S256.
 """
 
 from __future__ import annotations
 
 import contextlib
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -30,7 +33,7 @@ def build_oauth(settings: Settings) -> OAuth:
     oauth.register(
         name="authentik",
         client_id=settings.auth.oidc_client_id,
-        client_secret=settings.auth.oidc_client_secret,
+        client_secret=settings.auth.oidc_client_secret.get_secret_value(),
         server_metadata_url=(
             f"{settings.auth.metadata_issuer_url.rstrip('/')}/.well-known/openid-configuration"
         ),
@@ -113,6 +116,15 @@ class OidcClient:
             log.warning("auth.token.iss_mismatch", expected=self._issuer, got=iss_claim)
             return None
 
+        # Authentik mints the access token as the ID token's claims plus
+        # `scope`, `azp` and `uid` (IDToken.to_access_token); the ID token it
+        # returns next to it carries no `scope`. Requiring the claim keeps an ID
+        # token — same signer, issuer and audience — from being replayed as a
+        # bearer credential.
+        if not isinstance(decoded.claims.get("scope"), str):
+            log.warning("auth.token.not_access_token", reason="missing_scope_claim")
+            return None
+
         if conn is not None and self.is_near_expiry(
             decoded.claims, self._auth.refresh_threshold_seconds
         ):
@@ -125,15 +137,20 @@ class OidcClient:
         display_name = (
             decoded.claims.get("preferred_username") or decoded.claims.get("name") or sub_value
         )
-        raw_groups = decoded.claims.get("groups", [])
-        groups: list[str] = (
-            [g for g in raw_groups if isinstance(g, str)] if isinstance(raw_groups, list) else []
-        )
+        issued_at = datetime.fromtimestamp(float(decoded.claims["iat"]), UTC)
+        raw_groups = decoded.claims.get("groups")
+        groups_seen_at: datetime | None = None
+        groups: list[str] = []
+        if isinstance(raw_groups, list):
+            groups = [g for g in raw_groups if isinstance(g, str)]
+            groups_seen_at = issued_at
         return User(
             sub=sub_value,
             _display_name=str(display_name),
             source="oidc",
             groups=groups,
+            groups_seen_at=groups_seen_at,
+            issued_at=issued_at,
         )
 
     async def refresh(self, refresh_token: str) -> dict[str, Any] | None:
@@ -143,7 +160,9 @@ class OidcClient:
             log.warning("auth.token.refresh.metadata_failed")
             return None
         try:
-            async with AsyncOAuth2Client(self._client_id, self._auth.oidc_client_secret) as client:
+            async with AsyncOAuth2Client(
+                self._client_id, self._auth.oidc_client_secret.get_secret_value()
+            ) as client:
                 token = await client.refresh_token(token_endpoint, refresh_token=refresh_token)
                 if isinstance(token, dict):
                     return token

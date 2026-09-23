@@ -121,9 +121,7 @@ async def test_call_compile_returns_dict(
         return fake
 
     monkeypatch.setattr("keenyspace.clients.mcp.build_mcp_client", _builder)
-    out = await call_compile(
-        "http://localhost:8000", "ks_live_test", workspace="demo"
-    )
+    out = await call_compile("http://localhost:8000", "ks_live_test", workspace="demo")
     assert out == {"job_id": "j1", "status": "queued"}
     assert fake.last_call == ("compile", {"workspace": "demo"})
 
@@ -140,9 +138,7 @@ async def test_call_compile_status_returns_dict(
         return fake
 
     monkeypatch.setattr("keenyspace.clients.mcp.build_mcp_client", _builder)
-    out = await call_compile_status(
-        "http://localhost:8000", "ks_live_test", workspace="demo"
-    )
+    out = await call_compile_status("http://localhost:8000", "ks_live_test", workspace="demo")
     assert out["state"] == "running"
     assert fake.last_call == ("compile_status", {"workspace": "demo"})
 

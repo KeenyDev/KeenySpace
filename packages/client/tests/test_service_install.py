@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import platform
+import stat
 import subprocess
 from importlib.resources import files
 from pathlib import Path
@@ -16,25 +17,29 @@ import pytest
 
 def test_templates_packaged() -> None:
     """importlib.resources can read each template from the installed package."""
-    plist = files("keenyspace.templates").joinpath(
-        "launchd_com.keenyspace.daemon.plist"
-    ).read_text(encoding="utf-8")
+    plist = (
+        files("keenyspace.templates")
+        .joinpath("launchd_com.keenyspace.daemon.plist")
+        .read_text(encoding="utf-8")
+    )
     assert plist.startswith('<?xml version="1.0"'), "plist must be valid XML"
     assert "KeepAlive" in plist
     assert "__KEENYSPACE_BIN__" in plist
     assert "__HOME__" in plist
 
-    unit = files("keenyspace.templates").joinpath(
-        "systemd_keenyspace.service"
-    ).read_text(encoding="utf-8")
+    unit = (
+        files("keenyspace.templates")
+        .joinpath("systemd_keenyspace.service")
+        .read_text(encoding="utf-8")
+    )
     assert "[Service]" in unit
     assert "Restart=on-failure" in unit
     assert "__KEENYSPACE_BIN__" in unit
 
     settings = json.loads(
-        files("keenyspace.templates").joinpath("claude-code-settings.json").read_text(
-            encoding="utf-8"
-        )
+        files("keenyspace.templates")
+        .joinpath("claude-code-settings.json")
+        .read_text(encoding="utf-8")
     )
     assert "hooks" in settings
     assert "SessionStart" in settings["hooks"]
@@ -42,9 +47,9 @@ def test_templates_packaged() -> None:
 
 def test_claude_code_settings_template_registers_compact_matcher() -> None:
     settings = json.loads(
-        files("keenyspace.templates").joinpath("claude-code-settings.json").read_text(
-            encoding="utf-8"
-        )
+        files("keenyspace.templates")
+        .joinpath("claude-code-settings.json")
+        .read_text(encoding="utf-8")
     )
     session_start = settings["hooks"]["SessionStart"]
     compact_entries = [e for e in session_start if e.get("matcher") == "compact"]
@@ -76,9 +81,7 @@ def test_examples_match_templates(template_name: str, example_path: str) -> None
     CI invariant: when one is edited the other must follow. Prevents drift
     between documentation copies and the install-time source of truth.
     """
-    template = (
-        files("keenyspace.templates").joinpath(template_name).read_text(encoding="utf-8")
-    )
+    template = files("keenyspace.templates").joinpath(template_name).read_text(encoding="utf-8")
     # repo root = three levels up from this test file (tests/.. -> packages/client/.. -> repo)
     repo_root = Path(__file__).resolve().parents[3]
     example = (repo_root / example_path).read_text(encoding="utf-8")
@@ -130,9 +133,7 @@ def test_plist_renders_with_resolved_binary(
 
     service_mod._install_macos()  # type: ignore[attr-defined]
 
-    plist_dest = (
-        tmp_path / "Library" / "LaunchAgents" / "com.keenyspace.daemon.plist"
-    )
+    plist_dest = tmp_path / "Library" / "LaunchAgents" / "com.keenyspace.daemon.plist"
     content = plist_dest.read_text(encoding="utf-8")
     assert f"<string>{fake_bin.resolve()}</string>" in content
     assert "__KEENYSPACE_BIN__" not in content
@@ -142,6 +143,34 @@ def test_plist_renders_with_resolved_binary(
     assert captured[0][1] == "bootstrap"
     assert captured[0][2].startswith("gui/")
     assert captured[1][1] == "enable"
+
+
+def test_plist_written_owner_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import keenyspace.cli.service as service_mod
+
+    importlib.reload(service_mod)
+    fake_bin = tmp_path / "bin" / "keenyspace"
+    fake_bin.parent.mkdir(parents=True, exist_ok=True)
+    fake_bin.touch()
+    monkeypatch.setattr(service_mod.shutil, "which", lambda _bin: str(fake_bin))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        service_mod.subprocess,
+        "run",
+        lambda args, check=True: subprocess.CompletedProcess(args, 0),
+    )
+    plist_dest = tmp_path / "Library" / "LaunchAgents" / "com.keenyspace.daemon.plist"
+    plist_dest.parent.mkdir(parents=True)
+    plist_dest.write_text("stale world-readable copy", encoding="utf-8")
+    plist_dest.chmod(0o644)
+
+    service_mod._install_macos()  # type: ignore[attr-defined]
+
+    assert stat.S_IMODE(plist_dest.stat().st_mode) == 0o600
+    assert "__KEENYSPACE_BIN__" not in plist_dest.read_text(encoding="utf-8")
 
 
 def test_systemd_unit_renders_with_resolved_binary(
@@ -169,9 +198,7 @@ def test_systemd_unit_renders_with_resolved_binary(
 
     unit_dest = tmp_path / ".config" / "systemd" / "user" / "keenyspace.service"
     content = unit_dest.read_text(encoding="utf-8")
-    assert (
-        f"ExecStart={fake_bin.resolve()} daemon start --foreground" in content
-    )
+    assert f"ExecStart={fake_bin.resolve()} daemon start --foreground" in content
     assert "__KEENYSPACE_BIN__" not in content
     # Expect daemon-reload then enable --now
     assert captured[0] == ["systemctl", "--user", "daemon-reload"]

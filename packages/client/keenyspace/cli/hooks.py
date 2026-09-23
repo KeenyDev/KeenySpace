@@ -87,8 +87,7 @@ KEENYSPACE_HOOKS: dict[str, list[dict[str, Any]]] = {
 
 def _is_ours(group: dict[str, Any]) -> bool:
     return any(
-        str(obj.get("command", "")).startswith(OURS_PREFIX)
-        for obj in group.get("hooks", [])
+        str(obj.get("command", "")).startswith(OURS_PREFIX) for obj in group.get("hooks", [])
     )
 
 
@@ -108,9 +107,7 @@ def _prune(settings: dict[str, Any]) -> dict[str, Any]:
     if "hooks" not in settings:
         return settings
     for event in list(settings["hooks"].keys()):
-        settings["hooks"][event] = [
-            g for g in settings["hooks"][event] if not _is_ours(g)
-        ]
+        settings["hooks"][event] = [g for g in settings["hooks"][event] if not _is_ours(g)]
         if not settings["hooks"][event]:
             del settings["hooks"][event]
     if not settings["hooks"]:
@@ -153,7 +150,7 @@ def _load_settings(path: Path) -> dict[str, Any]:
 
 
 def _write_settings(path: Path, settings: dict[str, Any]) -> None:
-    from keenyspace.fs.atomic import write_atomic
+    from keenyspace_shared.atomic_write import write_atomic
 
     write_atomic(path, (json.dumps(settings, indent=2) + "\n").encode())
 

@@ -29,9 +29,7 @@ HAS_PG_DUMP = shutil.which("pg_dump") is not None and shutil.which("psql") is no
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
     pytest.mark.skipif(not HAS_PG_DUMP, reason="pg_dump/psql binary unavailable"),
 ]
 
@@ -55,7 +53,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
 
-    pepper = get_settings().auth.api_key_pepper
+    pepper = get_settings().auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = _h.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
@@ -65,10 +63,11 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     async with get_db_session() as session:
         await session.execute(
             text(
-                "INSERT INTO users (sub, display_name, email, source, created_at) "
-                "VALUES (:sub, :dn, NULL, 'api_key', :now)"
+                "INSERT INTO users (sub, display_name, email, source, created_at, "
+                "groups, groups_seen_at) VALUES (:sub, :dn, NULL, 'api_key', :now, "
+                "CAST(:groups AS jsonb), :now)"
             ),
-            {"sub": user_sub, "dn": "rt", "now": now},
+            {"groups": '["keenyspace-admins"]', "sub": user_sub, "dn": "rt", "now": now},
         )
         await session.execute(
             text(
@@ -156,9 +155,7 @@ async def test_backup_wipe_restore_preserves_workspaces_and_pg_state(
             restore_resp = await client.post(
                 "/v1/admin/restore",
                 params={"force": "true"},
-                files={"file": (
-                    "backup.tar.gz", backup_bytes, "application/gzip"
-                )},
+                files={"file": ("backup.tar.gz", backup_bytes, "application/gzip")},
             )
             assert restore_resp.status_code == 200, restore_resp.text
             assert restore_resp.json()["wiped"] is True
@@ -200,9 +197,7 @@ async def _wipe_target_state(pg_url: str, fs_root: Path) -> None:
     shutil.rmtree(fs_root / "blueprints", ignore_errors=True)
 
 
-async def test_restore_without_force_into_empty_target(
-    app: Any, pg_url: str, fs_root: Any
-) -> None:
+async def test_restore_without_force_into_empty_target(app: Any, pg_url: str, fs_root: Any) -> None:
     """An unforced restore into an empty target must complete, not block.
 
     Regression for the drill hang: the endpoint's own session held ACCESS SHARE
@@ -254,14 +249,17 @@ async def test_restore_without_force_into_empty_target(
             restore_resp = await asyncio.wait_for(
                 client.post(
                     "/v1/admin/restore",
-                    files={
-                        "file": ("backup.tar.gz", backup_bytes, "application/gzip")
-                    },
+                    files={"file": ("backup.tar.gz", backup_bytes, "application/gzip")},
                 ),
                 timeout=120,
             )
             assert restore_resp.status_code == 200, restore_resp.text
             assert restore_resp.json()["wiped"] is False
+
+            # The dump replaced api_keys: the key that ran the restore is not in
+            # the backup, and its cached verification must not outlive that.
+            after = await client.get("/v1/api/auth/api-keys")
+            assert after.status_code == 401
 
         assert await _workspace_count(pg_url) == 1
 

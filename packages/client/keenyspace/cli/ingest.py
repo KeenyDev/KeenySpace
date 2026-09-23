@@ -1,12 +1,11 @@
-"""Phase 5 D-02/D-03: server-driven ingest command.
+"""Server-driven ingest command.
 
-Reads source file (or recursively concatenates .md files from a directory)
-into a single LLM prompt, fetches Instructions from server first (CLI-13),
-then runs a pydantic-ai Agent that has access to `append_log` via MCP.
+Reads a source file (or recursively concatenates .md files from a directory)
+into a single LLM prompt, fetches Instructions from the server first, then
+runs a pydantic-ai Agent that has access to `append_log` via MCP.
 
-D-03 v1 invariant: whole file in one prompt; chunking deferred to v1.5.
-Provider context-overflow surfaces as a clean error (exit 2), NOT a stack
-trace.
+The whole file goes into one prompt; there is no chunking. Provider
+context-overflow surfaces as a clean error (exit 2), NOT a stack trace.
 
 Exit codes:
   0 — success
@@ -40,9 +39,7 @@ def _read_source(path: Path) -> str:
         chunks: list[str] = []
         for f in sorted(path.rglob("*.md")):
             rel = f.relative_to(path).as_posix()
-            chunks.append(
-                f'<file path="{rel}">\n{f.read_text(encoding="utf-8")}\n</file>'
-            )
+            chunks.append(f'<file path="{rel}">\n{f.read_text(encoding="utf-8")}\n</file>')
         return "\n\n".join(chunks)
     return path.read_text(encoding="utf-8")
 
@@ -76,9 +73,7 @@ async def run_ingest(path: Path, workspace: str | None = None) -> None:
         err.print("[red]Not logged in. Run `keenyspace login`.[/red]")
         sys.exit(EXIT_CONFIG)
     if not os.environ.get(settings.llm.api_key_env):
-        err.print(
-            f"[red]LLM API key env var {settings.llm.api_key_env} is not set.[/red]"
-        )
+        err.print(f"[red]LLM API key env var {settings.llm.api_key_env} is not set.[/red]")
         sys.exit(EXIT_CONFIG)
     source_content = _read_source(path)
     try:
@@ -100,8 +95,7 @@ async def run_ingest(path: Path, workspace: str | None = None) -> None:
     except BudgetAbort as ba:
         log_aborted(ba.reason, command="ingest", workspace=slug)
         err.print(
-            f"[yellow]Ingest aborted ({ba.reason}). "
-            "Partial appends may remain in WAL.[/yellow]"
+            f"[yellow]Ingest aborted ({ba.reason}). Partial appends may remain in WAL.[/yellow]"
         )
         sys.exit(EXIT_BUDGET_ABORT)
     except Exception as exc:

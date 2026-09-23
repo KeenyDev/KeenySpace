@@ -1,9 +1,8 @@
 """fastmcp Client wrapper helpers for client-side MCP tool invocations.
 
-Per Phase 5 D-02/D-05/CLI-13: every server-driven command calls
-`get_instructions(workspace, command, context)` FIRST. This module also
-exposes thin wrappers for `compile` + `compile_status` MCP tools used by
-the `keenyspace compile` CLI surface.
+Every server-driven command calls `get_instructions(workspace, command,
+context)` FIRST. This module also exposes thin wrappers for the `compile` +
+`compile_status` MCP tools used by the `keenyspace compile` CLI surface.
 
 `_coerce` defensively handles fastmcp 3.2 CallToolResult: prefer
 `structured_content` (dict from output_schema), fall back to the first
@@ -42,17 +41,13 @@ async def get_instructions(
     return Instructions.model_validate(payload)
 
 
-async def call_compile(
-    server_url: str, api_key: str, *, workspace: str
-) -> dict[str, Any]:
+async def call_compile(server_url: str, api_key: str, *, workspace: str) -> dict[str, Any]:
     async with build_mcp_client(server_url, api_key) as client:
         result = await client.call_tool("compile", {"workspace": workspace})
     return _coerce(result)
 
 
-async def call_compile_status(
-    server_url: str, api_key: str, *, workspace: str
-) -> dict[str, Any]:
+async def call_compile_status(server_url: str, api_key: str, *, workspace: str) -> dict[str, Any]:
     async with build_mcp_client(server_url, api_key) as client:
         result = await client.call_tool("compile_status", {"workspace": workspace})
     return _coerce(result)

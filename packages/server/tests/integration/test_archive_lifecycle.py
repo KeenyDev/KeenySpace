@@ -1,7 +1,8 @@
-"""Phase 4 archive lifecycle integration tests (WS-05 / D-01..D-03).
+"""Workspace archive/unarchive lifecycle integration tests.
 
 Full lifespan + real Postgres; uses ASGITransport with API-key Bearer auth.
 """
+
 from __future__ import annotations
 
 import os
@@ -42,7 +43,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
 
-    pepper = get_settings().auth.api_key_pepper
+    pepper = get_settings().auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
@@ -87,9 +88,7 @@ async def _ws_row(slug: str) -> Any:
     from keenyspace_server.db.session import get_db_session
 
     async with get_db_session() as session:
-        return (
-            await session.execute(select(Workspace).where(Workspace.slug == slug))
-        ).scalar_one()
+        return (await session.execute(select(Workspace).where(Workspace.slug == slug))).scalar_one()
 
 
 async def test_archive_flips_db_and_config(app, pg_url) -> None:  # type: ignore[no-untyped-def]
@@ -131,10 +130,14 @@ async def test_archive_flips_db_and_config(app, pg_url) -> None:  # type: ignore
 
             async with get_db_session() as session:
                 audit = (
-                    await session.execute(
-                        select(AuditLog).where(AuditLog.action == "workspace.archived")
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "workspace.archived")
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert any(row.workspace_uuid == ws.uuid for row in audit)
 
 
@@ -297,8 +300,8 @@ async def test_archive_mid_compile_race(app, pg_url) -> None:  # type: ignore[no
 
             ws_after = await _ws_row(slug)
             # Archive UPDATE wins; the (synthetic) "running" state is overwritten
-            # to paused/archived. A real running task self-terminates on next
-            # DB read per RESEARCH §Pattern 2.
+            # to paused/archived. A real running task self-terminates on its next
+            # DB read of compile_state.
             assert ws_after.compile_state == "paused"
             assert ws_after.compile_paused_reason == "archived"
 

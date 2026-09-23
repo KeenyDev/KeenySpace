@@ -17,7 +17,6 @@ from typing import Any
 import structlog
 import yaml
 from keenyspace_shared.mcp_contracts import WorkspaceImportResponse
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,19 +28,20 @@ from keenyspace_server.fs.blueprint import (
 )
 from keenyspace_server.observability.metrics import WORKSPACE_IMPORT_TOTAL
 from keenyspace_server.ws.export import EXPORT_SKIP_TOP_LEVEL
+from keenyspace_server.ws.registry import workspace_by_slug
 
 log = structlog.get_logger(__name__)
 
 MAX_IMPORT_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 
-# G-4: symmetric with export. Top-level components that export NEVER emits
+# Symmetric with export. Top-level components that export NEVER emits
 # are rejected on import to prevent operators from smuggling user-state
 # (.obsidian) or backup-territory (logs/) content into a freshly-imported
 # workspace. Aliasing the export constant guarantees the two policies cannot
-# drift again.
+# drift.
 IMPORT_REJECT_TOP_LEVEL_USER_STATE: frozenset[str] = EXPORT_SKIP_TOP_LEVEL
 
-# G-4: operator-smuggle denylist — top-level components that are virtually
+# Operator-smuggle denylist — top-level components that are virtually
 # never legitimate in a workspace and would be confusing or unsafe if an
 # operator pulled them in by accident. Defence-in-depth on top of path-
 # traversal / symlink / control-char guards. Nested instances of these
@@ -64,9 +64,7 @@ _IMPORT_REJECT_TOP_LEVEL: frozenset[str] = (
     IMPORT_REJECT_TOP_LEVEL_USER_STATE | IMPORT_REJECT_TOP_LEVEL_DENYLIST
 )
 
-_SLUG_RE = re.compile(
-    r"^[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}[a-zA-Z0-9]$|^[a-zA-Z0-9]$"
-)
+_SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
 
 
 class WorkspaceImportError(ValueError):
@@ -96,12 +94,6 @@ def _validate_zip_sync(zip_path: Path) -> _ZipValidation:
         raise WorkspaceImportError("bad_zip", f"zip is corrupt: {exc}") from exc
 
     try:
-        broken = zf.testzip()
-        if broken is not None:
-            raise WorkspaceImportError(
-                "bad_zip",
-                f"zip CRC check failed for entry: {broken!r}",
-            )
         infolist = zf.infolist()
         total = 0
         has_md = False
@@ -124,7 +116,7 @@ def _validate_zip_sync(zip_path: Path) -> _ZipValidation:
                     "path_traversal",
                     f"unsafe zip entry: {name!r}",
                 )
-            # G-4 top-level reject: drop entries whose first path component is
+            # Top-level reject: drop entries whose first path component is
             # canonical user-state (mirror of export EXPORT_SKIP_TOP_LEVEL)
             # OR operator-smuggle denylist. `.keenyspace` IS permitted (it's
             # the canonical config dir; export emits .keenyspace/config.yaml).
@@ -155,8 +147,7 @@ def _validate_zip_sync(zip_path: Path) -> _ZipValidation:
             if total > MAX_IMPORT_UNCOMPRESSED_BYTES:
                 raise WorkspaceImportError(
                     "size_cap",
-                    f"uncompressed size exceeds cap "
-                    f"({MAX_IMPORT_UNCOMPRESSED_BYTES} bytes)",
+                    f"uncompressed size exceeds cap ({MAX_IMPORT_UNCOMPRESSED_BYTES} bytes)",
                 )
             if not info.is_dir() and name.endswith(".md"):
                 has_md = True
@@ -165,6 +156,15 @@ def _validate_zip_sync(zip_path: Path) -> _ZipValidation:
             raise WorkspaceImportError(
                 "empty_workspace",
                 "zip contains no .md files",
+            )
+
+        # testzip decompresses every entry, so it runs only after the declared
+        # sizes passed the cap; zipfile bounds each read to the declared size.
+        broken = zf.testzip()
+        if broken is not None:
+            raise WorkspaceImportError(
+                "bad_zip",
+                f"zip CRC check failed for entry: {broken!r}",
             )
 
         preserved: str | None = None
@@ -211,20 +211,17 @@ def _unpack_zip_sync(zip_path: Path, dest: Path) -> None:
         # Surface CRC / truncation failures during extraction as a typed 422
         # rather than a generic 500 (the outer try in import_workspace catches
         # WorkspaceImportError but not BadZipFile).
-        raise WorkspaceImportError(
-            "bad_zip", f"zip extraction failed: {exc}"
-        ) from exc
+        raise WorkspaceImportError("bad_zip", f"zip extraction failed: {exc}") from exc
 
 
 def _rename_and_fsync(src: Path, dst: Path) -> None:
     """Atomic rename + parent dir fsync for durability (matches write_atomic).
 
-    Uses ``os.replace`` for parity with ``fs/blueprint.py`` (WR-01 standardised
-    the fs/ layer on ``os.replace`` because it overwrites the destination
-    atomically on POSIX; ``os.rename`` raises ``OSError(EEXIST)`` on a
-    non-empty destination directory). ``final_dir`` is always a fresh UUID in
-    the import path, but matching the convention keeps the fs/ surface
-    consistent for future readers.
+    Uses ``os.replace`` for parity with ``fs/blueprint.py``: it overwrites the
+    destination atomically on POSIX, while ``os.rename`` raises
+    ``OSError(EEXIST)`` on a non-empty destination directory. ``final_dir`` is
+    always a fresh UUID in the import path, but matching the convention keeps
+    the fs/ surface consistent for future readers.
     """
     os.replace(src, dst)
     parent = dst.parent
@@ -250,12 +247,12 @@ async def import_workspace(
             "slug must be alphanumeric + hyphens, 1-64 chars",
         )
 
-    existing = await session.execute(
-        select(Workspace).where(Workspace.slug == slug)
-    )
-    if existing.scalar_one_or_none() is not None:
+    if await workspace_by_slug(session, slug) is not None:
         WORKSPACE_IMPORT_TOTAL.labels(outcome="conflict").inc()
         raise WorkspaceSlugConflictError(slug)
+    # Release the pooled connection before zip validation and unpack; a
+    # concurrent import of the same slug is caught by UNIQUE(slug) at commit.
+    await session.rollback()
 
     try:
         validation = await validate_import_zip(zip_path)
@@ -266,20 +263,20 @@ async def import_workspace(
     new_uuid = uuid.uuid4()
     fs_root: Path = settings.fs.root
     workspaces_dir = fs_root / "workspaces"
-    workspaces_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(workspaces_dir.mkdir, parents=True, exist_ok=True)
     # Stage extraction under a sibling .tmp/ tree so workspace iteration (admin
     # UI, doctor sweep) never sees ephemeral .import_tmp_* entries. The .tmp/
     # dir lives on the same fs_root mount as workspaces/, so the final
     # os.rename(import_tmp, final_dir) stays atomic.
     tmp_root = fs_root / ".tmp"
-    tmp_root.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(tmp_root.mkdir, parents=True, exist_ok=True)
     import_tmp = tmp_root / f"import_{secrets.token_hex(8)}"
     final_dir = workspaces_dir / str(new_uuid)
 
     cleanup_tmp = True
     outcome = "validation_error"
     try:
-        import_tmp.mkdir(parents=True, exist_ok=False)
+        await asyncio.to_thread(import_tmp.mkdir, parents=True, exist_ok=False)
         await asyncio.to_thread(_unpack_zip_sync, zip_path, import_tmp)
 
         blueprint_ref = (
@@ -332,7 +329,7 @@ async def import_workspace(
             },
         )
 
-        # FS-then-DB ordering (D-08): move the workspace dir into place BEFORE
+        # FS-then-DB ordering: move the workspace dir into place BEFORE
         # committing the workspaces row. If the rename fails, we rollback the
         # session and the slug is still claimable. If the commit fails after a
         # successful rename, we remove the orphaned final_dir before raising.
@@ -350,7 +347,7 @@ async def import_workspace(
             await session.commit()
         except IntegrityError as exc:
             await session.rollback()
-            shutil.rmtree(final_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, final_dir, ignore_errors=True)
             outcome = "conflict"
             # Persist a conflict audit row in a SEPARATE session: the rollback
             # above wiped the workspace.imported audit entry we staged earlier,
@@ -361,6 +358,7 @@ async def import_workspace(
                 from keenyspace_server.db.session import (
                     get_db_session as _audit_session,
                 )
+
                 async with _audit_session() as audit_sess:
                     await write_audit(
                         audit_sess,
@@ -387,11 +385,10 @@ async def import_workspace(
             # BEFORE attempting rollback: the same failure conditions that
             # caused commit() to fail (closed connection, pool exhaustion,
             # lifespan shutdown) also cause rollback() to raise, and a raised
-            # rollback would skip the rmtree, leaving the orphan on disk and
-            # collapsing this handler back to the original CR-01 failure mode.
+            # rollback would skip the rmtree, leaving the orphan on disk.
             # Set outcome before rollback too so the metric label is correct
             # even if rollback throws.
-            shutil.rmtree(final_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, final_dir, ignore_errors=True)
             outcome = "fs_orphan_reaped"
             log.warning(
                 "workspace.import.fs_orphan_reaped",
@@ -422,5 +419,5 @@ async def import_workspace(
         return WorkspaceImportResponse(uuid=str(new_uuid), slug=slug)
     finally:
         if cleanup_tmp:
-            shutil.rmtree(import_tmp, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, import_tmp, ignore_errors=True)
         WORKSPACE_IMPORT_TOTAL.labels(outcome=outcome).inc()

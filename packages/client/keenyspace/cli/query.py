@@ -1,4 +1,4 @@
-"""Phase 5 D-04 + Pitfall #7 mitigation: read-only Q&A command.
+"""Read-only Q&A command.
 
 Server returns Instructions with tool_whitelist limited to read_page /
 search_workspace / list_pages. Client refuses to run if the server-supplied
@@ -41,9 +41,7 @@ async def run_query(question: str, workspace: str | None = None) -> None:
         err.print("[red]Not logged in. Run `keenyspace login`.[/red]")
         sys.exit(EXIT_CONFIG)
     if not os.environ.get(settings.llm.api_key_env):
-        err.print(
-            f"[red]LLM API key env var {settings.llm.api_key_env} is not set.[/red]"
-        )
+        err.print(f"[red]LLM API key env var {settings.llm.api_key_env} is not set.[/red]")
         sys.exit(EXIT_CONFIG)
     instructions = await get_instructions(
         settings.server_url,
@@ -52,9 +50,9 @@ async def run_query(question: str, workspace: str | None = None) -> None:
         command="query",
         context={"question": question},
     )
-    # WHY: T-05.04-02 defence-in-depth. Server may regress and accidentally
-    # include the write tool in a read-only command whitelist; the client
-    # refuses to be the failure point.
+    # Defence-in-depth: the server may regress and accidentally include the
+    # write tool in a read-only command whitelist; the client refuses to be
+    # the failure point.
     if "append_log" in instructions.tool_whitelist:
         err.print(
             "[red]Defence-in-depth: server returned a write tool in the query "

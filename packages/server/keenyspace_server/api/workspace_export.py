@@ -6,12 +6,13 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from keenyspace_server.api.workspace_dep import require_workspace
 from keenyspace_server.auth.audit import write_audit
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.observability.metrics import WORKSPACE_EXPORT_BYTES_TOTAL
 from keenyspace_server.ws.export import (
     ExportTooLargeError,
@@ -22,17 +23,9 @@ log = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-async def _load_workspace(slug: str, session: AsyncSession) -> Workspace:
-    result = await session.execute(select(Workspace).where(Workspace.slug == slug))
-    ws = result.scalar_one_or_none()
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
-    return ws
-
-
 def _resolve_ws_dir(request: Request, ws: Workspace) -> Path:
     settings = request.app.state.settings
-    return Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+    return workspace_root(settings.fs.root, ws.uuid)
 
 
 @router.get("/{slug}/export")
@@ -42,7 +35,7 @@ async def export_workspace(
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> StreamingResponse:
     user = request.user
-    ws = await _load_workspace(slug, session)
+    ws = await require_workspace(session, slug)
     ws_dir = _resolve_ws_dir(request, ws)
     archived = ws.status == "archived"
 
@@ -61,7 +54,9 @@ async def export_workspace(
     await session.commit()
 
     try:
-        chunk_iter = await build_workspace_zip(ws_dir)
+        chunk_iter = await build_workspace_zip(
+            ws_dir, tmp_root=Path(request.app.state.settings.fs.root) / ".tmp"
+        )
     except ExportTooLargeError as exc:
         raise HTTPException(
             status_code=413,

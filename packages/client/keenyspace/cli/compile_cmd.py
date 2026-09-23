@@ -1,4 +1,4 @@
-"""Phase 5 + Phase 2 D-12/D-13: thin client over MCP `compile` + `compile_status`.
+"""Thin client over the MCP `compile` + `compile_status` tools.
 
 Default is fire-and-forget — the server queues the compile job and returns
 immediately. `--wait` polls compile_status every 2s (default) until the
@@ -42,17 +42,13 @@ async def run_compile_cmd(
     trigger = await call_compile(settings.server_url, api_key, workspace=slug)
     job_id = trigger.get("job_id", "?")
     status = trigger.get("status", "?")
-    console.print(
-        f"Compile triggered: workspace={slug} job_id={job_id} status={status}"
-    )
+    console.print(f"Compile triggered: workspace={slug} job_id={job_id} status={status}")
     if not wait:
         return
     loop = asyncio.get_running_loop()
     deadline = loop.time() + wait_timeout
     while True:
-        payload = await call_compile_status(
-            settings.server_url, api_key, workspace=slug
-        )
+        payload = await call_compile_status(settings.server_url, api_key, workspace=slug)
         state = payload.get("state", "?")
         last_at = payload.get("last_compile_at", "?")
         console.print(f"  state={state} last_compile_at={last_at}")
@@ -62,9 +58,6 @@ async def run_compile_cmd(
                 console.print(f"[yellow]Compile paused: {reason}[/yellow]")
             return
         if loop.time() > deadline:
-            err.print(
-                f"[red]Compile did not finish within {wait_timeout}s "
-                f"(still {state}).[/red]"
-            )
+            err.print(f"[red]Compile did not finish within {wait_timeout}s (still {state}).[/red]")
             sys.exit(EXIT_COMPILE_TIMEOUT)
         await asyncio.sleep(poll_interval)

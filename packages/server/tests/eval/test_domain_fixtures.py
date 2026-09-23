@@ -81,7 +81,9 @@ async def test_domain_01_frontmatter_preservation(tmp_path: Path) -> None:
 
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         output_tool = info.output_tools[0].name if info.output_tools else "final_result"
-        return ModelResponse(parts=[ToolCallPart(tool_name=output_tool, args=synth_plan.model_dump())])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=output_tool, args=synth_plan.model_dump())]
+        )
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
@@ -116,11 +118,7 @@ async def test_domain_02_wikilink_hygiene(tmp_path: Path) -> None:
     target_path = expect["expected_ops"][0]["path"]
     required_fragments: list[str] = expect.get("required_body_fragments", [])
 
-    synth_body = (
-        "# Index\n\n"
-        "Main entry point.\n\n"
-        "See [[auth]] for authentication documentation.\n"
-    )
+    synth_body = "# Index\n\nMain entry point.\n\nSee [[auth]] for authentication documentation.\n"
     synth_plan = CompilePlan(
         ops=[PageOp(action="update", path=target_path, body=synth_body, frontmatter={})],
         notes="",
@@ -128,7 +126,9 @@ async def test_domain_02_wikilink_hygiene(tmp_path: Path) -> None:
 
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         output_tool = info.output_tools[0].name if info.output_tools else "final_result"
-        return ModelResponse(parts=[ToolCallPart(tool_name=output_tool, args=synth_plan.model_dump())])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=output_tool, args=synth_plan.model_dump())]
+        )
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
@@ -140,10 +140,7 @@ async def test_domain_02_wikilink_hygiene(tmp_path: Path) -> None:
 
     plan_paths_full = {op.path.removesuffix(".md") for op in plan.ops}
     plan_path_stems = {Path(p).name for p in plan_paths_full}
-    vault_paths = {
-        str(p.relative_to(ws_root)).removesuffix(".md")
-        for p in ws_root.rglob("*.md")
-    }
+    vault_paths = {str(p.relative_to(ws_root)).removesuffix(".md") for p in ws_root.rglob("*.md")}
     vault_stems = {Path(vp).name for vp in vault_paths}
 
     for link in _extract_wikilinks(op_body):
@@ -154,9 +151,7 @@ async def test_domain_02_wikilink_hygiene(tmp_path: Path) -> None:
             or link_stem in vault_stems
             or link_stem in plan_path_stems
         )
-        assert resolvable, (
-            f"Wikilink [[{link}]] is unresolvable: not in vault nor plan ops"
-        )
+        assert resolvable, f"Wikilink [[{link}]] is unresolvable: not in vault nor plan ops"
 
 
 @pytest.mark.asyncio
@@ -195,7 +190,9 @@ async def test_domain_03_heading_structure_preservation(tmp_path: Path) -> None:
 
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         output_tool = info.output_tools[0].name if info.output_tools else "final_result"
-        return ModelResponse(parts=[ToolCallPart(tool_name=output_tool, args=synth_plan.model_dump())])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=output_tool, args=synth_plan.model_dump())]
+        )
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):
@@ -229,7 +226,10 @@ async def test_domain_04_page_targeting_deepest(tmp_path: Path) -> None:
             PageOp(
                 action="update",
                 path=expected_path,
-                body="# Google OAuth\n\nGoogle OAuth now requires PKCE for all new integrations as of 2026.\n",
+                body=(
+                    "# Google OAuth\n\nGoogle OAuth now requires PKCE for all new "
+                    "integrations as of 2026.\n"
+                ),
                 frontmatter={},
             )
         ],
@@ -238,7 +238,9 @@ async def test_domain_04_page_targeting_deepest(tmp_path: Path) -> None:
 
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         output_tool = info.output_tools[0].name if info.output_tools else "final_result"
-        return ModelResponse(parts=[ToolCallPart(tool_name=output_tool, args=synth_plan.model_dump())])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=output_tool, args=synth_plan.model_dump())]
+        )
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_fake)):

@@ -45,9 +45,7 @@ def open_workspace_page(ws_root: Path, page_path: str) -> tuple[int, Path]:
     ws_root_resolved = ws_root.resolve()
 
     if not target.is_relative_to(ws_root_resolved):
-        raise UnsafePath(
-            f"Path {page_path!r} resolves outside workspace root"
-        )
+        raise UnsafePath(f"Path {page_path!r} resolves outside workspace root")
 
     # O_NOFOLLOW guards only the final path component against symlinks.
     # resolve() above follows intermediate symlinks — a TOCTOU window exists
@@ -78,7 +76,7 @@ _COMPILE_DENYLIST_EXACT: frozenset[str] = frozenset({"CLAUDE.md"})
 def is_compile_writable(ws_root: Path, path: str) -> bool:
     """Return True iff `path` is a workspace-relative page the compile coordinator may write.
 
-    Refuses anything that fails the 4-layer pre-validation OR matches the D-07 denylist
+    Refuses anything that fails the 4-layer pre-validation OR matches the denylist
     ('.keenyspace/', 'logs/', '_templates/', 'raw/' prefixes; 'CLAUDE.md' exact).
     Case-folded before prefix comparison so 'Logs/foo.md' and 'logs/foo.md' both match.
     """

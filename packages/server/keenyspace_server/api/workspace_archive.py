@@ -5,11 +5,12 @@ from pathlib import Path
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from keenyspace_server.api.workspace_dep import require_workspace
 from keenyspace_server.db.models import Workspace
 from keenyspace_server.db.session import get_db
+from keenyspace_server.fs.layout import workspace_root
 from keenyspace_server.ws.archive import (
     ArchiveConflictError,
     archive_workspace,
@@ -26,17 +27,9 @@ class ArchiveResponse(BaseModel):
     archived_at: str | None = None
 
 
-async def _load_workspace(slug: str, session: AsyncSession) -> Workspace:
-    result = await session.execute(select(Workspace).where(Workspace.slug == slug))
-    ws = result.scalar_one_or_none()
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"workspace {slug!r} not found")
-    return ws
-
-
 def _resolve_ws_dir(request: Request, ws: Workspace) -> Path:
     settings = request.app.state.settings
-    return Path(settings.fs.root) / "workspaces" / str(ws.uuid)
+    return workspace_root(settings.fs.root, ws.uuid)
 
 
 @router.post("/{slug}/archive", response_model=ArchiveResponse, status_code=200)
@@ -46,7 +39,7 @@ async def archive_endpoint(
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> ArchiveResponse:
     user = request.user
-    ws = await _load_workspace(slug, session)
+    ws = await require_workspace(session, slug)
     ws_dir = _resolve_ws_dir(request, ws)
     try:
         archived_at = await archive_workspace(
@@ -75,7 +68,7 @@ async def unarchive_endpoint(
     session: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> ArchiveResponse:
     user = request.user
-    ws = await _load_workspace(slug, session)
+    ws = await require_workspace(session, slug)
     ws_dir = _resolve_ws_dir(request, ws)
     try:
         await unarchive_workspace(

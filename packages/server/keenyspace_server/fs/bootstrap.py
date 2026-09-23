@@ -7,8 +7,7 @@ import shutil
 from pathlib import Path
 
 import structlog
-
-from .atomic import write_atomic
+from keenyspace_shared.atomic_write import write_atomic
 
 log = structlog.get_logger(__name__)
 
@@ -16,9 +15,7 @@ BLUEPRINT_SYNC_MANIFEST = ".image-sync.json"
 _MANIFEST_SCHEMA_VERSION = 1
 
 
-def ensure_fs_root_layout(
-    fs_root: Path, server_blueprints_image_dir: Path
-) -> None:
+def ensure_fs_root_layout(fs_root: Path, server_blueprints_image_dir: Path) -> None:
     for subdir in ("workspaces", "blueprints", ".tmp"):
         (fs_root / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -38,17 +35,20 @@ def ensure_fs_root_layout(
             )
             shipped = _digest_tree(default_src)
         else:
-            # G-3 (Phase 4 UAT): reconcile the on-disk blueprint catalog with
-            # the image on EVERY boot. Files missing on disk are added; files
-            # still byte-identical to what the image last shipped are upgraded
-            # in place; anything an operator has edited is left alone and
+            # Reconcile the on-disk blueprint catalog with the image on
+            # EVERY boot. Files missing on disk are added; files still
+            # byte-identical to what the image last shipped are upgraded in
+            # place; anything an operator has edited is left alone and
             # reported, so drift is visible instead of silent.
             _merge_blueprint_tree(default_src, default_target, shipped)
         if shipped != manifest.get("default"):
             manifest["default"] = shipped
             _save_manifest(blueprints_root, manifest)
 
-    _sweep_stale_tmp(fs_root / ".tmp")
+    _sweep_stale_tmp(fs_root / ".tmp", ("import_", "upload_"))
+    # Admin backup scratch only; restore-*.aside dirs are recovery copies of a
+    # failed restore and must survive a restart.
+    _sweep_stale_tmp(fs_root / "tmp", ("backup-",))
 
 
 def _digest_file(path: Path) -> str:
@@ -64,9 +64,7 @@ def _digest_tree(src: Path) -> dict[str, str]:
     digests: dict[str, str] = {}
     for src_root, dirnames, filenames in os.walk(src, followlinks=False):
         rel_root = Path(src_root).relative_to(src)
-        dirnames[:] = [
-            d for d in dirnames if not (Path(src_root) / d).is_symlink()
-        ]
+        dirnames[:] = [d for d in dirnames if not (Path(src_root) / d).is_symlink()]
         for filename in filenames:
             src_file = Path(src_root) / filename
             if src_file.is_symlink():
@@ -119,9 +117,7 @@ def _load_manifest(blueprints_root: Path) -> dict[str, dict[str, str]]:
     }
 
 
-def _save_manifest(
-    blueprints_root: Path, manifest: dict[str, dict[str, str]]
-) -> None:
+def _save_manifest(blueprints_root: Path, manifest: dict[str, dict[str, str]]) -> None:
     payload = {
         "schema_version": _MANIFEST_SCHEMA_VERSION,
         "blueprints": manifest,
@@ -139,9 +135,7 @@ def _save_manifest(
         )
 
 
-def _merge_blueprint_tree(
-    src: Path, dst: Path, shipped: dict[str, str] | None = None
-) -> None:
+def _merge_blueprint_tree(src: Path, dst: Path, shipped: dict[str, str] | None = None) -> None:
     """Reconcile ``dst`` against the image tree ``src``.
 
     Per file: absent on disk means copy; byte-identical to the digest the image
@@ -158,9 +152,7 @@ def _merge_blueprint_tree(
         rel_root = Path(src_root).relative_to(src)
         # Skip symlinked sub-directories defence-in-depth (os.walk followlinks=False
         # already refuses to descend, but pruning here avoids touching the entries).
-        dirnames[:] = [
-            d for d in dirnames if not (Path(src_root) / d).is_symlink()
-        ]
+        dirnames[:] = [d for d in dirnames if not (Path(src_root) / d).is_symlink()]
         dst_root = dst / rel_root
         try:
             dst_root.mkdir(parents=True, exist_ok=True)
@@ -215,15 +207,15 @@ def _merge_blueprint_tree(
                 )
 
 
-def _sweep_stale_tmp(tmp_root: Path) -> None:
-    """Reap stale ``import_*`` / ``upload_*`` entries left by killed requests.
+def _sweep_stale_tmp(tmp_root: Path, prefixes: tuple[str, ...]) -> None:
+    """Reap stale scratch entries named ``<prefix>*`` left by killed requests.
 
-    WR-14: the in-request ``finally`` blocks in ``api/workspace_import.py``
-    and ``ws/import_.py`` only run if the worker survives long enough to
-    execute them. ``kill -9``, OOM-killer, container restart, or a stuck
+    The in-request ``finally`` blocks in ``api/workspace_import.py`` and
+    ``ws/import_.py`` only run if the worker survives long enough to execute
+    them. ``kill -9``, OOM-killer, container restart, or a stuck
     ``await file.read(...)`` mid-cancellation leave staged extractions and
-    partial uploads on disk indefinitely. v1 ships single-worker uvicorn,
-    so at startup no other process is mid-import; a sweep here is safe.
+    partial uploads on disk indefinitely. The server runs single-worker, so at
+    startup no other process is mid-import; a sweep here is safe.
 
     Best-effort: failures to remove an entry log a warning and continue
     (a stuck mount or permission issue should not block server boot).
@@ -231,7 +223,7 @@ def _sweep_stale_tmp(tmp_root: Path) -> None:
     if not tmp_root.is_dir():
         return
     for entry in tmp_root.iterdir():
-        if not entry.name.startswith(("import_", "upload_")):
+        if not entry.name.startswith(prefixes):
             continue
         try:
             if entry.is_dir() and not entry.is_symlink():

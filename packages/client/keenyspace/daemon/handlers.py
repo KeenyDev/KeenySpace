@@ -1,9 +1,9 @@
 """JSONL dispatch for daemon socket events.
 
-Wave 6 (D-09): session-start source=compact now invokes the pydantic-ai
-post-compact orchestrator and writes a response payload back on the same
-connection. Every other kind (incl. post-compact per F-09) is pure
-fire-and-forget — daemon just logged the event.
+session-start with source=compact invokes the pydantic-ai post-compact
+orchestrator and writes a response payload back on the same connection. Every
+other kind, post-compact included, is pure fire-and-forget: the daemon only
+logs the event.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ async def dispatch(envelope: dict[str, Any], writer: asyncio.StreamWriter) -> No
         writer.write(json.dumps(response).encode() + b"\n")
         try:  # noqa: SIM105 — await cannot live inside contextlib.suppress
             await writer.drain()
-        except (OSError, ConnectionResetError):
+        except OSError, ConnectionResetError:
             pass
         return
-    # All other kinds (incl. post-compact per F-09): fire-and-forget — just logged.
+    # All other kinds, post-compact included: fire-and-forget — just logged.

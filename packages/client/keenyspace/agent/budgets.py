@@ -1,4 +1,4 @@
-"""Phase 5 D-05: budget enforcement on client-side pydantic-ai agents.
+"""Budget enforcement for client-side pydantic-ai agents.
 
 UsageLimits (request + total tokens) + asyncio.wait_for (wall clock) +
 LoopDetector (same tool+args 3x). BudgetAbort is the unified abort surface
@@ -15,7 +15,7 @@ from pydantic_ai.usage import UsageLimits
 log = structlog.get_logger(__name__)
 
 
-class BudgetAbort(Exception):  # noqa: N818 — name dictated by plan; "Abort" reads better than "Error"
+class BudgetAbort(Exception):  # noqa: N818 — an abort, not an error condition
     def __init__(
         self,
         reason: str,

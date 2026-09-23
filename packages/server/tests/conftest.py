@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def pytest_configure(config):  # type: ignore[no-untyped-def]
-    config.addinivalue_line("markers", "eval: marker for compile evaluation suite (Plans 06-08)")
+    config.addinivalue_line("markers", "eval: marker for the compile evaluation suite")
     config.addinivalue_line(
         "markers", "requires_anthropic: marker for fixtures that hit the real Anthropic API"
     )
@@ -26,7 +26,7 @@ def pytest_configure(config):  # type: ignore[no-untyped-def]
 def _ensure_auth_env():
     """Provide test auth/OIDC settings for the whole session.
 
-    Settings.auth is required (Phase 3). Standalone tests that build the app or
+    Settings.auth is required. Standalone tests that build the app or
     spawn a subprocess (alembic, uvicorn) without the function-scoped app_env
     fixture would otherwise fail Settings validation with "auth Field required".
     Set via os.environ (not monkeypatch) so child processes inherit it; tests
@@ -39,9 +39,7 @@ def _ensure_auth_env():
     # /var/lib/keenyspace, which is not writable on the CI runner or a dev
     # laptop. Point it at a session temp dir for standalone tests that bypass
     # app_env (which sets its own per-test fs_root).
-    os.environ.setdefault(
-        "KEENYSPACE_FS__ROOT", tempfile.mkdtemp(prefix="ks-session-fs-")
-    )
+    os.environ.setdefault("KEENYSPACE_FS__ROOT", tempfile.mkdtemp(prefix="ks-session-fs-"))
 
     defaults = {
         "KEENYSPACE_AUTH__OIDC_ISSUER_URL": "http://localhost:9999/application/o/test/",
@@ -51,6 +49,8 @@ def _ensure_auth_env():
         "KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI": "http://localhost:8000/",
         "KEENYSPACE_AUTH__API_KEY_PEPPER": "test-pepper-32chars-padded-here!",
         "KEENYSPACE_AUTH__SESSION_SECRET_KEY": "test-session-secret-32chars-pad!",
+        # Every app lifespan would otherwise bind the metrics port 9100 on the host.
+        "KEENYSPACE_METRICS_PORT": "0",
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
@@ -136,7 +136,7 @@ def app_env(fs_root, pg_url, monkeypatch):
     )
     monkeypatch.setenv("KEENYSPACE_AUTH__COOKIE_SECURE", "false")
     monkeypatch.setenv("KEENYSPACE_AUTO_MIGRATE", "true")
-    # CR-02: admin routes are disabled by default in production; enable
+    # Admin routes are disabled by default in production; enable them
     # explicitly for tests so integration suites exercise /v1/admin/*.
     monkeypatch.setenv("KEENYSPACE_ADMIN_API_ENABLED", "1")
     return {"fs_root": fs_root, "pg_url": pg_url}
@@ -167,10 +167,10 @@ async def _reset_schema(pg_url: str) -> None:
 
 @pytest_asyncio.fixture
 async def _engine_lifespan_ctx(app, pg_url):
-    """Reset schema -> engine_lifespan (с auto_migrate=true).
+    """Reset the schema, then enter engine_lifespan (with auto_migrate=true).
 
-    Каждый test получает чистый DB state; полный app_lifespan (scheduler,
-    coordinator) НЕ запускается — auth тесты этого не требуют.
+    Each test starts from clean DB state. The full app_lifespan (scheduler, compile
+    coordinator) is deliberately NOT started — the auth tests do not need it.
     """
     from keenyspace_server.db.session import engine_lifespan
 
@@ -181,10 +181,10 @@ async def _engine_lifespan_ctx(app, pg_url):
 
 @pytest_asyncio.fixture
 async def client(app, _engine_lifespan_ctx, api_key_user):
-    """Default client: authenticated через real CompositeAuthBackend + Bearer ks_live_*.
+    """Default client: authenticated via the real CompositeAuthBackend, Bearer ks_live_*.
 
-    Wave 2 cutover (D-19/D-21): integration tests proxy через настоящую auth chain,
-    no middleware-bypass. Negative-auth assertions используют `anon_client`.
+    Integration tests go through the real auth chain, with no middleware
+    bypass. Negative-auth assertions use `anon_client` instead.
     """
     _, plaintext = api_key_user
     transport = ASGITransport(app=app, raise_app_exceptions=False)
@@ -198,7 +198,7 @@ async def client(app, _engine_lifespan_ctx, api_key_user):
 
 @pytest_asyncio.fixture
 async def anon_client(app, _engine_lifespan_ctx):
-    """Anonymous client для negative tests (auth_bypass, public endpoints)."""
+    """Anonymous client for negative tests (auth_bypass, public endpoints)."""
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -206,12 +206,12 @@ async def anon_client(app, _engine_lifespan_ctx):
 
 @pytest_asyncio.fixture
 async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
-    """Router-level fast-path: authenticated через test-only AuthenticationBackend stub.
+    """Router-level fast path: authenticated via a test-only AuthenticationBackend stub.
 
-    Используется Wave 1 router tests для изоляции от composite resolver chain
-    (быстрая обратная связь без full DB verify roundtrip). Production path
-    тестируется через default `client` fixture + integration tests против
-    real composite backend.
+    Used by router tests to isolate them from the composite resolver chain
+    (fast feedback without the full DB verify roundtrip). The production path
+    is covered by the default `client` fixture and the integration tests that
+    run against the real composite backend.
     """
     from keenyspace_server.auth.user import User
     from starlette.authentication import AuthCredentials, AuthenticationBackend
@@ -226,7 +226,12 @@ async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
                 return None
             return (
                 AuthCredentials(["authenticated"]),
-                User(sub=user_sub, _display_name=user_sub, source="api_key"),
+                User(
+                    sub=user_sub,
+                    _display_name=user_sub,
+                    source="oidc",
+                    issued_at=datetime.now(UTC),
+                ),
             )
 
     for m in app.user_middleware:
@@ -245,38 +250,87 @@ async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
 
 @pytest_asyncio.fixture
 async def api_key_user(app, _engine_lifespan_ctx):
-    """D-20a fast-path API-key fixture — direct DB seed bypassing OIDC.
+    """Fast-path API-key fixture — direct DB seed bypassing OIDC.
 
-    Returns: (user_sub: str, plaintext_key: str).
-    Wave 0 stub: создаёт users row + api_keys row напрямую через get_db_session.
-    Real argon2 hash + lookup_hash вычисляются здесь же (НЕ ждём Wave 1).
+    Returns: (user_sub: str, plaintext_key: str). The owner has no group
+    snapshot (never logged in via OIDC), so the key is not an admin key.
     """
+    return await _seed_api_key_user(groups=None)
+
+
+@pytest_asyncio.fixture
+async def admin_api_key_user(app, _engine_lifespan_ctx):
+    """Like api_key_user, but the owner's snapshot holds the admin group."""
+    return await _seed_api_key_user(groups=["keenyspace-users", "keenyspace-admins"])
+
+
+@pytest_asyncio.fixture
+async def admin_client(app, _engine_lifespan_ctx, admin_api_key_user):
+    """Authenticated like `client`, with a key whose owner is in the admin group."""
+    _, plaintext = admin_api_key_user
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    ) as c:
+        yield c
+
+
+@pytest.fixture
+def seed_api_key(_engine_lifespan_ctx):
+    """Callable seeding a key whose owner has the given snapshot/expiry."""
+    return _seed_api_key_user
+
+
+async def _seed_api_key_user(
+    *,
+    groups: list[str] | None,
+    groups_seen_at: datetime | None = None,
+    expires_at: datetime | None = None,
+) -> tuple[str, str]:
+    """Insert a users row (with the given group snapshot) and one API key for it.
+
+    Requires engine_lifespan to be running. Real argon2 hash + lookup_hash.
+    """
+    import json
+
     from argon2 import PasswordHasher
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
     from sqlalchemy import text
 
     settings = get_settings()
-    pepper = settings.auth.api_key_pepper
+    pepper = settings.auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
     user_sub = f"test-user-{uuid4().hex[:8]}"
     key_id = uuid4()
     now = datetime.now(UTC)
+    if groups is not None and groups_seen_at is None:
+        groups_seen_at = now
 
     async with get_db_session() as session:
         await session.execute(
             text(
-                "INSERT INTO users (sub, display_name, email, source, created_at) "
-                "VALUES (:sub, :dn, NULL, 'api_key', :now)"
+                "INSERT INTO users (sub, display_name, email, source, created_at, groups, "
+                "groups_seen_at) VALUES (:sub, :dn, NULL, 'api_key', :now, "
+                "CAST(:groups AS jsonb), :seen)"
             ),
-            {"sub": user_sub, "dn": "test", "now": now},
+            {
+                "sub": user_sub,
+                "dn": "test",
+                "now": now,
+                "groups": json.dumps(groups) if groups is not None else None,
+                "seen": groups_seen_at if groups is not None else None,
+            },
         )
         await session.execute(
             text(
                 "INSERT INTO api_keys (id, user_sub, name, prefix, hash, lookup_hash, "
-                "created_at) VALUES (:id, :sub, 'test', 'ks_live_', :h, :lh, :now)"
+                "created_at, expires_at) VALUES (:id, :sub, 'test', 'ks_live_', :h, :lh, "
+                ":now, :exp)"
             ),
             {
                 "id": key_id,
@@ -284,6 +338,7 @@ async def api_key_user(app, _engine_lifespan_ctx):
                 "h": argon_hash,
                 "lh": lookup_hash,
                 "now": now,
+                "exp": expires_at,
             },
         )
         await session.commit()
@@ -308,7 +363,7 @@ async def _seed_api_keys(pg_url):
 
 @pytest.fixture
 def rsa_keypair():
-    """Generate RSA keypair для подписи test JWT (D-20b)."""
+    """Generate an RSA keypair for signing test JWTs."""
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
 
@@ -323,7 +378,7 @@ def rsa_keypair():
 
 @pytest.fixture
 def mock_authentik_provider(httpserver, rsa_keypair):
-    """D-20b — pytest-httpserver mock Authentik (discovery + JWKS + token + end_session).
+    """pytest-httpserver mock Authentik (discovery + JWKS + token + end_session).
 
     Returns dict {issuer, jwks_uri, token_endpoint, end_session_endpoint,
     sign_jwt, httpserver}. sign_jwt(claims, kid="test-kid-1") -> JWT signed via
@@ -400,10 +455,10 @@ async def app_with_mocked_authentik(mock_authentik_provider, fs_root, pg_url, mo
 
 @pytest.fixture
 def alembic_at_0002(pg_url, app_env):
-    """Применяет миграции до 0002 (НЕ до head) и вставляет seed api_keys row.
+    """Migrate to 0002 (NOT to head) and seed one api_keys row.
 
-    Используется в tests/auth/test_alembic_0003.py для проверки pre-assertion
-    (миграция 0003 raises RuntimeError при непустой api_keys table).
+    Used by tests/auth/test_alembic_0003.py to exercise the pre-migration assertion:
+    migration 0003 raises RuntimeError when api_keys is non-empty.
     """
     import asyncio
 

@@ -1,5 +1,6 @@
 {
-  "expected_status": "abort_budget",
-  "expected_ops": [],
-  "required_notes_substring": "wal_slice_truncated"
+  "expected_status": "success",
+  "expected_entry_count": 30,
+  "min_passes": 2,
+  "expected_final_cursor": "01KR8PZK20000000000000000Y"
 }

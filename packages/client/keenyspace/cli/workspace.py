@@ -1,7 +1,7 @@
 """`keenyspace workspace ...` subcommands.
 
-list / use / archive / from-cwd are thin httpx wrappers over the Phase 4
-endpoints; pull defers to keenyspace.cli.pull.run_pull.
+list / use / archive / from-cwd are thin httpx wrappers over the server's
+workspace endpoints; pull defers to keenyspace.cli.pull.run_pull.
 """
 
 from __future__ import annotations
@@ -20,9 +20,7 @@ from keenyspace.__main__ import workspace_app
 
 @workspace_app.command("list")
 def list_cmd(
-    archived: bool = typer.Option(
-        False, "--archived", help="Include archived workspaces."
-    ),
+    archived: bool = typer.Option(False, "--archived", help="Include archived workspaces."),
 ) -> None:
     """List workspaces (active by default; pass --archived for all)."""
 
@@ -114,9 +112,7 @@ async def _run_list(archived: bool) -> None:
 
     status = "all" if archived else "active"
     async with await build_authed_http_client() as client:
-        resp = await client.get(
-            "/v1/api/workspaces/", params={"status": status}
-        )
+        resp = await client.get("/v1/api/workspaces/", params={"status": status})
         resp.raise_for_status()
         payload = resp.json()
     workspaces = payload.get("workspaces") or []
@@ -137,10 +133,10 @@ async def _run_list(archived: bool) -> None:
 
 async def _run_use(slug: str) -> None:
     import yaml
+    from keenyspace_shared.atomic_write import write_atomic
 
     from keenyspace.clients.http import build_authed_http_client
     from keenyspace.config import load_config_yaml
-    from keenyspace.fs.atomic import write_atomic
     from keenyspace.paths import CONFIG_DIR, CONFIG_YAML
 
     async with await build_authed_http_client() as client:
@@ -170,7 +166,7 @@ def _resolve_target_path(path: str | None) -> str:
         )
         if result.returncode == 0:
             return str(Path(result.stdout.strip()).resolve())
-    except (FileNotFoundError, OSError):
+    except FileNotFoundError, OSError:
         pass
     return str(Path(os.getcwd()).resolve())
 
@@ -185,9 +181,9 @@ async def _run_register(
     import json
 
     import yaml
+    from keenyspace_shared.atomic_write import write_atomic
 
     from keenyspace.clients.http import build_authed_http_client
-    from keenyspace.fs.atomic import write_atomic
     from keenyspace.paths import CONFIG_DIR, WORKSPACE_MAP_YAML
 
     abs_path = _resolve_target_path(path)
@@ -202,10 +198,12 @@ async def _run_register(
             console.print(f"[red]workspace not found:[/red] {slug}")
             sys.exit(2)
         resp.raise_for_status()
-    except (httpx.ConnectError, httpx.ConnectTimeout):
+    except httpx.ConnectError, httpx.ConnectTimeout:
         # WHY: server unreachable at register time is non-fatal; the map entry
         # is still useful for local routing and can be validated later.
-        console.print("[yellow]warning: server unreachable, registering without validation[/yellow]")
+        console.print(
+            "[yellow]warning: server unreachable, registering without validation[/yellow]"
+        )
 
     if marker:
         marker_dir = Path(abs_path) / ".keenyspace"
@@ -241,8 +239,8 @@ async def _run_register(
 
 def _run_unregister(path: str | None) -> None:
     import yaml
+    from keenyspace_shared.atomic_write import write_atomic
 
-    from keenyspace.fs.atomic import write_atomic
     from keenyspace.paths import WORKSPACE_MAP_YAML
 
     abs_path = _resolve_target_path(path)

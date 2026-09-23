@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from keenyspace_server.fs.atomic import write_atomic
+from keenyspace_shared.atomic_write import write_atomic
 
 
 def test_write_creates_file(tmp_path: Path) -> None:

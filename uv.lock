@@ -1008,7 +1008,7 @@ wheels = [
 
 [[package]]
 name = "keenyspace"
-version = "0.1.0"
+version = "0.2.0a1"
 source = { editable = "packages/client" }
 dependencies = [
     { name = "aiofiles" },
@@ -1074,7 +1074,7 @@ dev = [
 
 [[package]]
 name = "keenyspace-server"
-version = "0.1.0"
+version = "0.2.0a1"
 source = { editable = "packages/server" }
 dependencies = [
     { name = "alembic" },
@@ -1158,7 +1158,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "keenyspace-shared"
-version = "0.1.0"
+version = "0.2.0a1"
 source = { editable = "packages/shared" }
 dependencies = [
     { name = "pydantic" },

@@ -1,7 +1,8 @@
-"""Phase 4 workspace export endpoint integration tests (WS-04 / WS-06 / D-06).
+"""Workspace export endpoint integration tests.
 
 Full lifespan + real Postgres; uses ASGITransport with API-key Bearer auth.
 """
+
 from __future__ import annotations
 
 import io
@@ -19,9 +20,7 @@ PG_URL = os.environ.get("KEENYSPACE_DB__URL")
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
 ]
 
 
@@ -44,7 +43,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.session import get_db_session
 
-    pepper = get_settings().auth.api_key_pepper
+    pepper = get_settings().auth.api_key_pepper.get_secret_value()
     body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     lookup_hash = hashlib.sha256(f"{body}{pepper}".encode()).hexdigest()
     argon_hash = PasswordHasher().hash(body)
@@ -80,16 +79,12 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
 
 async def _seed_workspace(client: AsyncClient) -> str:
     slug = f"export-{uuid4().hex[:8]}"
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
     assert resp.status_code == 201, resp.text
     return slug
 
 
-async def test_export_returns_application_zip_with_attachment_disposition(
-    app, pg_url
-) -> None:
+async def test_export_returns_application_zip_with_attachment_disposition(app, pg_url) -> None:
     await _reset_schema(pg_url)
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
@@ -106,10 +101,7 @@ async def test_export_returns_application_zip_with_attachment_disposition(
             resp = await client.get(f"/v1/api/workspaces/{slug}/export")
             assert resp.status_code == 200, resp.text
             assert resp.headers["content-type"] == "application/zip"
-            assert (
-                resp.headers["content-disposition"]
-                == f'attachment; filename="{slug}.zip"'
-            )
+            assert resp.headers["content-disposition"] == f'attachment; filename="{slug}.zip"'
             body = resp.content
             with zipfile.ZipFile(io.BytesIO(body)) as zf:
                 names = set(zf.namelist())
@@ -145,9 +137,7 @@ async def test_export_unauthenticated_401(app, pg_url) -> None:
             assert resp.status_code == 401
 
 
-async def test_export_archived_workspace_succeeds_and_audit_records_flag(
-    app, pg_url
-) -> None:
+async def test_export_archived_workspace_succeeds_and_audit_records_flag(app, pg_url) -> None:
     from keenyspace_server.db.models import AuditLog
     from keenyspace_server.db.session import get_db_session
 
@@ -172,18 +162,19 @@ async def test_export_archived_workspace_succeeds_and_audit_records_flag(
 
             async with get_db_session() as session:
                 rows = (
-                    await session.execute(
-                        select(AuditLog).where(
-                            AuditLog.action == "workspace.exported"
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "workspace.exported")
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert rows, "expected workspace.exported audit row"
             payloads = [r.payload for r in rows]
-            assert any(
-                isinstance(p, dict) and p.get("archived") is True
-                for p in payloads
-            ), payloads
+            assert any(isinstance(p, dict) and p.get("archived") is True for p in payloads), (
+                payloads
+            )
 
 
 async def test_export_audit_log_emitted_for_active_workspace(app, pg_url) -> None:
@@ -208,15 +199,16 @@ async def test_export_audit_log_emitted_for_active_workspace(app, pg_url) -> Non
 
             async with get_db_session() as session:
                 rows = (
-                    await session.execute(
-                        select(AuditLog).where(
-                            AuditLog.action == "workspace.exported"
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "workspace.exported")
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert rows
             payloads = [r.payload for r in rows]
-            assert all(
-                isinstance(p, dict) and p.get("archived") is False
-                for p in payloads
-            ), payloads
+            assert all(isinstance(p, dict) and p.get("archived") is False for p in payloads), (
+                payloads
+            )

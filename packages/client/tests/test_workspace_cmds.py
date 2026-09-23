@@ -17,19 +17,26 @@ def _reload_and_get_app(server_url: str) -> object:
     os.environ["KEENYSPACE_SERVER_URL"] = server_url
     os.environ["COLUMNS"] = "200"
     import keenyspace.paths as paths_mod
+
     importlib.reload(paths_mod)
     import keenyspace.config as cfg
+
     importlib.reload(cfg)
     cfg.get_client_settings.cache_clear()  # type: ignore[attr-defined]
     import keenyspace.auth as auth_mod
+
     importlib.reload(auth_mod)
     import keenyspace.clients.http as http_mod
+
     importlib.reload(http_mod)
     import keenyspace.__main__ as main_mod
+
     importlib.reload(main_mod)
     import keenyspace.cli.workspace as ws_mod
+
     importlib.reload(ws_mod)
     import keenyspace.workspace_inference as inf
+
     importlib.reload(inf)
     return main_mod
 
@@ -52,9 +59,7 @@ def test_list_calls_server_renders_table(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/", method="GET"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/", method="GET").respond_with_json(
         {
             "workspaces": [
                 {
@@ -80,9 +85,9 @@ def test_use_writes_config_yaml(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo", method="GET"
-    ).respond_with_json({"slug": "demo", "status": "active"})
+    httpserver.expect_request("/v1/api/workspaces/demo", method="GET").respond_with_json(
+        {"slug": "demo", "status": "active"}
+    )
     server_url = _ipv4(httpserver.url_for(""))
     main_mod = _reload_and_get_app(server_url)
     result = cli_runner.invoke(main_mod.app, ["workspace", "use", "demo"])  # type: ignore[attr-defined]
@@ -99,9 +104,9 @@ def test_use_workspace_not_found_404(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/missing", method="GET"
-    ).respond_with_json({"detail": "not found"}, status=404)
+    httpserver.expect_request("/v1/api/workspaces/missing", method="GET").respond_with_json(
+        {"detail": "not found"}, status=404
+    )
     server_url = _ipv4(httpserver.url_for(""))
     main_mod = _reload_and_get_app(server_url)
     result = cli_runner.invoke(main_mod.app, ["workspace", "use", "missing"])  # type: ignore[attr-defined]
@@ -116,9 +121,7 @@ def test_archive_calls_server(
     httpserver: HTTPServer,
 ) -> None:
     _seed_auth(temp_config_dir["config_dir"])
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/archive", method="POST"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/archive", method="POST").respond_with_json(
         {"slug": "demo", "status": "archived", "archived_at": "2026-05-24T00:00:00Z"}
     )
     server_url = _ipv4(httpserver.url_for(""))
@@ -156,13 +159,13 @@ def test_from_cwd_unresolved_exits_2(
 
 
 def test_workspace_subcommands_reachable_from_cli_entrypoint() -> None:
-    """Regression guard (Phase 6 dogfood P1): `workspace` subcommands must be
-    dispatchable through the real CLI entrypoint, not just importable.
+    """Regression guard: `workspace` subcommands must be dispatchable through the real
+    CLI entrypoint, not merely importable.
 
-    The WR-04 lazy import previously lived in @workspace_app.callback(), which
-    Click runs AFTER subcommand resolution, so `keenyspace workspace use` died
-    with "No such command 'use'". The fix imports keenyspace.cli.workspace
-    eagerly when sys.argv[1] == "workspace".
+    The lazy import that keeps CLI startup fast used to live in @workspace_app.callback(),
+    which Click runs AFTER subcommand resolution, so `keenyspace workspace use` died with
+    "No such command 'use'". The fix imports keenyspace.cli.workspace eagerly when
+    sys.argv[1] == "workspace".
 
     We invoke the entry point exactly as the console script does
     (`from keenyspace.__main__ import app; app()`) in a fresh process with a
