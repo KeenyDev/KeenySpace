@@ -27,7 +27,9 @@ def mcp_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         wal=SimpleNamespace(max_entry_bytes=1024),
         auth=SimpleNamespace(multi_worker=False),
     )
-    app = SimpleNamespace(state=SimpleNamespace(settings=settings, wal_locks=WorkspaceLockRegistry()))
+    app = SimpleNamespace(
+        state=SimpleNamespace(settings=settings, wal_locks=WorkspaceLockRegistry())
+    )
     request = SimpleNamespace(app=app, headers={})
 
     @contextlib.asynccontextmanager

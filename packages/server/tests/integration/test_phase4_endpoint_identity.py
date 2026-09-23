@@ -9,6 +9,7 @@ NOTE: this test deliberately does NOT skip on health 500/503. That escape hatch
 in pre-UAT integration tests is what hid the original bug. If health is not
 green we want a hard failure surfacing the response body.
 """
+
 from __future__ import annotations
 
 import base64
@@ -30,9 +31,7 @@ PG_URL = os.environ.get("KEENYSPACE_DB__URL")
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
 ]
 
 
@@ -86,9 +85,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
 
 async def _seed_workspace(client: AsyncClient) -> str:
     slug = f"g2-{uuid4().hex[:8]}"
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
     assert resp.status_code == 201, resp.text
     return slug
 
@@ -106,15 +103,14 @@ async def _assert_audit_row(action: str, expected_sub: str) -> None:
 
     async with get_db_session() as session:
         rows = (
-            await session.execute(
-                select(AuditLog).where(AuditLog.action == action)
-            )
-        ).scalars().all()
+            (await session.execute(select(AuditLog).where(AuditLog.action == action)))
+            .scalars()
+            .all()
+        )
     assert rows, f"expected at least one {action!r} audit row"
     actor_subs = {r.actor_sub for r in rows}
     assert expected_sub in actor_subs, (
-        f"{action} audit row actor_sub mismatch: "
-        f"expected {expected_sub!r}, got {actor_subs!r}"
+        f"{action} audit row actor_sub mismatch: expected {expected_sub!r}, got {actor_subs!r}"
     )
 
 
@@ -130,9 +126,7 @@ def _make_client(app: object, plaintext: str) -> AsyncClient:
 async def _require_healthy(client: AsyncClient) -> None:
     health = await client.get("/healthz")
     if health.status_code != 200:
-        pytest.fail(
-            f"/healthz not green: status={health.status_code} body={health.text}"
-        )
+        pytest.fail(f"/healthz not green: status={health.status_code} body={health.text}")
 
 
 async def test_archive_endpoint_resolves_identity_under_real_authmiddleware(app, pg_url) -> None:  # type: ignore[no-untyped-def]
@@ -143,9 +137,7 @@ async def test_archive_endpoint_resolves_identity_under_real_authmiddleware(app,
             await _require_healthy(client)
             slug = await _seed_workspace(client)
             resp = await client.post(f"/v1/api/workspaces/{slug}/archive")
-            assert resp.status_code == 200, (
-                f"archive returned {resp.status_code} body={resp.text}"
-            )
+            assert resp.status_code == 200, f"archive returned {resp.status_code} body={resp.text}"
             await _assert_audit_row("workspace.archived", user_sub)
 
 
@@ -159,9 +151,7 @@ async def test_unarchive_endpoint_resolves_identity_under_real_authmiddleware(ap
             r1 = await client.post(f"/v1/api/workspaces/{slug}/archive")
             assert r1.status_code == 200, r1.text
             r2 = await client.post(f"/v1/api/workspaces/{slug}/unarchive")
-            assert r2.status_code == 200, (
-                f"unarchive returned {r2.status_code} body={r2.text}"
-            )
+            assert r2.status_code == 200, f"unarchive returned {r2.status_code} body={r2.text}"
             await _assert_audit_row("workspace.unarchived", user_sub)
 
 
@@ -173,9 +163,7 @@ async def test_export_endpoint_resolves_identity_under_real_authmiddleware(app, 
             await _require_healthy(client)
             slug = await _seed_workspace(client)
             resp = await client.get(f"/v1/api/workspaces/{slug}/export")
-            assert resp.status_code == 200, (
-                f"export returned {resp.status_code} body={resp.text}"
-            )
+            assert resp.status_code == 200, f"export returned {resp.status_code} body={resp.text}"
             await _assert_audit_row("workspace.exported", user_sub)
 
 
@@ -192,7 +180,5 @@ async def test_import_endpoint_resolves_identity_under_real_authmiddleware(app, 
                 data={"slug": slug},
                 files={"file": ("a.zip", zb, "application/zip")},
             )
-            assert resp.status_code == 201, (
-                f"import returned {resp.status_code} body={resp.text}"
-            )
+            assert resp.status_code == 201, f"import returned {resp.status_code} body={resp.text}"
             await _assert_audit_row("workspace.imported", user_sub)

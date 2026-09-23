@@ -229,9 +229,7 @@ def compile_cmd(
     workspace: str | None = typer.Option(
         None, "--workspace", help="Override resolved workspace slug"
     ),
-    wait: bool = typer.Option(
-        False, "--wait", help="Block until compile finishes or 5min timeout"
-    ),
+    wait: bool = typer.Option(False, "--wait", help="Block until compile finishes or 5min timeout"),
 ) -> None:
     """Trigger server compile pass (fire-and-forget; --wait polls compile_status)."""
     import asyncio
@@ -291,6 +289,8 @@ def doctor_cmd(
     from keenyspace.cli.doctor import run_doctor
 
     asyncio.run(run_doctor(as_json=as_json))
+
+
 # --- end 05-07 ---
 
 

@@ -32,7 +32,7 @@ async def fire_and_forget(envelope: dict[str, Any]) -> None:
             asyncio.open_unix_connection(str(DAEMON_SOCK)),
             timeout=FIRE_AND_FORGET_CONNECT_S,
         )
-    except (FileNotFoundError, ConnectionRefusedError, TimeoutError, OSError):
+    except FileNotFoundError, ConnectionRefusedError, TimeoutError, OSError:
         increment(counter_key)
         print(
             "WARN: keenyspace daemon socket unreachable; event dropped",
@@ -59,7 +59,7 @@ async def request_response(envelope: dict[str, Any], *, counter_key: str) -> str
             asyncio.open_unix_connection(str(DAEMON_SOCK)),
             timeout=REQ_RESP_CONNECT_S,
         )
-    except (FileNotFoundError, ConnectionRefusedError, TimeoutError, OSError):
+    except FileNotFoundError, ConnectionRefusedError, TimeoutError, OSError:
         increment(counter_key)
         return ""
     try:
@@ -77,7 +77,7 @@ async def request_response(envelope: dict[str, Any], *, counter_key: str) -> str
             content = payload.get("content")
             return content if isinstance(content, str) else ""
         return ""
-    except (TimeoutError, json.JSONDecodeError, OSError):
+    except TimeoutError, json.JSONDecodeError, OSError:
         increment(counter_key)
         return ""
     finally:

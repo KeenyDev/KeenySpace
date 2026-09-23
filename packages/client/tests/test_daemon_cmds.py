@@ -51,7 +51,7 @@ async def test_daemon_start_creates_socket_and_pidfile(
         task.cancel()
         try:  # noqa: SIM105 — await cannot live inside contextlib.suppress
             await task
-        except (asyncio.CancelledError, SystemExit):
+        except asyncio.CancelledError, SystemExit:
             pass
         paths_mod.DAEMON_SOCK.unlink(missing_ok=True)
         paths_mod.DAEMON_PID.unlink(missing_ok=True)
@@ -125,8 +125,7 @@ def test_daemon_stop_terminates_running_daemon(
             proc.terminate()
             out, err = proc.communicate(timeout=2)
             pytest.fail(
-                f"daemon did not bind socket in 5s\n"
-                f"stdout: {out.decode()}\nstderr: {err.decode()}"
+                f"daemon did not bind socket in 5s\nstdout: {out.decode()}\nstderr: {err.decode()}"
             )
         pid = int(paths_mod.DAEMON_PID.read_text().strip())
         os.kill(pid, signal.SIGTERM)

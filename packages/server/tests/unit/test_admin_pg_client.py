@@ -59,9 +59,7 @@ def test_pg_env_forwards_only_path_and_libpq_variables(
     monkeypatch.setenv("KEENYSPACE_AUTH__API_KEY_PEPPER", "pepper")
     monkeypatch.setenv("PGSSLMODE", "require")
 
-    env = admin._pg_env(
-        "postgresql+asyncpg://ks:secretpw@db:5432/ks", lock_timeout_ms=1000
-    )
+    env = admin._pg_env("postgresql+asyncpg://ks:secretpw@db:5432/ks", lock_timeout_ms=1000)
 
     assert all(key == "PATH" or key.startswith("PG") for key in env), sorted(env)
     assert env["PGPASSWORD"] == "secretpw"

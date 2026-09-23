@@ -56,7 +56,9 @@ def test_clone_writes_config_yaml(tmp_path: Path) -> None:
     _make_blueprint(bp_dir, with_instructions=False)
 
     ws_uuid = uuid.uuid4()
-    ws_dir = clone_default_blueprint(fs_root, "test-bp", ws_uuid, slug="myslug", display_name="test")
+    ws_dir = clone_default_blueprint(
+        fs_root, "test-bp", ws_uuid, slug="myslug", display_name="test"
+    )
 
     config_path = ws_dir / ".keenyspace" / "config.yaml"
     assert config_path.exists()
@@ -108,9 +110,7 @@ def test_move_instructions_preserves_existing_dst(tmp_path: Path) -> None:
 
     _move_instructions_to_keenyspace(ws)
 
-    assert (
-        ws / ".keenyspace" / "instructions" / "ingest.md"
-    ).read_text() == "already-here"
+    assert (ws / ".keenyspace" / "instructions" / "ingest.md").read_text() == "already-here"
 
 
 def test_clone_rejects_name_outside_blueprints_dir(tmp_path: Path) -> None:

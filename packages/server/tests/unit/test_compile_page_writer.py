@@ -12,9 +12,11 @@ from keenyspace_server.compile.page_writer import (
 
 
 def test_apply_plan_writes_valid_pageop(tmp_path: Path) -> None:
-    plan = CompilePlan(ops=[
-        PageOp(action="create", path="notes/test.md", body="hello", frontmatter={"title": "T"}),
-    ])
+    plan = CompilePlan(
+        ops=[
+            PageOp(action="create", path="notes/test.md", body="hello", frontmatter={"title": "T"}),
+        ]
+    )
     n = apply_plan(tmp_path, plan)
     assert n == 1
     page = tmp_path / "notes" / "test.md"
@@ -25,10 +27,12 @@ def test_apply_plan_writes_valid_pageop(tmp_path: Path) -> None:
 
 
 def test_apply_plan_denylist_zero_files_written_on_first_violation(tmp_path: Path) -> None:
-    plan = CompilePlan(ops=[
-        PageOp(action="create", path="notes/ok.md", body="ok", frontmatter={}),
-        PageOp(action="create", path="logs/forbidden.md", body="x", frontmatter={}),
-    ])
+    plan = CompilePlan(
+        ops=[
+            PageOp(action="create", path="notes/ok.md", body="ok", frontmatter={}),
+            PageOp(action="create", path="logs/forbidden.md", body="x", frontmatter={}),
+        ]
+    )
     with pytest.raises(CompilePlanSafetyError):
         apply_plan(tmp_path, plan)
     assert not (tmp_path / "notes" / "ok.md").exists()
@@ -37,9 +41,11 @@ def test_apply_plan_denylist_zero_files_written_on_first_violation(tmp_path: Pat
 
 
 def test_apply_plan_denylist_first_op_violation(tmp_path: Path) -> None:
-    plan = CompilePlan(ops=[
-        PageOp(action="create", path="CLAUDE.md", body="x", frontmatter={}),
-    ])
+    plan = CompilePlan(
+        ops=[
+            PageOp(action="create", path="CLAUDE.md", body="x", frontmatter={}),
+        ]
+    )
     with pytest.raises(CompilePlanSafetyError) as exc_info:
         apply_plan(tmp_path, plan)
     assert exc_info.value.path == "CLAUDE.md"
@@ -63,7 +69,9 @@ def test_serialize_page_round_trip_no_frontmatter(tmp_path: Path) -> None:
 
 
 def test_apply_plan_writes_to_canonical_md_path(tmp_path: Path) -> None:
-    unvalidated = PageOp.model_construct(action="create", path="notes/raw-name", body="b", frontmatter={})
+    unvalidated = PageOp.model_construct(
+        action="create", path="notes/raw-name", body="b", frontmatter={}
+    )
     apply_plan(tmp_path, CompilePlan.model_construct(ops=[unvalidated], notes=""))
     assert (tmp_path / "notes" / "raw-name.md").is_file()
     assert not (tmp_path / "notes" / "raw-name").exists()

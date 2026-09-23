@@ -55,8 +55,7 @@ def read_auth(path: Path = AUTH_JSON) -> dict[str, Any]:
         parsed = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(
-            f"Error: {path} is unreadable or corrupt ({exc}). "
-            f"Run `keenyspace login` to refresh."
+            f"Error: {path} is unreadable or corrupt ({exc}). Run `keenyspace login` to refresh."
         ) from exc
     if not isinstance(parsed, dict):
         return {}

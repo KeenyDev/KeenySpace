@@ -112,15 +112,11 @@ async def list_pages_tool(
 
         settings = app.state.settings
         ws_root = workspace_root(settings.fs.root, ws.uuid)
-        all_paths = await run_in_thread_slot(
-            VAULT_SCAN_SLOTS, list_md_paths, ws_root, prefix_norm
-        )
+        all_paths = await run_in_thread_slot(VAULT_SCAN_SLOTS, list_md_paths, ws_root, prefix_norm)
 
         page_size = _validated_limit(limit)
         try:
-            page, next_cursor = paginate_sequence(
-                all_paths, cursor=cursor, page_size=page_size
-            )
+            page, next_cursor = paginate_sequence(all_paths, cursor=cursor, page_size=page_size)
         except (ValueError, TypeError) as exc:
             raise ToolError(f"malformed cursor: {exc}") from exc
 
@@ -192,8 +188,6 @@ async def search_workspace_tool(
         )
 
         page = matches[:page_size]
-        next_cursor = (
-            encode_cursor({"after": page[-1]}) if len(matches) > page_size else None
-        )
+        next_cursor = encode_cursor({"after": page[-1]}) if len(matches) > page_size else None
         results = [SearchResult(path=p) for p in page]
         return SearchResponse(results=results, next_cursor=next_cursor)

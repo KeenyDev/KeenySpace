@@ -156,11 +156,7 @@ def _pg_env(db_url: str, *, lock_timeout_ms: int | None = None) -> dict[str, str
     secret; the client tools need none of them, so nothing else is inherited.
     """
     parsed = urlparse(db_url)
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if key == "PATH" or key.startswith("PG")
-    }
+    env = {key: value for key, value in os.environ.items() if key == "PATH" or key.startswith("PG")}
     if parsed.password:
         env["PGPASSWORD"] = unquote(parsed.password)
     if lock_timeout_ms is not None:
@@ -172,10 +168,8 @@ async def _run_pg_client(
     argv: list[str],
     env: dict[str, str],
     *,
-    feed_stdin: Callable[[asyncio.StreamWriter], Coroutine[Any, Any, None]]
-    | None = None,
-    drain_stdout: Callable[[asyncio.StreamReader], Coroutine[Any, Any, None]]
-    | None = None,
+    feed_stdin: Callable[[asyncio.StreamWriter], Coroutine[Any, Any, None]] | None = None,
+    drain_stdout: Callable[[asyncio.StreamReader], Coroutine[Any, Any, None]] | None = None,
 ) -> tuple[int, bytes]:
     """Run a PostgreSQL client tool and return ``(returncode, stderr)``.
 
@@ -294,11 +288,7 @@ class _PsqlScriptScanner:
             self._in_copy = True
 
     def _at_statement_start(self) -> bool:
-        return (
-            self._state is _LexState.CODE
-            and not self._statement_open
-            and self._paren_depth == 0
-        )
+        return self._state is _LexState.CODE and not self._statement_open and self._paren_depth == 0
 
     def _lex(self, line: bytes, line_number: int) -> None:
         i, n = 0, len(line)
@@ -500,7 +490,7 @@ async def _replay_dump(db_url: str, pg_dump_path: Path, *, wipe: bool) -> None:
                 while dump_chunk := dump_fp.read(UPLOAD_CHUNK_BYTES):
                     stdin.write(dump_chunk)
                     await stdin.drain()
-        except (BrokenPipeError, ConnectionResetError):
+        except BrokenPipeError, ConnectionResetError:
             # ON_ERROR_STOP makes psql exit mid-stream; its exit status and
             # stderr carry the actual failure.
             pass
@@ -713,9 +703,7 @@ async def admin_backup(
         _stream(),
         media_type="application/gzip",
         headers={
-            "Content-Disposition": (
-                f'attachment; filename="keenyspace-backup-{iso}.tar.gz"'
-            ),
+            "Content-Disposition": (f'attachment; filename="keenyspace-backup-{iso}.tar.gz"'),
             "Content-Length": str(archive_size),
         },
     )
@@ -761,29 +749,19 @@ async def admin_restore(
             await asyncio.to_thread(_extract_tar)
         except _ArchiveLinkError as exc:
             ADMIN_RESTORE_TOTAL.labels(outcome="symlink").inc()
-            raise HTTPException(
-                422, {"error": "symlink", "detail": f"link member {exc}"}
-            ) from exc
+            raise HTTPException(422, {"error": "symlink", "detail": f"link member {exc}"}) from exc
         except tarfile.OutsideDestinationError as exc:
             ADMIN_RESTORE_TOTAL.labels(outcome="path_traversal").inc()
-            raise HTTPException(
-                422, {"error": "path_traversal", "detail": str(exc)}
-            ) from exc
+            raise HTTPException(422, {"error": "path_traversal", "detail": str(exc)}) from exc
         except tarfile.AbsolutePathError as exc:
             ADMIN_RESTORE_TOTAL.labels(outcome="absolute_path").inc()
-            raise HTTPException(
-                422, {"error": "absolute_path", "detail": str(exc)}
-            ) from exc
+            raise HTTPException(422, {"error": "absolute_path", "detail": str(exc)}) from exc
         except tarfile.LinkOutsideDestinationError as exc:
             ADMIN_RESTORE_TOTAL.labels(outcome="symlink").inc()
-            raise HTTPException(
-                422, {"error": "symlink", "detail": str(exc)}
-            ) from exc
+            raise HTTPException(422, {"error": "symlink", "detail": str(exc)}) from exc
         except tarfile.TarError as exc:
             ADMIN_RESTORE_TOTAL.labels(outcome="malformed").inc()
-            raise HTTPException(
-                422, {"error": "malformed_tar", "detail": str(exc)}
-            ) from exc
+            raise HTTPException(422, {"error": "malformed_tar", "detail": str(exc)}) from exc
 
         manifest_path = tmp_dir / "manifest.json"
         if not manifest_path.exists():
@@ -796,9 +774,7 @@ async def admin_restore(
             target_version = _semver.VersionInfo.parse(KS_VERSION)
         except ValueError as exc:
             ADMIN_RESTORE_TOTAL.labels(outcome="bad_version").inc()
-            raise HTTPException(
-                422, {"error": "bad_version", "detail": str(exc)}
-            ) from exc
+            raise HTTPException(422, {"error": "bad_version", "detail": str(exc)}) from exc
         if (source_version.major, source_version.minor) != (
             target_version.major,
             target_version.minor,
@@ -824,9 +800,7 @@ async def admin_restore(
                 },
             )
 
-        existing = (
-            await session.execute(text("SELECT count(*) FROM workspaces"))
-        ).scalar_one()
+        existing = (await session.execute(text("SELECT count(*) FROM workspaces"))).scalar_one()
         existing = int(existing)
         existing_dirs = _sorted_dir_names(fs_root / "workspaces")
         if (existing > 0 or existing_dirs) and not force:
@@ -847,9 +821,7 @@ async def admin_restore(
         restored_root = tmp_dir / "fs_root"
         if not (restored_root / "workspaces").is_dir():
             ADMIN_RESTORE_TOTAL.labels(outcome="missing_fs_tree").inc()
-            raise HTTPException(
-                422, {"error": "missing_fs_tree", "detail": "fs_root/workspaces"}
-            )
+            raise HTTPException(422, {"error": "missing_fs_tree", "detail": "fs_root/workspaces"})
         try:
             await asyncio.to_thread(_check_dump_safe, pg_dump_path)
         except UnsafeDumpError as exc:
@@ -860,9 +832,7 @@ async def admin_restore(
                 line_number=exc.line_number,
                 reason=exc.reason,
             )
-            raise HTTPException(
-                422, {"error": "unsafe_pg_dump", "detail": str(exc)}
-            ) from exc
+            raise HTTPException(422, {"error": "unsafe_pg_dump", "detail": str(exc)}) from exc
 
         wipe = force and (existing > 0 or bool(existing_dirs))
 
@@ -951,9 +921,7 @@ async def admin_restore(
         # failed restore undiagnosable.
         ADMIN_RESTORE_TOTAL.labels(outcome="unexpected_error").inc()
         log.exception("admin.restore.unexpected_error", error=str(exc))
-        raise HTTPException(
-            500, {"error": "restore_failed", "detail": str(exc)[:500]}
-        ) from exc
+        raise HTTPException(500, {"error": "restore_failed", "detail": str(exc)[:500]}) from exc
     finally:
         with contextlib.suppress(OSError):
             archive_path.unlink(missing_ok=True)

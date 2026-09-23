@@ -12,19 +12,26 @@ from pytest_httpserver import HTTPServer
 
 def _reload() -> object:
     import keenyspace.paths as paths_mod
+
     importlib.reload(paths_mod)
     import keenyspace.config as cfg
+
     importlib.reload(cfg)
     cfg.get_client_settings.cache_clear()  # type: ignore[attr-defined]
     import keenyspace.auth as auth_mod
+
     importlib.reload(auth_mod)
     import keenyspace.clients.http as http_mod
+
     importlib.reload(http_mod)
     import keenyspace.pull.manifest as mf
+
     importlib.reload(mf)
     import keenyspace.pull.stash as st
+
     importlib.reload(st)
     import keenyspace.cli.pull as pull_mod
+
     return importlib.reload(pull_mod)
 
 
@@ -46,12 +53,8 @@ def _seed_auth(config_dir: Path) -> None:
 
 def _set_default_pull_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     pull_root = tmp_path / "keenyspace"
-    monkeypatch.setattr(
-        "keenyspace.cli.pull.__defaults__", (), raising=False
-    )
-    monkeypatch.setattr(
-        "keenyspace.paths.DEFAULT_PULL_ROOT", pull_root, raising=True
-    )
+    monkeypatch.setattr("keenyspace.cli.pull.__defaults__", (), raising=False)
+    monkeypatch.setattr("keenyspace.paths.DEFAULT_PULL_ROOT", pull_root, raising=True)
     return pull_root
 
 
@@ -71,15 +74,13 @@ async def test_pull_clean_succeeds(
         "raw/img.png": b"\x89PNG fake",
     }
     server_manifest = {rel: _sha256(b) for rel, b in server_files_bytes.items()}
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": server_manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
     for rel, payload in server_files_bytes.items():
-        httpserver.expect_request(
-            f"/v1/api/workspaces/demo/pages-raw/{rel}"
-        ).respond_with_data(payload, content_type="application/octet-stream")
+        httpserver.expect_request(f"/v1/api/workspaces/demo/pages-raw/{rel}").respond_with_data(
+            payload, content_type="application/octet-stream"
+        )
 
     pull_mod = _reload()
     pull_root = tmp_path / "keenyspace"
@@ -87,12 +88,8 @@ async def test_pull_clean_succeeds(
     await pull_mod.run_pull("demo", force=False, target=target)  # type: ignore[attr-defined]
 
     assert (target / "index.md").read_bytes() == server_files_bytes["index.md"]
-    assert (
-        target / "concepts" / "foo.md"
-    ).read_bytes() == server_files_bytes["concepts/foo.md"]
-    assert (
-        target / "raw" / "img.png"
-    ).read_bytes() == server_files_bytes["raw/img.png"]
+    assert (target / "concepts" / "foo.md").read_bytes() == server_files_bytes["concepts/foo.md"]
+    assert (target / "raw" / "img.png").read_bytes() == server_files_bytes["raw/img.png"]
 
     marker_path = target / ".keenyspace" / "slug-marker.json"
     assert marker_path.is_file()
@@ -124,9 +121,7 @@ async def test_pull_dirty_modified_refuses(
     # Mutate local AFTER manifest known.
     (target / "index.md").write_bytes(b"# locally edited\n")
 
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": server_manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
 
@@ -150,9 +145,7 @@ async def test_pull_dirty_added_refuses(
     target.mkdir(parents=True)
     (target / "extra.md").write_bytes(b"new local note\n")
 
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": {}, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
 
@@ -176,9 +169,7 @@ async def test_pull_dirty_removed_refuses(
     target.mkdir(parents=True)
     # Vault is missing 'index.md' but the server lists it.
     server_manifest = {"index.md": _sha256(b"# canon\n")}
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": server_manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
 
@@ -203,9 +194,7 @@ async def test_pull_ignores_non_md_outside_raw(
     target.mkdir(parents=True)
     (target / "notes.txt").write_bytes(b"arbitrary local non-tracked file\n")
 
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": {}, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
 
@@ -231,9 +220,7 @@ async def test_pull_ignores_obsidian_and_keenyspace(
     (target / ".keenyspace").mkdir()
     (target / ".keenyspace" / "cache.json").write_bytes(b"{}")
 
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": {}, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
 
@@ -295,9 +282,7 @@ async def test_pull_aborts_before_writing_on_unsafe_manifest_key(
     _seed_auth(temp_config_dir["config_dir"])
     monkeypatch.setenv("KEENYSPACE_SERVER_URL", _ipv4(httpserver.url_for("")))
 
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {
             "files": {
                 "index.md": _sha256(b"# index\n"),
@@ -315,9 +300,7 @@ async def test_pull_aborts_before_writing_on_unsafe_manifest_key(
     assert excinfo.value.code == 7
     assert not target.exists()
     assert not (tmp_path / "keenyspace" / "escape.md").exists()
-    assert [req.path for req, _resp in httpserver.log] == [
-        "/v1/api/workspaces/demo/manifest"
-    ]
+    assert [req.path for req, _resp in httpserver.log] == ["/v1/api/workspaces/demo/manifest"]
 
 
 async def test_pull_skips_fetching_unchanged_files(
@@ -339,9 +322,7 @@ async def test_pull_skips_fetching_unchanged_files(
         "index.md": _sha256(unchanged),
         "concepts/foo.md": _sha256(server_foo),
     }
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json(
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
         {"files": server_manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
     )
     httpserver.expect_request(
@@ -427,16 +408,16 @@ async def test_pull_aborts_on_failed_fetch_without_writing_state(
     good = {f"p{i}.md": f"# p{i}\n".encode() for i in range(12)}
     manifest = {rel: _sha256(b) for rel, b in good.items()}
     manifest["broken.md"] = _sha256(b"# broken\n")
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json({"files": manifest, "server_canon_at": "2026-05-24T00:00:00Z"})
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
+        {"files": manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
+    )
     for rel, payload in good.items():
-        httpserver.expect_request(
-            f"/v1/api/workspaces/demo/pages-raw/{rel}"
-        ).respond_with_data(payload, content_type="application/octet-stream")
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/pages-raw/broken.md"
-    ).respond_with_data("boom", status=500)
+        httpserver.expect_request(f"/v1/api/workspaces/demo/pages-raw/{rel}").respond_with_data(
+            payload, content_type="application/octet-stream"
+        )
+    httpserver.expect_request("/v1/api/workspaces/demo/pages-raw/broken.md").respond_with_data(
+        "boom", status=500
+    )
 
     pull_mod = _reload()
     target = tmp_path / "keenyspace" / "demo"
@@ -462,21 +443,19 @@ async def test_pull_writes_local_state_in_sorted_order(
 
     files = {f"n{i:02d}.md": f"# {i}\n".encode() for i in reversed(range(20))}
     manifest = {rel: _sha256(b) for rel, b in files.items()}
-    httpserver.expect_request(
-        "/v1/api/workspaces/demo/manifest"
-    ).respond_with_json({"files": manifest, "server_canon_at": "2026-05-24T00:00:00Z"})
+    httpserver.expect_request("/v1/api/workspaces/demo/manifest").respond_with_json(
+        {"files": manifest, "server_canon_at": "2026-05-24T00:00:00Z"}
+    )
     for rel, payload in files.items():
-        httpserver.expect_request(
-            f"/v1/api/workspaces/demo/pages-raw/{rel}"
-        ).respond_with_data(payload, content_type="application/octet-stream")
+        httpserver.expect_request(f"/v1/api/workspaces/demo/pages-raw/{rel}").respond_with_data(
+            payload, content_type="application/octet-stream"
+        )
 
     pull_mod = _reload()
     target = tmp_path / "keenyspace" / "demo"
     await pull_mod.run_pull("demo", force=False, target=target)  # type: ignore[attr-defined]
 
-    state = json.loads(
-        (temp_config_dir["state_dir"] / "demo" / "local-state.json").read_text()
-    )
+    state = json.loads((temp_config_dir["state_dir"] / "demo" / "local-state.json").read_text())
     assert list(state["files"]) == sorted(files)
     assert state["files"] == manifest
     for rel, payload in files.items():

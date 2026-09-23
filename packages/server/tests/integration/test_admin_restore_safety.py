@@ -163,9 +163,7 @@ async def test_force_restore_without_workspaces_tree_keeps_existing_state(
     admin_client: AsyncClient, fs_root: Path
 ) -> None:
     ws_dir = await _seed_workspace(admin_client, fs_root)
-    archive = _archive(
-        await _alembic_head(), pg_dump=b"SELECT 1;\n", with_workspaces_tree=False
-    )
+    archive = _archive(await _alembic_head(), pg_dump=b"SELECT 1;\n", with_workspaces_tree=False)
 
     resp = await _force_restore(admin_client, archive)
 

@@ -12,6 +12,7 @@ narrow pre-857b7c2 default forever. The sync manifest records what the image
 last shipped so an untouched default can be upgraded while operator edits stay
 untouched.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -37,13 +38,9 @@ def _seed_image(image_dir: Path) -> None:
     (blueprint / ".keenyspace").mkdir()
     (blueprint / "index.md").write_text("# image index\n")
     (blueprint / "CLAUDE.md").write_text("# image CLAUDE\n")
-    (blueprint / "_instructions" / "ingest.md").write_text(
-        "---\nname: ingest\n---\nbody\n"
-    )
+    (blueprint / "_instructions" / "ingest.md").write_text("---\nname: ingest\n---\nbody\n")
     (blueprint / "_templates" / "concept.md").write_text("# tpl\n")
-    (blueprint / ".keenyspace" / "blueprint.yaml").write_text(
-        "name: default\nversion: v0.1\n"
-    )
+    (blueprint / ".keenyspace" / "blueprint.yaml").write_text("name: default\nversion: v0.1\n")
 
 
 def test_first_boot_clones_full_tree(tmp_path: Path) -> None:
@@ -55,12 +52,8 @@ def test_first_boot_clones_full_tree(tmp_path: Path) -> None:
 
     ensure_fs_root_layout(fs_root, image_dir)
 
-    assert (
-        fs_root / "blueprints" / "default" / "index.md"
-    ).read_text() == "# image index\n"
-    assert (
-        fs_root / "blueprints" / "default" / "_instructions" / "ingest.md"
-    ).exists()
+    assert (fs_root / "blueprints" / "default" / "index.md").read_text() == "# image index\n"
+    assert (fs_root / "blueprints" / "default" / "_instructions" / "ingest.md").exists()
     assert (fs_root / "workspaces").is_dir()
     assert (fs_root / ".tmp").is_dir()
 
@@ -78,9 +71,7 @@ def test_second_boot_adds_missing_file_without_overwriting(tmp_path: Path) -> No
     target.mkdir(parents=True)
     (target / "index.md").write_text("# OPERATOR EDIT\n")
     (target / ".keenyspace").mkdir()
-    (target / ".keenyspace" / "blueprint.yaml").write_text(
-        "name: default\nversion: v0.1\n"
-    )
+    (target / ".keenyspace" / "blueprint.yaml").write_text("name: default\nversion: v0.1\n")
 
     ensure_fs_root_layout(fs_root, image_dir)
 
@@ -140,7 +131,7 @@ def test_merge_skips_symlinks_in_image(tmp_path: Path) -> None:
     link = image_dir / "default" / "evil-link.md"
     try:
         link.symlink_to(outside)
-    except (OSError, NotImplementedError):
+    except OSError, NotImplementedError:
         pytest.skip("filesystem does not support symlinks")
 
     # Pre-create target dir with all NON-symlink files (so we exercise the
@@ -170,9 +161,7 @@ def test_merge_oserror_logs_and_continues(tmp_path: Path) -> None:
             raise OSError("simulated")
         return real_copy(s, d, *args, **kwargs)
 
-    with patch(
-        "keenyspace_server.fs.bootstrap.shutil.copy2", side_effect=flaky_copy
-    ):
+    with patch("keenyspace_server.fs.bootstrap.shutil.copy2", side_effect=flaky_copy):
         _merge_blueprint_tree(src, dst)  # must NOT raise
 
     assert (dst / "b.md").exists()
@@ -180,9 +169,7 @@ def test_merge_oserror_logs_and_continues(tmp_path: Path) -> None:
 
 
 def _manifest(fs_root: Path) -> dict:
-    return json.loads(
-        (fs_root / "blueprints" / BLUEPRINT_SYNC_MANIFEST).read_bytes()
-    )
+    return json.loads((fs_root / "blueprints" / BLUEPRINT_SYNC_MANIFEST).read_bytes())
 
 
 def test_first_boot_records_shipped_digests(tmp_path: Path) -> None:
@@ -299,9 +286,7 @@ def test_in_sync_file_heals_missing_manifest_entry(tmp_path: Path) -> None:
     (image_dir / "default" / "index.md").write_text("# image index v2\n")
     ensure_fs_root_layout(fs_root, image_dir)
 
-    assert (
-        fs_root / "blueprints" / "default" / "index.md"
-    ).read_text() == "# image index v2\n"
+    assert (fs_root / "blueprints" / "default" / "index.md").read_text() == "# image index v2\n"
 
 
 def test_merge_called_before_sweep_stale_tmp(tmp_path: Path) -> None:

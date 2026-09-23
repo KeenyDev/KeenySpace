@@ -9,11 +9,14 @@ import pytest
 
 def _reload() -> object:
     import keenyspace.paths as paths_mod
+
     importlib.reload(paths_mod)
     import keenyspace.config as cfg
+
     importlib.reload(cfg)
     cfg.get_client_settings.cache_clear()  # type: ignore[attr-defined]
     import keenyspace.workspace_inference as inf
+
     return importlib.reload(inf)
 
 
@@ -39,9 +42,7 @@ def test_slug_marker_walk_up(
     monkeypatch.delenv("KEENYSPACE_WORKSPACE", raising=False)
     vault = tmp_path / "foo" / "bar"
     (vault / ".keenyspace").mkdir(parents=True)
-    (vault / ".keenyspace" / "slug-marker.json").write_text(
-        json.dumps({"slug": "beta"})
-    )
+    (vault / ".keenyspace" / "slug-marker.json").write_text(json.dumps({"slug": "beta"}))
     deep = vault / "concepts"
     deep.mkdir()
     inf = _reload()
@@ -62,9 +63,7 @@ def test_workspace_map_longest_prefix(
     long_prefix = tmp_path / "ws" / "deep"
     long_prefix.mkdir(parents=True)
     (config_dir / "workspace-map.yaml").write_text(
-        "paths:\n"
-        f"  '{short_prefix}': delta\n"
-        f"  '{long_prefix}': gamma\n"
+        f"paths:\n  '{short_prefix}': delta\n  '{long_prefix}': gamma\n"
     )
     inf = _reload()
     target = long_prefix / "subdir"
@@ -82,9 +81,7 @@ def test_default_fallback(
     monkeypatch.setenv("KEENYSPACE_SERVER_URL", "http://srv")
     monkeypatch.delenv("KEENYSPACE_WORKSPACE", raising=False)
     config_dir = temp_config_dir["config_dir"]
-    (config_dir / "config.yaml").write_text(
-        "server_url: http://srv\ndefault_workspace: epsilon\n"
-    )
+    (config_dir / "config.yaml").write_text("server_url: http://srv\ndefault_workspace: epsilon\n")
     inf = _reload()
     slug, source = inf.resolve_workspace_slug(cwd=tmp_path)  # type: ignore[attr-defined]
     assert slug == "epsilon"

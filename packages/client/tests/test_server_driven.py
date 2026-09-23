@@ -47,8 +47,7 @@ def _seed_config(home: Path) -> None:
 def _instructions(tool_whitelist: list[str] | None = None) -> Instructions:
     return Instructions(
         prompt="be helpful",
-        tool_whitelist=tool_whitelist
-        or ["search_workspace", "read_page", "list_pages"],
+        tool_whitelist=tool_whitelist or ["search_workspace", "read_page", "list_pages"],
         steps=["one"],
         model=None,
         budgets=Budgets(max_steps=5, max_tokens=10_000, max_seconds=30),
@@ -113,6 +112,4 @@ async def test_every_command_calls_get_instructions_first(
         await getattr(mod, run_fn)(**kwargs)
     assert order[0] == "get_instructions"
     assert "run_server_driven_command" in order
-    assert order.index("get_instructions") < order.index(
-        "run_server_driven_command"
-    )
+    assert order.index("get_instructions") < order.index("run_server_driven_command")

@@ -116,9 +116,7 @@ def _archive_workspace_sync(pg_url: str, slug: str) -> None:
 
         engine = create_async_engine(pg_url)
         async with engine.begin() as conn:
-            result = await conn.execute(
-                select(Workspace.uuid).where(Workspace.slug == slug)
-            )
+            result = await conn.execute(select(Workspace.uuid).where(Workspace.slug == slug))
             row = result.fetchone()
             if row:
                 await conn.execute(
@@ -146,8 +144,16 @@ async def test_list_workspaces_active_only(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -204,9 +210,7 @@ async def test_list_workspaces_active_only(tmp_path) -> None:
                 )
         await engine.dispose()
 
-        transport = StreamableHttpTransport(
-            f"http://127.0.0.1:{port}/v1/mcp/", headers=headers
-        )
+        transport = StreamableHttpTransport(f"http://127.0.0.1:{port}/v1/mcp/", headers=headers)
         async with Client(transport) as mcp_client:
             result = await mcp_client.call_tool("list_workspaces", {"include_archived": False})
             assert result is not None
@@ -234,8 +238,16 @@ async def test_list_workspaces_include_archived(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -287,9 +299,7 @@ async def test_list_workspaces_include_archived(tmp_path) -> None:
                 )
         await engine.dispose()
 
-        transport = StreamableHttpTransport(
-            f"http://127.0.0.1:{port}/v1/mcp/", headers=headers
-        )
+        transport = StreamableHttpTransport(f"http://127.0.0.1:{port}/v1/mcp/", headers=headers)
         async with Client(transport) as mcp_client:
             result = await mcp_client.call_tool("list_workspaces", {"include_archived": True})
             assert result is not None
@@ -317,8 +327,16 @@ async def test_get_workspace_info(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -354,9 +372,7 @@ async def test_get_workspace_info(tmp_path) -> None:
             created = r.json() if r.status_code == 201 else {}
             ws_uuid = created.get("uuid", "")
 
-        transport = StreamableHttpTransport(
-            f"http://127.0.0.1:{port}/v1/mcp/", headers=headers
-        )
+        transport = StreamableHttpTransport(f"http://127.0.0.1:{port}/v1/mcp/", headers=headers)
         async with Client(transport) as mcp_client:
             result = await mcp_client.call_tool("get_workspace_info", {"workspace": slug})
             assert result is not None
@@ -386,8 +402,16 @@ async def test_get_workspace_info_missing_raises_tool_error(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -410,9 +434,7 @@ async def test_get_workspace_info_missing_raises_tool_error(tmp_path) -> None:
         _, plaintext = await _seed_api_key(PG_URL or "")
         headers = {"Authorization": f"Bearer {plaintext}"}
 
-        transport = StreamableHttpTransport(
-            f"http://127.0.0.1:{port}/v1/mcp/", headers=headers
-        )
+        transport = StreamableHttpTransport(f"http://127.0.0.1:{port}/v1/mcp/", headers=headers)
         from fastmcp.exceptions import ToolError
 
         async with Client(transport) as mcp_client:

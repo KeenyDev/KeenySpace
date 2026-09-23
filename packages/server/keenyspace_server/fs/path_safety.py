@@ -45,9 +45,7 @@ def open_workspace_page(ws_root: Path, page_path: str) -> tuple[int, Path]:
     ws_root_resolved = ws_root.resolve()
 
     if not target.is_relative_to(ws_root_resolved):
-        raise UnsafePath(
-            f"Path {page_path!r} resolves outside workspace root"
-        )
+        raise UnsafePath(f"Path {page_path!r} resolves outside workspace root")
 
     # O_NOFOLLOW guards only the final path component against symlinks.
     # resolve() above follows intermediate symlinks — a TOCTOU window exists

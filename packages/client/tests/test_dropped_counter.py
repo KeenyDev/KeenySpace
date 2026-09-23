@@ -13,9 +13,7 @@ import pytest
 
 
 @pytest.fixture
-def _reload_dropped(
-    temp_config_dir: dict[str, Path], short_xdg_state: Path
-) -> object:
+def _reload_dropped(temp_config_dir: dict[str, Path], short_xdg_state: Path) -> object:
     import keenyspace.paths as paths_mod
 
     importlib.reload(paths_mod)

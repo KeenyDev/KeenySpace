@@ -106,9 +106,7 @@ async def list_workspaces_tool(include_archived: bool = False) -> ListWorkspaces
         # parallel: a session per row would serialize on the asyncpg pool.
         async with get_db_session() as session:
             rows = list((await session.execute(stmt)).scalars().all())
-            last_compile_map = await _fetch_last_compile_map(
-                session, [ws.uuid for ws in rows]
-            )
+            last_compile_map = await _fetch_last_compile_map(session, [ws.uuid for ws in rows])
 
         page_counts = await asyncio.gather(
             *[

@@ -1,4 +1,5 @@
 """RED tests for ws/archive.py — fail before implementation exists."""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -38,10 +38,12 @@ def test_pageop_body_min_length() -> None:
 
 def test_compileplan_rejects_duplicate_paths() -> None:
     with pytest.raises(ValidationError, match="Duplicate path"):
-        CompilePlan(ops=[
-            PageOp(action="create", path="x.md", body="a"),
-            PageOp(action="update", path="x.md", body="b"),
-        ])
+        CompilePlan(
+            ops=[
+                PageOp(action="create", path="x.md", body="a"),
+                PageOp(action="update", path="x.md", body="b"),
+            ]
+        )
 
 
 def test_compileplan_empty_is_valid() -> None:

@@ -48,9 +48,7 @@ def increment(kind: str) -> None:
             try:
                 f.seek(0)
                 raw = f.read()
-                parsed: object = (
-                    json.loads(raw) if raw.strip() else {"version": 1, "by_kind": {}}
-                )
+                parsed: object = json.loads(raw) if raw.strip() else {"version": 1, "by_kind": {}}
                 state: dict[str, object]
                 if isinstance(parsed, dict) and "by_kind" in parsed:
                     state = parsed
@@ -74,6 +72,6 @@ def increment(kind: str) -> None:
             finally:
                 with contextlib.suppress(OSError):
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         # Hook must always exit 0; missed increment is acceptable.
         return

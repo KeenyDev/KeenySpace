@@ -3,6 +3,7 @@
 
 Full lifespan + real Postgres; uses ASGITransport with API-key Bearer auth.
 """
+
 from __future__ import annotations
 
 import io
@@ -20,9 +21,7 @@ PG_URL = os.environ.get("KEENYSPACE_DB__URL")
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
 ]
 
 
@@ -81,9 +80,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
 
 async def _seed_workspace(client: AsyncClient) -> str:
     slug = f"src-{uuid4().hex[:8]}"
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
     assert resp.status_code == 201, resp.text
     return slug
 
@@ -118,9 +115,7 @@ async def test_export_import_roundtrip_preserves_pages(app, pg_url) -> None:  # 
             slug_a = await _seed_workspace(client)
             async with get_db_session() as session:
                 ws_a = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug_a)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug_a))
                 ).scalar_one()
             settings = get_settings()
             ws_a_dir = settings.fs.root / "workspaces" / str(ws_a.uuid)
@@ -147,9 +142,7 @@ async def test_export_import_roundtrip_preserves_pages(app, pg_url) -> None:  # 
 
             async with get_db_session() as session:
                 ws_b = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug_b)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug_b))
                 ).scalar_one()
             ws_b_dir = settings.fs.root / "workspaces" / str(ws_b.uuid)
             assert (ws_b_dir / "sample.md").read_bytes() == sample_body
@@ -158,10 +151,7 @@ async def test_export_import_roundtrip_preserves_pages(app, pg_url) -> None:  # 
 
             async with get_db_session() as session:
                 actions = {
-                    r.action
-                    for r in (
-                        await session.execute(select(AuditLog))
-                    ).scalars().all()
+                    r.action for r in (await session.execute(select(AuditLog))).scalars().all()
                 }
             assert "workspace.exported" in actions
             assert "workspace.imported" in actions
@@ -181,9 +171,7 @@ async def test_import_path_traversal_returns_422(app, pg_url) -> None:  # type: 
             if health.status_code in (500, 503):
                 pytest.skip("server not ready")
 
-            zb = _make_zip_bytes(
-                [("../../../etc/passwd", b"x"), ("index.md", b"# x")]
-            )
+            zb = _make_zip_bytes([("../../../etc/passwd", b"x"), ("index.md", b"# x")])
             resp = await client.post(
                 "/v1/api/workspaces/import",
                 data={"slug": "trav"},
@@ -234,9 +222,7 @@ async def test_import_bad_zip_returns_422(app, pg_url) -> None:  # type: ignore[
             resp = await client.post(
                 "/v1/api/workspaces/import",
                 data={"slug": "bogus"},
-                files={
-                    "file": ("bad.zip", b"not a zip", "application/zip")
-                },
+                files={"file": ("bad.zip", b"not a zip", "application/zip")},
             )
             assert resp.status_code == 422
             assert resp.json()["detail"]["code"] == "bad_zip"
@@ -313,7 +299,9 @@ async def test_import_releases_db_connection_and_reaps_dir_on_slug_race(  # type
             resp = await client.post(
                 "/v1/api/workspaces/import",
                 data={"slug": slug},
-                files={"file": ("a.zip", _make_zip_bytes([("index.md", b"# x")]), "application/zip")},
+                files={
+                    "file": ("a.zip", _make_zip_bytes([("index.md", b"# x")]), "application/zip")
+                },
             )
 
         assert resp.status_code == 409, resp.text
@@ -340,14 +328,8 @@ async def test_import_assigns_new_uuid_ignoring_source(app, pg_url) -> None:  # 
                 pytest.skip("server not ready")
 
             source_uuid = "11111111-1111-1111-1111-111111111111"
-            cfg = (
-                f"uuid: {source_uuid}\n"
-                "slug: original\n"
-                "blueprint: custom-bp@v0.2\n"
-            ).encode()
-            zb = _make_zip_bytes(
-                [(".keenyspace/config.yaml", cfg), ("index.md", b"# x")]
-            )
+            cfg = (f"uuid: {source_uuid}\nslug: original\nblueprint: custom-bp@v0.2\n").encode()
+            zb = _make_zip_bytes([(".keenyspace/config.yaml", cfg), ("index.md", b"# x")])
             slug = f"new-{uuid4().hex[:8]}"
             resp = await client.post(
                 "/v1/api/workspaces/import",
@@ -361,9 +343,7 @@ async def test_import_assigns_new_uuid_ignoring_source(app, pg_url) -> None:  # 
 
             async with get_db_session() as session:
                 ws = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug))
                 ).scalar_one()
             assert ws.blueprint_ref == "custom-bp@v0.2"
 
@@ -411,18 +391,13 @@ async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> No
         ) as client:
             health = await client.get("/healthz")
             if health.status_code != 200:
-                pytest.fail(
-                    f"/healthz not green: status={health.status_code} "
-                    f"body={health.text}"
-                )
+                pytest.fail(f"/healthz not green: status={health.status_code} body={health.text}")
 
             slug_a = await _seed_workspace(client)
 
             async with get_db_session() as session:
                 ws_a = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug_a)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug_a))
                 ).scalar_one()
             settings = get_settings()
             ws_a_dir = settings.fs.root / "workspaces" / str(ws_a.uuid)
@@ -469,10 +444,7 @@ async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> No
 
             async with get_db_session() as session:
                 actions = {
-                    r.action
-                    for r in (
-                        await session.execute(select(AuditLog))
-                    ).scalars().all()
+                    r.action for r in (await session.execute(select(AuditLog))).scalars().all()
                 }
             assert "workspace.exported" in actions
             assert "workspace.imported" in actions

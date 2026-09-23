@@ -64,9 +64,7 @@ async def assemble_context(envelope: dict[str, Any]) -> dict[str, Any]:
 
     excerpt = await read_transcript_excerpt(transcript_path)
     if excerpt is None:
-        log.warning(
-            "post_compact.transcript_unavailable", workspace=workspace_slug
-        )
+        log.warning("post_compact.transcript_unavailable", workspace=workspace_slug)
         return {
             "ok": False,
             "content": None,

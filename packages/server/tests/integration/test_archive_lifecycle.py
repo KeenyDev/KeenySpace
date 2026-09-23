@@ -2,6 +2,7 @@
 
 Full lifespan + real Postgres; uses ASGITransport with API-key Bearer auth.
 """
+
 from __future__ import annotations
 
 import os
@@ -87,9 +88,7 @@ async def _ws_row(slug: str) -> Any:
     from keenyspace_server.db.session import get_db_session
 
     async with get_db_session() as session:
-        return (
-            await session.execute(select(Workspace).where(Workspace.slug == slug))
-        ).scalar_one()
+        return (await session.execute(select(Workspace).where(Workspace.slug == slug))).scalar_one()
 
 
 async def test_archive_flips_db_and_config(app, pg_url) -> None:  # type: ignore[no-untyped-def]
@@ -131,10 +130,14 @@ async def test_archive_flips_db_and_config(app, pg_url) -> None:  # type: ignore
 
             async with get_db_session() as session:
                 audit = (
-                    await session.execute(
-                        select(AuditLog).where(AuditLog.action == "workspace.archived")
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "workspace.archived")
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert any(row.workspace_uuid == ws.uuid for row in audit)
 
 

@@ -84,9 +84,7 @@ async def test_session_start_compact_request_response(
     sock_path = paths_mod.DAEMON_SOCK
     sock_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async def handler(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             line = await reader.readline()
             assert line, "no line received"
@@ -243,9 +241,11 @@ async def test_hook_drops_on_default_workspace(
     monkeypatch.setenv("KEENYSPACE_SERVER_URL", "http://127.0.0.1:1")
     (temp_config_dir["config_dir"] / "config.yaml").write_text("default_workspace: fallback\n")
     import keenyspace.config as cfg_mod
+
     importlib.reload(cfg_mod)
     cfg_mod.get_client_settings.cache_clear()  # type: ignore[attr-defined]
     import keenyspace.workspace_inference as inf_mod
+
     importlib.reload(inf_mod)
     handlers_mod, paths_mod = await _reload_hooks_modules()
     _set_stdin(monkeypatch, {"cwd": "/tmp/no-mapping-here", "session_id": "s99"})
@@ -272,9 +272,11 @@ async def test_hook_forwards_when_mapped(
     cwd_path = str(Path("/tmp").resolve())
     map_path.write_text(yaml.safe_dump({"paths": {cwd_path: "mapped"}}))
     import keenyspace.config as cfg_mod
+
     importlib.reload(cfg_mod)
     cfg_mod.get_client_settings.cache_clear()  # type: ignore[attr-defined]
     import keenyspace.workspace_inference as inf_mod
+
     importlib.reload(inf_mod)
     handlers_mod, _ = await _reload_hooks_modules()
     _set_stdin(monkeypatch, {"cwd": "/tmp", "session_id": "s77"})

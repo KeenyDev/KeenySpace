@@ -104,9 +104,7 @@ async def test_build_workspace_zip_excludes_obsidian_and_logs(tmp_path):
 @pytest.mark.asyncio
 async def test_build_workspace_zip_raises_when_over_cap(monkeypatch, tmp_path):
     ws = _seed_ws(tmp_path)
-    monkeypatch.setattr(
-        "keenyspace_server.ws.export.MAX_EXPORT_UNCOMPRESSED_BYTES", 1
-    )
+    monkeypatch.setattr("keenyspace_server.ws.export.MAX_EXPORT_UNCOMPRESSED_BYTES", 1)
     with pytest.raises(ExportTooLargeError):
         await build_workspace_zip(ws, enforce_size_cap=True, tmp_root=tmp_path / ".tmp")
 
@@ -114,9 +112,7 @@ async def test_build_workspace_zip_raises_when_over_cap(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_build_workspace_zip_completes_within_timeout(tmp_path):
     ws = _seed_ws(tmp_path)
-    gen = await asyncio.wait_for(
-        build_workspace_zip(ws, tmp_root=tmp_path / ".tmp"), timeout=10.0
-    )
+    gen = await asyncio.wait_for(build_workspace_zip(ws, tmp_root=tmp_path / ".tmp"), timeout=10.0)
     blob = b"".join([c async for c in gen])
     assert len(blob) > 0
 

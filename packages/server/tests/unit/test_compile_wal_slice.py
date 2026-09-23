@@ -114,8 +114,7 @@ def test_extract_wal_slice_unparseable_cursor_reads_every_file(tmp_path: Path) -
 
 def _three_entries(ws_root: Path) -> list[bytes]:
     chunks = [
-        _make_entry_bytes(_DAY + timedelta(seconds=i), content=f"entry-{i}")[1]
-        for i in range(3)
+        _make_entry_bytes(_DAY + timedelta(seconds=i), content=f"entry-{i}")[1] for i in range(3)
     ]
     _log_file(ws_root, _DAY).write_bytes(b"".join(chunks))
     return chunks
@@ -129,11 +128,11 @@ def _three_entries(ws_root: Path) -> list[bytes]:
         pytest.param(
             lambda c: len(c[0]) + len(c[1]) - 1, ["entry-0"], True, id="second-entry-does-not-fit"
         ),
+        pytest.param(lambda c: len(c[0]) + len(c[1]), ["entry-0", "entry-1"], True, id="exact-fit"),
         pytest.param(
-            lambda c: len(c[0]) + len(c[1]), ["entry-0", "entry-1"], True, id="exact-fit"
-        ),
-        pytest.param(
-            lambda c: sum(len(x) for x in c), ["entry-0", "entry-1", "entry-2"], False,
+            lambda c: sum(len(x) for x in c),
+            ["entry-0", "entry-1", "entry-2"],
+            False,
             id="budget-covers-backlog",
         ),
     ],

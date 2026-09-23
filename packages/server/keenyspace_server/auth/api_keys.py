@@ -174,9 +174,7 @@ class ApiKeyService:
         async with self._db_factory() as session:
             await _lock_user_keys(session, user_sub)
             seen_at = (
-                await session.execute(
-                    select(UserRow.groups_seen_at).where(UserRow.sub == user_sub)
-                )
+                await session.execute(select(UserRow.groups_seen_at).where(UserRow.sub == user_sub))
             ).scalar_one_or_none()
             if seen_at is not None and seen_at > credential_issued_at:
                 log.warning(

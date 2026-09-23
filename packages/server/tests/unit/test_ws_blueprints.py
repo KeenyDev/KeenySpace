@@ -82,9 +82,7 @@ async def test_logs_and_skips_malformed_yaml(tmp_path: Path) -> None:
         result = await list_blueprints_from_fs(tmp_path)
 
     assert result == []
-    assert any(
-        event.get("event") == "blueprint.yaml_parse_failed" for event in captured
-    )
+    assert any(event.get("event") == "blueprint.yaml_parse_failed" for event in captured)
 
 
 @pytest.mark.asyncio
@@ -99,6 +97,4 @@ async def test_logs_and_skips_non_dict_yaml(tmp_path: Path) -> None:
         result = await list_blueprints_from_fs(tmp_path)
 
     assert result == []
-    assert any(
-        event.get("event") == "blueprint.yaml_invalid_shape" for event in captured
-    )
+    assert any(event.get("event") == "blueprint.yaml_invalid_shape" for event in captured)

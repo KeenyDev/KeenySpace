@@ -12,7 +12,6 @@ import re
 
 import pytest
 from fastmcp.tools import Tool
-
 from keenyspace_server.mcp.server import _TIER1_TOOLS
 
 _PLANNING_ID = re.compile(r"\b[A-Z]{1,6}-[0-9]+\b")

@@ -45,9 +45,7 @@ async def archive_workspace(
         .returning(Workspace.uuid)
     )
     if result.scalar_one_or_none() is None:
-        raise ArchiveConflictError(
-            f"workspace {slug!r} not found or already archived"
-        )
+        raise ArchiveConflictError(f"workspace {slug!r} not found or already archived")
     await write_audit(
         session,
         actor_sub=actor_sub,
@@ -82,9 +80,7 @@ async def unarchive_workspace(
         .returning(Workspace.uuid)
     )
     if status_result.scalar_one_or_none() is None:
-        raise ArchiveConflictError(
-            f"workspace {slug!r} not found or not archived"
-        )
+        raise ArchiveConflictError(f"workspace {slug!r} not found or not archived")
 
     # Selective compile-state reset: only clear pause if reason was 'archived'.
     # Other pause reasons (daily_ceiling, loop_abort, ...) survive unarchive and
@@ -120,9 +116,7 @@ def _mirror_archived_at_to_config(ws_dir: Path, archived_at: datetime | None) ->
     config_path = ws_dir / ".keenyspace" / "config.yaml"
     try:
         if not config_path.exists():
-            log.warning(
-                "workspace.config_yaml_missing", path=str(config_path)
-            )
+            log.warning("workspace.config_yaml_missing", path=str(config_path))
             return
         with contextlib.suppress(Exception):
             existing_text = config_path.read_text()

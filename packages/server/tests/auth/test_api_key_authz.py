@@ -154,7 +154,7 @@ async def test_revoke_drops_cached_verification(seed_api_key) -> None:
     sub, key = await seed_api_key(groups=None)
     service = _service()
     assert await service.verify(key) is not None
-    (key_id, _), = await _key_rows(sub)
+    ((key_id, _),) = await _key_rows(sub)
 
     assert await service.revoke(key_id, sub) is True
 
@@ -263,7 +263,7 @@ async def test_revoke_and_audit_commit_together(
     seed_api_key, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sub, key = await seed_api_key(groups=None)
-    (key_id, _), = await _key_rows(sub)
+    ((key_id, _),) = await _key_rows(sub)
 
     async def _failing_audit(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("audit store unavailable")
@@ -273,7 +273,7 @@ async def test_revoke_and_audit_commit_together(
     with pytest.raises(RuntimeError, match="audit store unavailable"):
         await _service().revoke(key_id, sub)
 
-    (_, revoked_at), = await _key_rows(sub)
+    ((_, revoked_at),) = await _key_rows(sub)
     assert revoked_at is None
     monkeypatch.undo()
     assert await _service().verify(key) is not None
@@ -364,9 +364,7 @@ async def test_mint_for_user_without_snapshot_is_allowed(seed_api_key) -> None:
     assert minted["key"].startswith("ks_live_")
 
 
-async def test_last_used_tracking_is_bounded(
-    seed_api_key, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_last_used_tracking_is_bounded(seed_api_key, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(api_keys_module, "LAST_USED_TRACKED_MAX_ENTRIES", 1)
     service = _service()
     _, first = await seed_api_key(groups=None)

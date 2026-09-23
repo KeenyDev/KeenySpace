@@ -2,6 +2,7 @@
 WAL rotation race test: validates filename derivation inside asyncio.Lock (Pitfall #7).
 Simulates 100 concurrent appends around UTC midnight boundary.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -105,7 +106,9 @@ async def test_wal_rotation_race(tmp_path: Path):
     entries_after = parse_wal(day_after.read_text()) if day_after.exists() else []
 
     total = len(entries_before) + len(entries_after)
-    assert total == 100, f"Expected 100 entries total, got {total} ({len(entries_before)} + {len(entries_after)})"
+    assert total == 100, (
+        f"Expected 100 entries total, got {total} ({len(entries_before)} + {len(entries_after)})"
+    )
 
     all_ulids = [str(e.id) for e in entries_before + entries_after]
     assert len(set(all_ulids)) == 100, f"Expected 100 unique ULIDs, got {len(set(all_ulids))}"

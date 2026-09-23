@@ -104,9 +104,7 @@ def test_copy_block_without_terminator_is_accepted_at_eof(tmp_path: Path) -> Non
         pytest.param(b"SELECT 1;\x00\\! id\n", "NUL", id="nul-byte"),
     ],
 )
-def test_meta_command_vectors_are_rejected(
-    tmp_path: Path, dump: bytes, reason: str
-) -> None:
+def test_meta_command_vectors_are_rejected(tmp_path: Path, dump: bytes, reason: str) -> None:
     with pytest.raises(UnsafeDumpError, match=reason):
         _check_dump_safe(_write(tmp_path, dump))
 

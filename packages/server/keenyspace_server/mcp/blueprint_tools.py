@@ -70,9 +70,7 @@ async def get_instructions_tool(
         workspace = resolve_workspace(workspace)
 
         if not _COMMAND_RE.match(command):
-            raise ToolError(
-                f"invalid command name {command!r}: must match {_COMMAND_RE.pattern}"
-            )
+            raise ToolError(f"invalid command name {command!r}: must match {_COMMAND_RE.pattern}")
 
         req = get_http_request()
         settings = req.app.state.settings

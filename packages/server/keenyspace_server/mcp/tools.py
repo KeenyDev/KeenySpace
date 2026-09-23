@@ -116,6 +116,7 @@ async def append_log(
         locks = app.state.wal_locks
 
         from keenyspace_server.auth.user import User
+
         actor = f"dev:{user.sub}" if isinstance(user, User) else f"unknown:{user.identity}"
 
         client_version: str | None = None
@@ -196,7 +197,9 @@ async def compile_tool(workspace: str | None = None) -> CompileTriggerResponse:
         if coordinator is None:
             raise ToolError("compile coordinator not initialised")
         try:
-            trigger_result: CompileTriggerResponse = await coordinator.trigger(ws.uuid, source="mcp_tool")
+            trigger_result: CompileTriggerResponse = await coordinator.trigger(
+                ws.uuid, source="mcp_tool"
+            )
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
         return trigger_result

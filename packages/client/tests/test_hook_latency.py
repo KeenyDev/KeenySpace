@@ -60,9 +60,7 @@ async def test_session_start_compact_under_1s(
     sock_path = paths_mod.DAEMON_SOCK
     sock_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async def handler(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             line = await reader.readline()
             assert line

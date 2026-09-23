@@ -1,0 +1,2 @@
+- [Deploy gotchas](project_deploy_gotchas.md) — editable install required in image, no Redis, .env interpolation-only, metrics on :9100, fail-closed secrets
+- [Local dev environment](project_local_dev_env.md) — dev Postgres compose on :55432 (contended), required KEENYSPACE_* vars, skeleton-app trap, broken .env.example

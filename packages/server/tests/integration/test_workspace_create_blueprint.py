@@ -41,9 +41,7 @@ async def test_create_workspace_rejects_unsafe_blueprint_name(
     assert list((fs_root / "workspaces").iterdir()) == []
 
 
-async def test_create_workspace_unknown_blueprint_returns_422(
-    client, fs_root: Path
-) -> None:
+async def test_create_workspace_unknown_blueprint_returns_422(client, fs_root: Path) -> None:
     resp = await client.post(
         "/v1/api/workspaces/", json={"slug": "missing-bp", "blueprint": "nope"}
     )

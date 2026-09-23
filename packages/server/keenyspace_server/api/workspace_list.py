@@ -133,9 +133,7 @@ async def list_workspaces_http(
     # DB query runs OUTSIDE asyncio.gather because AsyncSession is not safe
     # for concurrent use; only the thread-bound count_pages calls run
     # in parallel.
-    last_compile_map = await _fetch_last_compile_map(
-        session, [ws.uuid for ws in page_rows]
-    )
+    last_compile_map = await _fetch_last_compile_map(session, [ws.uuid for ws in page_rows])
     page_counts = await asyncio.gather(
         *[
             asyncio.to_thread(count_pages, workspace_root(settings.fs.root, ws.uuid))

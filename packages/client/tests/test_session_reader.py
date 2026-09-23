@@ -199,14 +199,26 @@ async def test_tick_buffer_accumulates_across_ticks_then_ingests(tmp_path: Path)
 
     # Two small appends, each below the threshold on its own.
     f.write_text(_transcript("/Users/dmitrydankov/BSW", [("user", "a" * 2500)]))
-    await _tick(state, dead_letter_path=tmp_path / "dead.jsonl", projects_dir=projects, ingest_fn=fake_ingest,
-                resolve_fn=_registered, min_delta_chars=4_000)
+    await _tick(
+        state,
+        dead_letter_path=tmp_path / "dead.jsonl",
+        projects_dir=projects,
+        ingest_fn=fake_ingest,
+        resolve_fn=_registered,
+        min_delta_chars=4_000,
+    )
     assert calls == []  # still under threshold
 
     with f.open("a") as fh:
         fh.write(json.dumps({"message": {"role": "assistant", "content": "b" * 2500}}) + "\n")
-    await _tick(state, dead_letter_path=tmp_path / "dead.jsonl", projects_dir=projects, ingest_fn=fake_ingest,
-                resolve_fn=_registered, min_delta_chars=4_000)
+    await _tick(
+        state,
+        dead_letter_path=tmp_path / "dead.jsonl",
+        projects_dir=projects,
+        ingest_fn=fake_ingest,
+        resolve_fn=_registered,
+        min_delta_chars=4_000,
+    )
     assert len(calls) == 1  # accumulated buffer crossed the threshold
     assert "a" * 100 in calls[0][1] and "b" * 100 in calls[0][1]
     assert buffers[str(f)] == ""  # cleared after ingest
@@ -260,8 +272,14 @@ async def test_tick_skipped_ingest_keeps_buffer_and_retries_when_idle(
 
     state = ReaderState()
     cursors, buffers = state.cursors, state.buffers
-    await _tick(state, dead_letter_path=tmp_path / "dead.jsonl", projects_dir=projects, ingest_fn=ingest,
-                resolve_fn=_registered, min_delta_chars=4_000)
+    await _tick(
+        state,
+        dead_letter_path=tmp_path / "dead.jsonl",
+        projects_dir=projects,
+        ingest_fn=ingest,
+        resolve_fn=_registered,
+        min_delta_chars=4_000,
+    )
     assert calls == []
     assert cursors[str(f)] == f.stat().st_size
     kept = buffers[str(f)]
@@ -269,8 +287,14 @@ async def test_tick_skipped_ingest_keeps_buffer_and_retries_when_idle(
 
     # No new transcript bytes: the pending buffer alone must trigger the retry.
     credential_available = True
-    await _tick(state, dead_letter_path=tmp_path / "dead.jsonl", projects_dir=projects, ingest_fn=ingest,
-                resolve_fn=_registered, min_delta_chars=4_000)
+    await _tick(
+        state,
+        dead_letter_path=tmp_path / "dead.jsonl",
+        projects_dir=projects,
+        ingest_fn=ingest,
+        resolve_fn=_registered,
+        min_delta_chars=4_000,
+    )
     assert calls == [kept]
     assert buffers[str(f)] == ""
 
@@ -291,8 +315,15 @@ async def test_tick_caps_buffer_while_ingest_keeps_failing(tmp_path: Path) -> No
     for marker in "abcde":
         with f.open("a") as fh:
             fh.write(json.dumps({"message": {"role": "user", "content": marker * 3000}}) + "\n")
-        await _tick(state, dead_letter_path=tmp_path / "dead.jsonl", projects_dir=projects, ingest_fn=failing_ingest,
-                    resolve_fn=_registered, min_delta_chars=1_000, max_buffer_chars=7_000)
+        await _tick(
+            state,
+            dead_letter_path=tmp_path / "dead.jsonl",
+            projects_dir=projects,
+            ingest_fn=failing_ingest,
+            resolve_fn=_registered,
+            min_delta_chars=1_000,
+            max_buffer_chars=7_000,
+        )
 
     kept = buffers[str(f)]
     assert len(kept) <= 7_000
@@ -325,9 +356,15 @@ async def test_tick_failing_ingest_backs_off_then_dead_letters(tmp_path: Path) -
     state = ReaderState()
     # 10-minute ticks over two days: far more ticks than allowed attempts.
     for _ in range(6 * 48):
-        await _tick(state, dead_letter_path=dead, projects_dir=projects,
-                    ingest_fn=failing_ingest, resolve_fn=_registered,
-                    min_delta_chars=4_000, clock=clock)
+        await _tick(
+            state,
+            dead_letter_path=dead,
+            projects_dir=projects,
+            ingest_fn=failing_ingest,
+            resolve_fn=_registered,
+            min_delta_chars=4_000,
+            clock=clock,
+        )
         clock.now += 600
 
     assert len(calls) == MAX_INGEST_ATTEMPTS
@@ -362,9 +399,15 @@ async def test_tick_success_after_failure_clears_retry_state(tmp_path: Path) -> 
     state = ReaderState()
 
     async def tick() -> None:
-        await _tick(state, dead_letter_path=tmp_path / "dead.jsonl", projects_dir=projects,
-                    ingest_fn=flaky_ingest, resolve_fn=_registered,
-                    min_delta_chars=4_000, clock=clock)
+        await _tick(
+            state,
+            dead_letter_path=tmp_path / "dead.jsonl",
+            projects_dir=projects,
+            ingest_fn=flaky_ingest,
+            resolve_fn=_registered,
+            min_delta_chars=4_000,
+            clock=clock,
+        )
 
     await tick()
     assert state.retries[str(f)].attempts == 1
@@ -395,8 +438,14 @@ async def test_tick_skipped_ingest_does_not_count_as_attempt(tmp_path: Path) -> 
 
     state = ReaderState()
     for _ in range(MAX_INGEST_ATTEMPTS + 2):
-        await _tick(state, dead_letter_path=tmp_path / "dead.jsonl", projects_dir=projects,
-                    ingest_fn=skipping_ingest, resolve_fn=_registered, min_delta_chars=4_000)
+        await _tick(
+            state,
+            dead_letter_path=tmp_path / "dead.jsonl",
+            projects_dir=projects,
+            ingest_fn=skipping_ingest,
+            resolve_fn=_registered,
+            min_delta_chars=4_000,
+        )
 
     assert calls == MAX_INGEST_ATTEMPTS + 2  # free skips retry every tick
     assert state.retries == {}
@@ -450,9 +499,15 @@ async def test_tick_keeps_buffer_when_dead_letter_unwritable(tmp_path: Path) -> 
         raise RuntimeError("server rejected")
 
     state = ReaderState(retries={str(f): IngestRetry(MAX_INGEST_ATTEMPTS - 1, 0.0)})
-    await _tick(state, dead_letter_path=blocker / "dead.jsonl", projects_dir=projects,
-                ingest_fn=failing_ingest, resolve_fn=_registered,
-                min_delta_chars=4_000, clock=clock)
+    await _tick(
+        state,
+        dead_letter_path=blocker / "dead.jsonl",
+        projects_dir=projects,
+        ingest_fn=failing_ingest,
+        resolve_fn=_registered,
+        min_delta_chars=4_000,
+        clock=clock,
+    )
 
     assert "x" * 5000 in state.buffers[str(f)]
     assert state.retries[str(f)].next_retry_at == clock.now + RETRY_MAX_SECONDS
@@ -497,9 +552,15 @@ async def _idle_tick(state: ReaderState, tmp_path: Path, dead: Path) -> None:
 
     projects = tmp_path / "projects"
     projects.mkdir(exist_ok=True)
-    await _tick(state, dead_letter_path=dead, projects_dir=projects,
-                ingest_fn=never_ingest, resolve_fn=_registered, min_delta_chars=4_000,
-                clock=_FakeClock())
+    await _tick(
+        state,
+        dead_letter_path=dead,
+        projects_dir=projects,
+        ingest_fn=never_ingest,
+        resolve_fn=_registered,
+        min_delta_chars=4_000,
+        clock=_FakeClock(),
+    )
 
 
 @pytest.mark.asyncio
@@ -591,8 +652,9 @@ async def test_tick_runs_blocking_file_io_off_the_event_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     projects = tmp_path / "projects"
-    _write_session(projects, "s1.jsonl",
-                   _transcript("/Users/dmitrydankov/BSW", [("user", "x" * 5000)]))
+    _write_session(
+        projects, "s1.jsonl", _transcript("/Users/dmitrydankov/BSW", [("user", "x" * 5000)])
+    )
     offloaded: list[str] = []
     real_to_thread = asyncio.to_thread
 
@@ -608,8 +670,14 @@ async def test_tick_runs_blocking_file_io_off_the_event_loop(
     state = ReaderState()
     for _ in range(MAX_INGEST_ATTEMPTS):
         state.retries = {k: IngestRetry(r.attempts, 0.0) for k, r in state.retries.items()}
-        await _tick(state, dead_letter_path=tmp_path / "dead.jsonl", projects_dir=projects,
-                    ingest_fn=failing_ingest, resolve_fn=_registered, min_delta_chars=4_000)
+        await _tick(
+            state,
+            dead_letter_path=tmp_path / "dead.jsonl",
+            projects_dir=projects,
+            ingest_fn=failing_ingest,
+            resolve_fn=_registered,
+            min_delta_chars=4_000,
+        )
 
     assert "_transcript_cwd" in offloaded
     assert "_dead_letter" in offloaded

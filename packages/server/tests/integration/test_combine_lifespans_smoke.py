@@ -7,6 +7,7 @@ which proves the FastMCP task group stays initialized (Pitfall #1).
 Also includes a negative-test: stripping mcp_app.lifespan from combine_lifespans
 causes the second call to fail, proving the test is load-bearing.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -109,6 +110,7 @@ async def test_negative_without_mcp_lifespan_second_call_fails() -> None:
     )
 
     from keenyspace_server.api import health
+
     broken_app.include_router(health.router)
     broken_app.mount("/v1/mcp", mcp_app)
 

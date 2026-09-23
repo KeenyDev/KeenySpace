@@ -22,9 +22,7 @@ def _entry(content: str, offset_ms: int) -> bytes:
 
 
 def test_empty_entry_does_not_swallow_next_entry() -> None:
-    text = b"".join(
-        [_entry("", 0), _entry("second fact", 1), _entry("third", 2)]
-    ).decode()
+    text = b"".join([_entry("", 0), _entry("second fact", 1), _entry("third", 2)]).decode()
 
     entries = parse_wal(text)
 

@@ -46,9 +46,7 @@ async def _check_health(client: httpx.AsyncClient) -> CheckResult:
     try:
         resp = await client.get("/healthz")
     except httpx.RequestError as exc:
-        return CheckResult(
-            "server /healthz", "fail", f"unreachable: {type(exc).__name__}"
-        )
+        return CheckResult("server /healthz", "fail", f"unreachable: {type(exc).__name__}")
     if resp.status_code == 200:
         return CheckResult("server /healthz", "ok", "HTTP 200")
     return CheckResult("server /healthz", "fail", f"HTTP {resp.status_code}")
@@ -58,17 +56,13 @@ async def _check_ready(client: httpx.AsyncClient) -> CheckResult:
     try:
         resp = await client.get("/readyz")
     except httpx.RequestError as exc:
-        return CheckResult(
-            "server /readyz", "fail", f"unreachable: {type(exc).__name__}"
-        )
+        return CheckResult("server /readyz", "fail", f"unreachable: {type(exc).__name__}")
     if resp.status_code == 200:
         return CheckResult("server /readyz", "ok", "HTTP 200")
     return CheckResult("server /readyz", "warn", f"HTTP {resp.status_code}")
 
 
-async def _check_auth_validity(
-    client: httpx.AsyncClient, token: str | None
-) -> CheckResult:
+async def _check_auth_validity(client: httpx.AsyncClient, token: str | None) -> CheckResult:
     if not token:
         return CheckResult(
             "auth validity",
@@ -122,7 +116,7 @@ def _check_dropped_events() -> CheckResult:
         data = _json.loads(DROPPED_JSON.read_text())
         by_kind = data.get("by_kind", {})
         total = sum(int(b.get("count", 0)) for b in by_kind.values())
-    except (OSError, ValueError, TypeError):
+    except OSError, ValueError, TypeError:
         return CheckResult("dropped events", "warn", "unreadable")
     if total == 0:
         return CheckResult("dropped events", "ok", "total=0")
@@ -164,10 +158,7 @@ async def run_doctor(as_json: bool = False) -> None:
         # Pure stdout JSON; sys.stdout.write avoids rich.Console formatting noise
         sys.stdout.write(
             _json.dumps(
-                [
-                    {"name": r.name, "status": r.status, "detail": r.detail}
-                    for r in results
-                ],
+                [{"name": r.name, "status": r.status, "detail": r.detail} for r in results],
                 indent=2,
             )
         )

@@ -11,8 +11,10 @@ import pytest
 
 def _reload_auth() -> object:
     import keenyspace.paths as paths_mod
+
     importlib.reload(paths_mod)
     import keenyspace.auth as auth_mod
+
     return importlib.reload(auth_mod)
 
 

@@ -109,16 +109,28 @@ async def test_list_pages_returns_sorted_paths(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         deadline = time.monotonic() + 20
         async with httpx.AsyncClient() as http_client:
             while time.monotonic() < deadline:
                 try:
-                    if (await http_client.get(f"http://127.0.0.1:{port}/healthz")).status_code == 200:
+                    if (
+                        await http_client.get(f"http://127.0.0.1:{port}/healthz")
+                    ).status_code == 200:
                         break
                 except Exception:
                     pass
@@ -145,7 +157,9 @@ async def test_list_pages_returns_sorted_paths(tmp_path) -> None:
         transport = StreamableHttpTransport(f"http://127.0.0.1:{port}/v1/mcp/", headers=headers)
         async with Client(transport) as mcp_client:
             result = await mcp_client.call_tool("list_pages", {"workspace": slug})
-            data = result.structured_content if hasattr(result, "structured_content") else result.data
+            data = (
+                result.structured_content if hasattr(result, "structured_content") else result.data
+            )
             pages = data["pages"]
             assert "concepts/a.md" in pages
             assert "concepts/b.md" in pages
@@ -170,16 +184,28 @@ async def test_list_pages_prefix_concepts(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         deadline = time.monotonic() + 20
         async with httpx.AsyncClient() as http_client:
             while time.monotonic() < deadline:
                 try:
-                    if (await http_client.get(f"http://127.0.0.1:{port}/healthz")).status_code == 200:
+                    if (
+                        await http_client.get(f"http://127.0.0.1:{port}/healthz")
+                    ).status_code == 200:
                         break
                 except Exception:
                     pass
@@ -210,7 +236,9 @@ async def test_list_pages_prefix_concepts(tmp_path) -> None:
             result = await mcp_client.call_tool(
                 "list_pages", {"workspace": slug, "prefix": "concepts/"}
             )
-            data = result.structured_content if hasattr(result, "structured_content") else result.data
+            data = (
+                result.structured_content if hasattr(result, "structured_content") else result.data
+            )
             pages = data["pages"]
             assert "concepts/a.md" in pages
             assert "concepts/b.md" in pages
@@ -235,16 +263,28 @@ async def test_list_pages_cursor_pagination(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         deadline = time.monotonic() + 20
         async with httpx.AsyncClient() as http_client:
             while time.monotonic() < deadline:
                 try:
-                    if (await http_client.get(f"http://127.0.0.1:{port}/healthz")).status_code == 200:
+                    if (
+                        await http_client.get(f"http://127.0.0.1:{port}/healthz")
+                    ).status_code == 200:
                         break
                 except Exception:
                     pass
@@ -277,7 +317,11 @@ async def test_list_pages_cursor_pagination(tmp_path) -> None:
                 if cursor is not None:
                     args["cursor"] = cursor
                 result = await mcp_client.call_tool("list_pages", args)
-                data = result.structured_content if hasattr(result, "structured_content") else result.data
+                data = (
+                    result.structured_content
+                    if hasattr(result, "structured_content")
+                    else result.data
+                )
                 page = data["pages"]
                 all_collected.extend(page)
                 cursor = data.get("next_cursor")
@@ -305,16 +349,28 @@ async def test_list_pages_unsafe_prefix_rejected(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         deadline = time.monotonic() + 20
         async with httpx.AsyncClient() as http_client:
             while time.monotonic() < deadline:
                 try:
-                    if (await http_client.get(f"http://127.0.0.1:{port}/healthz")).status_code == 200:
+                    if (
+                        await http_client.get(f"http://127.0.0.1:{port}/healthz")
+                    ).status_code == 200:
                         break
                 except Exception:
                     pass
@@ -362,16 +418,28 @@ async def test_search_workspace_content_match(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         deadline = time.monotonic() + 20
         async with httpx.AsyncClient() as http_client:
             while time.monotonic() < deadline:
                 try:
-                    if (await http_client.get(f"http://127.0.0.1:{port}/healthz")).status_code == 200:
+                    if (
+                        await http_client.get(f"http://127.0.0.1:{port}/healthz")
+                    ).status_code == 200:
                         break
                 except Exception:
                     pass
@@ -400,7 +468,9 @@ async def test_search_workspace_content_match(tmp_path) -> None:
             result = await mcp_client.call_tool(
                 "search_workspace", {"workspace": slug, "query": "bravo"}
             )
-            data = result.structured_content if hasattr(result, "structured_content") else result.data
+            data = (
+                result.structured_content if hasattr(result, "structured_content") else result.data
+            )
             paths = [r["path"] for r in data["results"]]
             assert "notes/foo.md" in paths
             assert "other.md" not in paths
@@ -424,16 +494,28 @@ async def test_search_workspace_filename_match(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         deadline = time.monotonic() + 20
         async with httpx.AsyncClient() as http_client:
             while time.monotonic() < deadline:
                 try:
-                    if (await http_client.get(f"http://127.0.0.1:{port}/healthz")).status_code == 200:
+                    if (
+                        await http_client.get(f"http://127.0.0.1:{port}/healthz")
+                    ).status_code == 200:
                         break
                 except Exception:
                     pass
@@ -462,7 +544,9 @@ async def test_search_workspace_filename_match(tmp_path) -> None:
             result = await mcp_client.call_tool(
                 "search_workspace", {"workspace": slug, "query": "banana"}
             )
-            data = result.structured_content if hasattr(result, "structured_content") else result.data
+            data = (
+                result.structured_content if hasattr(result, "structured_content") else result.data
+            )
             paths = [r["path"] for r in data["results"]]
             assert "concepts/banana.md" in paths
             assert "other.md" not in paths
@@ -486,16 +570,28 @@ async def test_search_workspace_regex_chars_treated_literally(tmp_path) -> None:
     env = await _subprocess_env(PG_URL or "", str(fs_root))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "keenyspace_server.main:app",
-         "--port", str(port), "--workers", "1"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "keenyspace_server.main:app",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         deadline = time.monotonic() + 20
         async with httpx.AsyncClient() as http_client:
             while time.monotonic() < deadline:
                 try:
-                    if (await http_client.get(f"http://127.0.0.1:{port}/healthz")).status_code == 200:
+                    if (
+                        await http_client.get(f"http://127.0.0.1:{port}/healthz")
+                    ).status_code == 200:
                         break
                 except Exception:
                     pass
@@ -519,9 +615,7 @@ async def test_search_workspace_regex_chars_treated_literally(tmp_path) -> None:
             # semantics were removed to close a ReDoS surface), so a
             # regex-special character must be handled safely and neither raise
             # nor return an error result.
-            res = await mcp_client.call_tool(
-                "search_workspace", {"workspace": slug, "query": "["}
-            )
+            res = await mcp_client.call_tool("search_workspace", {"workspace": slug, "query": "["})
             assert not getattr(res, "is_error", False), f"unexpected error: {res}"
     finally:
         proc.send_signal(signal.SIGTERM)

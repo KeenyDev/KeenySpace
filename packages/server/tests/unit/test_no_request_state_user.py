@@ -5,6 +5,7 @@ conn.scope["user"]). The three workspace endpoints (archive/export/import)
 initially read request.state.user, which yielded HTTP 500 (AttributeError)
 because nothing populates state.user. This grep guard prevents reintroduction.
 """
+
 from __future__ import annotations
 
 import re
@@ -33,8 +34,7 @@ def test_production_source_does_not_use_request_state_user() -> None:
     assert not offenders, (
         "request.state.user is forbidden in production source - use "
         "request.user (BaseUser populated by Starlette AuthMiddleware). "
-        "Offenders:\n"
-        + "\n".join(f"  {p}:{ln}: {src}" for p, ln, src in offenders)
+        "Offenders:\n" + "\n".join(f"  {p}:{ln}: {src}" for p, ln, src in offenders)
     )
 
 

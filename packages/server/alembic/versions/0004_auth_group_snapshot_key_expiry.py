@@ -21,12 +21,8 @@ depends_on: Sequence[str] | None = None
 
 def upgrade() -> None:
     op.add_column("users", sa.Column("groups", postgresql.JSONB(), nullable=True))
-    op.add_column(
-        "users", sa.Column("groups_seen_at", sa.DateTime(timezone=True), nullable=True)
-    )
-    op.add_column(
-        "api_keys", sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True)
-    )
+    op.add_column("users", sa.Column("groups_seen_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column("api_keys", sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True))
 
 
 def downgrade() -> None:

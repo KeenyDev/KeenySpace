@@ -57,7 +57,7 @@ def _walk_up_slug_marker(cwd: Path) -> str | None:
             continue
         try:
             data: Any = json.loads(marker.read_text())
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             continue
         if isinstance(data, dict):
             slug = data.get("slug")
@@ -85,7 +85,7 @@ def _lookup_workspace_map(cwd: Path) -> str | None:
             continue
         try:
             expanded = Path(os.path.expanduser(prefix_str)).resolve()
-        except (OSError, RuntimeError):
+        except OSError, RuntimeError:
             continue
         try:
             cwd.relative_to(expanded)

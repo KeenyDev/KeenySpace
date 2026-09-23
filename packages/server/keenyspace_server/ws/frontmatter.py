@@ -22,7 +22,7 @@ def split_frontmatter(content: str) -> tuple[dict[str, Any], str]:
         return {}, content
 
     yaml_text = content[4:end]
-    body = content[end + 5:]
+    body = content[end + 5 :]
 
     try:
         fm = yaml.safe_load(yaml_text)

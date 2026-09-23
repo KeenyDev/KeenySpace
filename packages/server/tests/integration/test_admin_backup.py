@@ -25,9 +25,7 @@ HAS_PG_DUMP = shutil.which("pg_dump") is not None
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
     pytest.mark.skipif(not HAS_PG_DUMP, reason="pg_dump binary unavailable"),
 ]
 
@@ -88,9 +86,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
 
 async def _seed_workspace(client: AsyncClient) -> str:
     slug = f"backup-{uuid4().hex[:8]}"
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
     assert resp.status_code == 201, resp.text
     return slug
 
@@ -158,9 +154,7 @@ async def test_admin_backup_manifest_shape(app: Any, pg_url: str) -> None:
             assert "workspaces" in manifest.pg_tables_dumped
 
 
-async def test_admin_backup_excludes_obsidian(
-    app: Any, pg_url: str, fs_root: Any
-) -> None:
+async def test_admin_backup_excludes_obsidian(app: Any, pg_url: str, fs_root: Any) -> None:
     from pathlib import Path
 
     await _reset_schema(pg_url)
@@ -182,9 +176,7 @@ async def test_admin_backup_excludes_obsidian(
 
             async with get_db_session() as session:
                 ws = (
-                    await session.execute(
-                        select(Workspace).where(Workspace.slug == slug)
-                    )
+                    await session.execute(select(Workspace).where(Workspace.slug == slug))
                 ).scalar_one()
                 ws_uuid = str(ws.uuid)
             ws_dir = Path(fs_root) / "workspaces" / ws_uuid
@@ -198,9 +190,7 @@ async def test_admin_backup_excludes_obsidian(
             assert all(".obsidian" not in n.split("/") for n in names), names
 
 
-async def test_admin_backup_increments_counters(
-    app: Any, pg_url: str
-) -> None:
+async def test_admin_backup_increments_counters(app: Any, pg_url: str) -> None:
     from keenyspace_server.observability.metrics import (
         ADMIN_BACKUP_BYTES,
         ADMIN_BACKUP_TOTAL,
@@ -253,12 +243,14 @@ async def test_admin_backup_audit_log_row(app: Any, pg_url: str) -> None:
 
             async with get_db_session() as session:
                 rows = (
-                    await session.execute(
-                        select(AuditLog).where(
-                            AuditLog.action == "admin.backup.requested"
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "admin.backup.requested")
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert rows
             row = rows[0]
             assert row.actor_sub == user_sub

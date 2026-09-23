@@ -45,7 +45,10 @@ def test_models_match_migrated_schema() -> None:
     env = {**os.environ, "KEENYSPACE_DB__URL": PG_URL or ""}
     up = subprocess.run(
         ["uv", "run", "alembic", "upgrade", "head"],
-        cwd=SERVER_DIR, env=env, capture_output=True, text=True,
+        cwd=SERVER_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert up.returncode == 0, up.stderr
 

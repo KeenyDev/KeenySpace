@@ -26,9 +26,7 @@ HAS_PG_DUMP = shutil.which("pg_dump") is not None and shutil.which("psql") is no
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
     pytest.mark.skipif(not HAS_PG_DUMP, reason="pg_dump/psql binary unavailable"),
 ]
 

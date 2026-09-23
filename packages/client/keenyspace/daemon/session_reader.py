@@ -104,7 +104,7 @@ def _claude_projects_dir() -> Path:
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
+    except FileNotFoundError, OSError, json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -493,8 +493,13 @@ async def _tick(
                 now = clock()
                 if attempts >= MAX_INGEST_ATTEMPTS:
                     if await asyncio.to_thread(
-                        _dead_letter, dead_letter_path, key=key, slug=slug, text=text,
-                        attempts=attempts, now=now,
+                        _dead_letter,
+                        dead_letter_path,
+                        key=key,
+                        slug=slug,
+                        text=text,
+                        attempts=attempts,
+                        now=now,
                     ):
                         buffers[key] = ""
                         retries.pop(key, None)

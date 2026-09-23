@@ -52,9 +52,13 @@ class FakeCompileAgent:
         self.entered.set()
         if self.gate is not None:
             await self.gate.wait()
-        plan = CompilePlan(ops=[
-            PageOp(action="create", path=f"notes/pass-{len(self.wal_texts)}.md", body="compiled\n"),
-        ])
+        plan = CompilePlan(
+            ops=[
+                PageOp(
+                    action="create", path=f"notes/pass-{len(self.wal_texts)}.md", body="compiled\n"
+                ),
+            ]
+        )
         return plan, loop_detector or LoopDetector(), self.output_tokens
 
 
@@ -149,27 +153,39 @@ async def _settle(c: CompileCoordinator, *, timeout: float = 10.0) -> None:
 
 async def _workspace(ws_uuid: UUID) -> Workspace:
     async with get_db_session() as session:
-        return (await session.execute(select(Workspace).where(Workspace.uuid == ws_uuid))).scalar_one()
+        return (
+            await session.execute(select(Workspace).where(Workspace.uuid == ws_uuid))
+        ).scalar_one()
 
 
 async def _runs(ws_uuid: UUID) -> list[CompileRun]:
     async with get_db_session() as session:
-        return list((await session.execute(
-            select(CompileRun)
-            .where(CompileRun.workspace_uuid == ws_uuid)
-            .order_by(CompileRun.started_at)
-        )).scalars().all())
+        return list(
+            (
+                await session.execute(
+                    select(CompileRun)
+                    .where(CompileRun.workspace_uuid == ws_uuid)
+                    .order_by(CompileRun.started_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
 
 
 async def _cursor(ws_uuid: UUID) -> str | None:
     async with get_db_session() as session:
-        return (await session.execute(
-            select(CompileCursor.last_wal_id).where(CompileCursor.workspace_uuid == ws_uuid)
-        )).scalar_one_or_none()
+        return (
+            await session.execute(
+                select(CompileCursor.last_wal_id).where(CompileCursor.workspace_uuid == ws_uuid)
+            )
+        ).scalar_one_or_none()
 
 
 async def test_archive_during_inflight_pass_keeps_workspace_archived(
-    app: Any, pg_url: str, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     # Output tokens over the space budget make the pass attempt its post-success pause,
     # which must not overwrite the archive reason.
@@ -188,12 +204,20 @@ async def test_archive_during_inflight_pass_keeps_workspace_archived(
         await coordinator.reset_daily_ceiling()
 
         ws = await _workspace(ws_uuid)
-        assert (ws.status, ws.compile_state, ws.compile_paused_reason) == ("archived", "paused", "archived")
-        assert [(r.status, r.completed_at is not None) for r in await _runs(ws_uuid)] == [("success", True)]
+        assert (ws.status, ws.compile_state, ws.compile_paused_reason) == (
+            "archived",
+            "paused",
+            "archived",
+        )
+        assert [(r.status, r.completed_at is not None) for r in await _runs(ws_uuid)] == [
+            ("success", True)
+        ]
 
 
 async def test_pass_on_paused_workspace_is_skipped_without_run_row(
-    app: Any, pg_url: str, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     async with _serving(app, pg_url) as (client, coordinator):
         slug, ws_uuid = await _create_workspace(client)
@@ -202,7 +226,8 @@ async def test_pass_on_paused_workspace_is_skipped_without_run_row(
         assert ws_root is not None
         async with get_db_session() as session:
             await session.execute(
-                update(Workspace).where(Workspace.uuid == ws_uuid)
+                update(Workspace)
+                .where(Workspace.uuid == ws_uuid)
                 .values(compile_state="paused", compile_paused_reason="loop_abort")
             )
             await session.commit()
@@ -217,7 +242,10 @@ async def test_pass_on_paused_workspace_is_skipped_without_run_row(
 
 
 async def test_apply_plan_os_error_finalizes_run_and_pauses_workspace(
-    app: Any, pg_url: str, fs_root: Path, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fs_root: Path,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     async with _serving(app, pg_url) as (client, coordinator):
         slug, ws_uuid = await _create_workspace(client)
@@ -237,7 +265,10 @@ async def test_apply_plan_os_error_finalizes_run_and_pauses_workspace(
 
 
 async def test_failure_before_agent_releases_workspace_for_retry(
-    app: Any, pg_url: str, fake_agent: FakeCompileAgent, monkeypatch: pytest.MonkeyPatch,
+    app: Any,
+    pg_url: str,
+    fake_agent: FakeCompileAgent,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     real_extract = coordinator_module.extract_wal_slice
     calls = 0
@@ -271,7 +302,9 @@ async def test_failure_before_agent_releases_workspace_for_retry(
 
 
 async def test_aclose_interrupts_inflight_pass_and_frees_workspace(
-    app: Any, pg_url: str, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     fake_agent.gate = asyncio.Event()
     async with _serving(app, pg_url) as (client, coordinator):
@@ -297,11 +330,22 @@ async def test_reconcile_interrupted_clears_running_leftovers(app: Any, pg_url: 
             await session.execute(
                 update(Workspace).where(Workspace.uuid == ws_uuid).values(compile_state="running")
             )
-            session.add(CompileRun(
-                id=uuid4(), workspace_uuid=ws_uuid, started_at=datetime.now(UTC), completed_at=None,
-                status="running", trigger_source="test", pages_written=0, tokens_input=0,
-                tokens_output=0, duration_ms=None, model="m", error_message=None,
-            ))
+            session.add(
+                CompileRun(
+                    id=uuid4(),
+                    workspace_uuid=ws_uuid,
+                    started_at=datetime.now(UTC),
+                    completed_at=None,
+                    status="running",
+                    trigger_source="test",
+                    pages_written=0,
+                    tokens_input=0,
+                    tokens_output=0,
+                    duration_ms=None,
+                    model="m",
+                    error_message=None,
+                )
+            )
             await session.commit()
 
         await coordinator.reconcile_interrupted()
@@ -313,7 +357,9 @@ async def test_reconcile_interrupted_clears_running_leftovers(app: Any, pg_url: 
 
 
 async def test_append_during_running_pass_triggers_follow_up_pass(
-    app: Any, pg_url: str, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     fake_agent.gate = asyncio.Event()
     async with _serving(app, pg_url) as (client, coordinator):
@@ -335,7 +381,9 @@ async def test_append_during_running_pass_triggers_follow_up_pass(
 
 
 async def test_backlog_over_slice_budget_compiles_in_chunks(
-    app: Any, pg_url: str, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     async with _serving(app, pg_url, max_slice_bytes=1) as (client, coordinator):
         slug, ws_uuid = await _create_workspace(client)
@@ -352,7 +400,9 @@ async def test_backlog_over_slice_budget_compiles_in_chunks(
 
 
 async def test_empty_slice_pass_writes_no_run_row(
-    app: Any, pg_url: str, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     async with _serving(app, pg_url) as (client, coordinator):
         _slug, ws_uuid = await _create_workspace(client)
@@ -366,7 +416,9 @@ async def test_empty_slice_pass_writes_no_run_row(
 
 
 async def test_cursor_moved_mid_pass_pauses_workspace(
-    app: Any, pg_url: str, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     async with _serving(app, pg_url) as (client, coordinator):
         slug, ws_uuid = await _create_workspace(client)
@@ -381,7 +433,8 @@ async def test_cursor_moved_mid_pass_pauses_workspace(
         await asyncio.wait_for(fake_agent.entered.wait(), timeout=5)
         async with get_db_session() as session:
             await session.execute(
-                update(CompileCursor).where(CompileCursor.workspace_uuid == ws_uuid)
+                update(CompileCursor)
+                .where(CompileCursor.workspace_uuid == ws_uuid)
                 .values(last_wal_id="0" * 26)
             )
             await session.commit()
@@ -394,7 +447,9 @@ async def test_cursor_moved_mid_pass_pauses_workspace(
 
 
 async def test_resume_keeps_space_budget_tally(
-    app: Any, pg_url: str, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     fake_agent.output_tokens = 50
     async with _serving(app, pg_url, max_output_tokens_per_space=5) as (client, coordinator):
@@ -435,17 +490,24 @@ class _SimulatedCrash(BaseException):
 
 async def _pending_intent(ws_uuid: UUID) -> tuple[str | None, str | None]:
     async with get_db_session() as session:
-        row = (await session.execute(
-            select(CompileCursor.pending_wal_last_id, CompileCursor.pending_plan_hash)
-            .where(CompileCursor.workspace_uuid == ws_uuid)
-        )).one_or_none()
+        row = (
+            await session.execute(
+                select(CompileCursor.pending_wal_last_id, CompileCursor.pending_plan_hash).where(
+                    CompileCursor.workspace_uuid == ws_uuid
+                )
+            )
+        ).one_or_none()
     return (row[0], row[1]) if row is not None else (None, None)
 
 
 @pytest.mark.parametrize("prior_pass", [False, True], ids=["first-pass", "after-committed-pass"])
 async def test_crash_after_apply_replays_intent_without_agent(
-    app: Any, pg_url: str, fs_root: Path, fake_agent: FakeCompileAgent,
-    monkeypatch: pytest.MonkeyPatch, prior_pass: bool,
+    app: Any,
+    pg_url: str,
+    fs_root: Path,
+    fake_agent: FakeCompileAgent,
+    monkeypatch: pytest.MonkeyPatch,
+    prior_pass: bool,
 ) -> None:
     async with _serving(app, pg_url) as (client, coordinator):
         slug, ws_uuid = await _create_workspace(client)
@@ -485,21 +547,32 @@ async def test_crash_after_apply_replays_intent_without_agent(
         assert await _pending_intent(ws_uuid) == (None, None)
         runs = await _runs(ws_uuid)
         assert [r.status for r in runs] == expected_runs
-        assert (runs[-1].wal_last_id, runs[-1].pages_written, runs[-1].tokens_output) == (entry_id, 1, 0)
+        assert (runs[-1].wal_last_id, runs[-1].pages_written, runs[-1].tokens_output) == (
+            entry_id,
+            1,
+            0,
+        )
         assert (await _workspace(ws_uuid)).compile_state == "idle"
 
 
 async def test_replayed_plan_keeps_frontmatter_key_order(
-    app: Any, pg_url: str, fs_root: Path, monkeypatch: pytest.MonkeyPatch,
+    app: Any,
+    pg_url: str,
+    fs_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     frontmatter = {"zeta": 1, "alpha": ["x"], "title": "Ordered"}
 
     async def _agent(
         deps: CompileDeps, *, loop_detector: LoopDetector | None = None, **_: Any
     ) -> tuple[CompilePlan, LoopDetector, int]:
-        plan = CompilePlan(ops=[
-            PageOp(action="create", path="notes/ordered.md", body="body\n", frontmatter=frontmatter),
-        ])
+        plan = CompilePlan(
+            ops=[
+                PageOp(
+                    action="create", path="notes/ordered.md", body="body\n", frontmatter=frontmatter
+                ),
+            ]
+        )
         return plan, loop_detector or LoopDetector(), 1
 
     monkeypatch.setattr(coordinator_module, "run_compile_agent", _agent)
@@ -527,7 +600,10 @@ async def test_replayed_plan_keeps_frontmatter_key_order(
 
 
 async def test_failed_apply_discards_intent_so_resume_recompiles(
-    app: Any, pg_url: str, fs_root: Path, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fs_root: Path,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     async with _serving(app, pg_url) as (client, coordinator):
         slug, ws_uuid = await _create_workspace(client)
@@ -550,7 +626,9 @@ async def test_failed_apply_discards_intent_so_resume_recompiles(
 
 
 async def test_backstop_caps_concurrent_agent_runs(
-    app: Any, pg_url: str, monkeypatch: pytest.MonkeyPatch,
+    app: Any,
+    pg_url: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     gate = asyncio.Event()
     running = 0
@@ -598,14 +676,18 @@ async def _archive_keeping_compile_idle(ws_uuid: UUID) -> None:
     # edit leaves behind, and the one the status gate exists for.
     async with get_db_session() as session:
         await session.execute(
-            update(Workspace).where(Workspace.uuid == ws_uuid)
+            update(Workspace)
+            .where(Workspace.uuid == ws_uuid)
             .values(status="archived", archived_at=datetime.now(UTC), compile_state="idle")
         )
         await session.commit()
 
 
 async def test_archived_workspace_is_never_claimed(
-    app: Any, pg_url: str, fs_root: Path, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fs_root: Path,
+    fake_agent: FakeCompileAgent,
 ) -> None:
     async with _serving(app, pg_url) as (client, coordinator):
         slug, ws_uuid = await _create_workspace(client)
@@ -626,7 +708,10 @@ async def test_archived_workspace_is_never_claimed(
 
 
 async def test_pending_intent_is_kept_while_archived_and_replayed_after_unarchive(
-    app: Any, pg_url: str, fs_root: Path, fake_agent: FakeCompileAgent,
+    app: Any,
+    pg_url: str,
+    fs_root: Path,
+    fake_agent: FakeCompileAgent,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with _serving(app, pg_url) as (client, coordinator):
@@ -662,7 +747,11 @@ async def test_pending_intent_is_kept_while_archived_and_replayed_after_unarchiv
         assert await _cursor(ws_uuid) is None
         assert [r.status for r in await _runs(ws_uuid)] == ["abort_interrupted"]
         ws = await _workspace(ws_uuid)
-        assert (ws.status, ws.compile_state, ws.compile_paused_reason) == ("archived", "paused", "archived")
+        assert (ws.status, ws.compile_state, ws.compile_paused_reason) == (
+            "archived",
+            "paused",
+            "archived",
+        )
 
         unarchive = await client.post(f"/v1/api/workspaces/{slug}/unarchive")
         assert unarchive.status_code == 200, unarchive.text

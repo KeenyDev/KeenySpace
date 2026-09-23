@@ -41,9 +41,7 @@ def _synth_plan_from_expect(expect: dict[str, Any]) -> CompilePlan:
 
 
 _fixture_names = sorted(
-    p.name
-    for p in FIXTURES.iterdir()
-    if p.is_dir() and (p / "expect.json").exists()
+    p.name for p in FIXTURES.iterdir() if p.is_dir() and (p / "expect.json").exists()
 )
 
 

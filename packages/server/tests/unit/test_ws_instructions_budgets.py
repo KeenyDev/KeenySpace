@@ -76,13 +76,7 @@ async def test_budgets_missing_field_raises(tmp_path: Path) -> None:
     instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
     _write_instruction(
         instr_path,
-        (
-            "tool_whitelist: []\n"
-            "steps: []\n"
-            "budgets:\n"
-            "  max_steps: 5\n"
-            "  max_tokens: 1000"
-        ),
+        ("tool_whitelist: []\nsteps: []\nbudgets:\n  max_steps: 5\n  max_tokens: 1000"),
         "body",
     )
 
@@ -124,11 +118,10 @@ async def test_budgets_valid_populated(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "command", ["ingest", "query", "lint", "post-compact"],
+    "command",
+    ["ingest", "query", "lint", "post-compact"],
 )
-async def test_default_blueprint_instructions_render_ok(
-    tmp_path: Path, command: str
-) -> None:
+async def test_default_blueprint_instructions_render_ok(tmp_path: Path, command: str) -> None:
     """Each F-08 default-blueprint instruction renders with valid budgets."""
 
     repo_root = Path(__file__).resolve().parents[4]

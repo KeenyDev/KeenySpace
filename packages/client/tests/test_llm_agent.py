@@ -39,8 +39,7 @@ def _make_instructions(
 ) -> Instructions:
     return Instructions(
         prompt="You are a helpful assistant.",
-        tool_whitelist=tool_whitelist
-        or ["search_workspace", "read_page", "list_pages"],
+        tool_whitelist=tool_whitelist or ["search_workspace", "read_page", "list_pages"],
         steps=["step one"],
         model=None,
         budgets=budgets or _BUDGETS_TIGHT,

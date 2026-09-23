@@ -108,15 +108,17 @@ async def append_log(
     # is harmless, and the coordinator pauses within milliseconds.
     # Skipped when the DB engine was never initialised (unit tests without lifespan).
     from keenyspace_server.db.session import get_engine as _get_engine
+
     if _get_engine() is not None:
         from sqlalchemy import select as _select
 
         from keenyspace_server.db.models import Workspace as _Workspace
         from keenyspace_server.db.session import get_db_session as _get_db_session
+
         async with _get_db_session() as _session:
-            _status = (await _session.execute(
-                _select(_Workspace.status).where(_Workspace.uuid == ws_uuid)
-            )).scalar_one_or_none()
+            _status = (
+                await _session.execute(_select(_Workspace.status).where(_Workspace.uuid == ws_uuid))
+            ).scalar_one_or_none()
         if _status == "archived":
             raise WorkspaceArchivedError(
                 f"workspace {ws_uuid} is archived; unarchive before appending"
@@ -147,16 +149,13 @@ async def append_log(
         )
 
         if len(payload) > max_bytes:
-            raise PayloadTooLarge(
-                f"Serialised entry exceeds maximum size of {max_bytes} bytes"
-            )
+            raise PayloadTooLarge(f"Serialised entry exceeds maximum size of {max_bytes} bytes")
 
-        await asyncio.to_thread(
-            _blocking_append, wal_path, payload, multi_worker
-        )
+        await asyncio.to_thread(_blocking_append, wal_path, payload, multi_worker)
         locks.record_id(ws_uuid, entry_id)
 
     from keenyspace_server.observability.metrics import WAL_APPENDS_TOTAL
+
     WAL_APPENDS_TOTAL.labels(workspace=str(ws_uuid), source=source).inc()
 
     # Notify the compile coordinator outside the workspace lock scope. The

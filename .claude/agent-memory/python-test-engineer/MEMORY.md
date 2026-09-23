@@ -1,0 +1,1 @@
+- [Test database constraint](feedback_test_database.md) — server suite runs only against `keenyspace_test_c`; its fixtures DROP SCHEMA public CASCADE

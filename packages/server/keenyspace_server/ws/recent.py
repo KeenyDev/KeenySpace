@@ -5,9 +5,7 @@ from pathlib import Path
 from keenyspace_server.ws.scan import iter_md_files
 
 
-def scan_recent_changes(
-    ws_root: Path, since_ns: int | None = None
-) -> list[tuple[int, str]]:
+def scan_recent_changes(ws_root: Path, since_ns: int | None = None) -> list[tuple[int, str]]:
     if not ws_root.is_dir():
         return []
     results: list[tuple[int, str]] = []

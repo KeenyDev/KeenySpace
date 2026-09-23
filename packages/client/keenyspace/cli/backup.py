@@ -40,11 +40,14 @@ async def run_backup(output: Path | None) -> None:
         iso = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
         output = Path.cwd() / f"keenyspace-backup-{iso}.tar.gz"
     headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(
-        base_url=settings.server_url,
-        timeout=600.0,
-        headers=headers,
-    ) as client, client.stream("POST", "/v1/admin/backup") as response:
+    async with (
+        httpx.AsyncClient(
+            base_url=settings.server_url,
+            timeout=600.0,
+            headers=headers,
+        ) as client,
+        client.stream("POST", "/v1/admin/backup") as response,
+    ):
         response.raise_for_status()
         cl = response.headers.get("content-length")
         total = int(cl) if cl else None

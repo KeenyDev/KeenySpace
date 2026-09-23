@@ -114,9 +114,7 @@ def test_doctor_reports_dropped_events_warn(
     httpserver: HTTPServer,
 ) -> None:
     state_dir = temp_config_dir["state_dir"]
-    (state_dir / "dropped.json").write_text(
-        json.dumps({"by_kind": {"post-tool": {"count": 5}}})
-    )
+    (state_dir / "dropped.json").write_text(json.dumps({"by_kind": {"post-tool": {"count": 5}}}))
     httpserver.expect_request("/healthz").respond_with_json({"status": "ok"})
     httpserver.expect_request("/readyz").respond_with_json({"status": "ok"})
     httpserver.expect_request("/v1/api/auth/api-keys").respond_with_json([])

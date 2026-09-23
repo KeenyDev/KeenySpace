@@ -31,7 +31,9 @@ def test_notify_dirty_records_workspace() -> None:
 
 
 @pytest.mark.asyncio
-async def test_trigger_returns_paused_when_workspace_state_is_paused(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_trigger_returns_paused_when_workspace_state_is_paused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     c = CompileCoordinator(CompileSettings())
 
     async def _fake_root(self: CompileCoordinator, ws_uuid: UUID) -> Path:

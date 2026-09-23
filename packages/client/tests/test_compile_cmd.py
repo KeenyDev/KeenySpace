@@ -162,9 +162,7 @@ async def test_compile_wait_timeout_exits_5(
     monkeypatch.setattr(mod, "call_compile", _fake_compile)
     monkeypatch.setattr(mod, "call_compile_status", _fake_status)
     with pytest.raises(SystemExit) as excinfo:
-        await mod.run_compile_cmd(
-            None, wait=True, wait_timeout=0.01, poll_interval=0.0
-        )
+        await mod.run_compile_cmd(None, wait=True, wait_timeout=0.01, poll_interval=0.0)
     assert excinfo.value.code == 5
 
 

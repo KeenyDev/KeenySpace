@@ -26,9 +26,7 @@ class PageOp(BaseModel):
     @classmethod
     def no_traversal(cls, v: str) -> str:
         if v.startswith("/") or ".." in v:
-            raise ValueError(
-                f"path must be workspace-relative and non-traversing, got {v!r}"
-            )
+            raise ValueError(f"path must be workspace-relative and non-traversing, got {v!r}")
         return v
 
     @field_validator("path")

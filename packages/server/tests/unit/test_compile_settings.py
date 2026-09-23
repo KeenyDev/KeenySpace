@@ -53,7 +53,9 @@ def test_resolve_model_id_provider_neutral() -> None:
     assert resolve_model_id("gpt-4o", "openai") == "openai:gpt-4o"
     # already-qualified id passes through untouched, regardless of provider arg
     assert resolve_model_id("openai:gpt-4o", "anthropic") == "openai:gpt-4o"
-    assert resolve_model_id("anthropic:claude-sonnet-4-6", "openai") == "anthropic:claude-sonnet-4-6"
+    assert (
+        resolve_model_id("anthropic:claude-sonnet-4-6", "openai") == "anthropic:claude-sonnet-4-6"
+    )
 
 
 def test_compile_settings_provider_default_and_override() -> None:

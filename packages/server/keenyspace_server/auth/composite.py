@@ -65,7 +65,11 @@ class CompositeAuthBackend(AuthenticationBackend):
         )
         if user is None:
             raise AuthenticationError("no valid credentials")
-        if self._snapshots is not None and user.source == "oidc" and user.groups_seen_at is not None:
+        if (
+            self._snapshots is not None
+            and user.source == "oidc"
+            and user.groups_seen_at is not None
+        ):
             snapshot, wrote = await self._snapshots.observe(user)
             if wrote:
                 self._keys.forget_user(user.sub)

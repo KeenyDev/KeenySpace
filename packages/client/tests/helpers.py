@@ -79,9 +79,7 @@ def make_envelope(
 T = TypeVar("T")
 
 
-async def expect_within_seconds(
-    coro: Any, seconds: float
-) -> Any:
+async def expect_within_seconds(coro: Any, seconds: float) -> Any:
     """Wrap asyncio.wait_for; surfaces latency-budget violations as TimeoutError."""
 
     return await asyncio.wait_for(coro, timeout=seconds)

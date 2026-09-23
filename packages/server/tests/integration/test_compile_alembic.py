@@ -14,7 +14,10 @@ def test_alembic_upgrade_creates_compile_runs_and_workspace_columns() -> None:
     env = {**os.environ, "KEENYSPACE_DB__URL": PG_URL}
     up = subprocess.run(
         ["uv", "run", "alembic", "upgrade", "head"],
-        cwd=SERVER_DIR, env=env, capture_output=True, text=True,
+        cwd=SERVER_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert up.returncode == 0, up.stderr
 
@@ -28,10 +31,12 @@ def test_alembic_upgrade_creates_compile_runs_and_workspace_columns() -> None:
         async with eng.connect() as conn:
             r = await conn.execute(text("SELECT to_regclass('public.compile_runs')"))
             assert r.scalar() == "compile_runs"
-            cols = await conn.execute(text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name='workspaces' AND column_name LIKE 'compile_%'"
-            ))
+            cols = await conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name='workspaces' AND column_name LIKE 'compile_%'"
+                )
+            )
             col_names = {row[0] for row in cols.fetchall()}
             assert {"compile_state", "compile_paused_reason", "compile_paused_at"} <= col_names
         await eng.dispose()
@@ -50,7 +55,10 @@ def test_alembic_downgrade_reverts_phase2() -> None:
     # this stays correct as later migrations are added.
     down = subprocess.run(
         ["uv", "run", "alembic", "downgrade", "0001"],
-        cwd=SERVER_DIR, env=env, capture_output=True, text=True,
+        cwd=SERVER_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert down.returncode == 0, down.stderr
 

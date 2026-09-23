@@ -4,6 +4,7 @@ Revision ID: 0002
 Revises: 0001
 Create Date: 2026-05-10
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -24,7 +25,9 @@ def upgrade() -> None:
         sa.Column("compile_state", sa.String(32), nullable=False, server_default="idle"),
     )
     op.add_column("workspaces", sa.Column("compile_paused_reason", sa.String(64), nullable=True))
-    op.add_column("workspaces", sa.Column("compile_paused_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "workspaces", sa.Column("compile_paused_at", sa.DateTime(timezone=True), nullable=True)
+    )
 
     op.create_table(
         "compile_runs",

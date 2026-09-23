@@ -24,7 +24,7 @@ async def read_transcript_excerpt(
     path = Path(transcript_path)
     try:
         content = await asyncio.to_thread(path.read_text, encoding="utf-8")
-    except (FileNotFoundError, OSError):
+    except FileNotFoundError, OSError:
         return None
     if not content:
         return ""

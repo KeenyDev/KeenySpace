@@ -35,7 +35,7 @@ async def dispatch(envelope: dict[str, Any], writer: asyncio.StreamWriter) -> No
         writer.write(json.dumps(response).encode() + b"\n")
         try:  # noqa: SIM105 — await cannot live inside contextlib.suppress
             await writer.drain()
-        except (OSError, ConnectionResetError):
+        except OSError, ConnectionResetError:
             pass
         return
     # All other kinds, post-compact included: fire-and-forget — just logged.

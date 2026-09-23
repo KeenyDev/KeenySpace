@@ -74,8 +74,7 @@ async def get_recent_changes_tool(
             # st_mtime_ns (always UTC).
             if since_dt.tzinfo is None:
                 raise ToolError(
-                    "since timestamp must include timezone offset "
-                    "(e.g. 'Z' or '+00:00')"
+                    "since timestamp must include timezone offset (e.g. 'Z' or '+00:00')"
                 )
             since_ns = int(since_dt.timestamp() * 1_000_000_000)
 
@@ -91,9 +90,7 @@ async def get_recent_changes_tool(
             except ValueError as exc:
                 raise ToolError(f"malformed cursor: {exc}") from exc
             cursor_key = (-cursor_mtime_ns, cursor_path)
-            all_items = [
-                (m, p) for (m, p) in all_items if (-m, p) > cursor_key
-            ]
+            all_items = [(m, p) for (m, p) in all_items if (-m, p) > cursor_key]
 
         page_size = _validated_limit(limit)
         page = all_items[:page_size]

@@ -76,19 +76,23 @@ async def test_edge_02_oversized_backlog_compiles_in_bounded_passes(tmp_path: Pa
         assert len(slice_.formatted_text.encode()) <= max_slice_bytes
         passes += 1
         slice_ids = [str(e.id) for e in slice_.entries]
-        pass_plan = CompilePlan(ops=[
-            PageOp(
-                action="create",
-                path=f"notes/oversized-pass-{passes}.md",
-                body="\n".join(slice_ids) + "\n",
-            )
-        ])
+        pass_plan = CompilePlan(
+            ops=[
+                PageOp(
+                    action="create",
+                    path=f"notes/oversized-pass-{passes}.md",
+                    body="\n".join(slice_ids) + "\n",
+                )
+            ]
+        )
 
         async def _fake(
             messages: list[ModelMessage], info: AgentInfo, plan: CompilePlan = pass_plan
         ) -> ModelResponse:
             output_tool_name = info.output_tools[0].name if info.output_tools else "final_result"
-            return ModelResponse(parts=[ToolCallPart(tool_name=output_tool_name, args=plan.model_dump())])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name=output_tool_name, args=plan.model_dump())]
+            )
 
         deps = CompileDeps(ws_root=ws_root, wal_text=slice_.formatted_text)
         with compile_agent.override(model=FunctionModel(_fake)):
@@ -105,7 +109,9 @@ async def test_edge_02_oversized_backlog_compiles_in_bounded_passes(tmp_path: Pa
     page_ids = [
         line
         for n in range(1, passes + 1)
-        for line in (ws_root / "notes" / f"oversized-pass-{n}.md").read_text(encoding="utf-8").split()
+        for line in (ws_root / "notes" / f"oversized-pass-{n}.md")
+        .read_text(encoding="utf-8")
+        .split()
     ]
     assert page_ids == all_ids
     assert extract_wal_slice(ws_root, cursor, max_bytes=max_slice_bytes).entries == []
@@ -191,7 +197,9 @@ async def test_edge_04_nonexistent_page_creates_not_loops(tmp_path: Path) -> Non
     with compile_agent.override(model=FunctionModel(_fake)):
         plan, _, _ = await run_compile_agent(deps)
 
-    assert plan.ops[0].action == "create", "Agent should emit create (not update) for nonexistent page"
+    assert plan.ops[0].action == "create", (
+        "Agent should emit create (not update) for nonexistent page"
+    )
 
 
 async def test_edge_05_terse_fragment_does_not_confabulate(tmp_path: Path) -> None:

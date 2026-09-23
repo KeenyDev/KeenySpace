@@ -72,9 +72,7 @@ async def run_pull(
         server_doc: dict[str, Any] = resp.json()
         server_files: dict[str, str] = dict(server_doc.get("files") or {})
         try:
-            dest_paths = {
-                rel: resolve_vault_path(target_path, rel) for rel in server_files
-            }
+            dest_paths = {rel: resolve_vault_path(target_path, rel) for rel in server_files}
         except UnsafeManifestPathError as exc:
             console.print(
                 "[red]Refusing to pull: manifest path resolves outside the vault "
@@ -149,18 +147,14 @@ async def run_pull(
         # reflect the bytes actually on disk so the next `pull` is not falsely
         # reported as dirty. Sorted so the file content does not depend on
         # fetch completion order.
-        actual_hashes = {
-            rel: written.get(rel, server_files[rel]) for rel in sorted(server_files)
-        }
+        actual_hashes = {rel: written.get(rel, server_files[rel]) for rel in sorted(server_files)}
 
         for rel in set(local_files) - set(server_files):
             (target_path / rel).unlink(missing_ok=True)
 
         marker = target_path / ".keenyspace" / "slug-marker.json"
         marker.parent.mkdir(parents=True, exist_ok=True)
-        write_atomic_secret(
-            marker, json.dumps({"slug": slug}, indent=2).encode()
-        )
+        write_atomic_secret(marker, json.dumps({"slug": slug}, indent=2).encode())
 
         new_manifest = {
             "version": 1,
@@ -169,13 +163,9 @@ async def run_pull(
             "last_pull_ts": datetime.now(UTC).isoformat(),
             "files": actual_hashes,
         }
-        write_atomic_secret(
-            local_state_path, json.dumps(new_manifest, indent=2).encode()
-        )
+        write_atomic_secret(local_state_path, json.dumps(new_manifest, indent=2).encode())
 
-    console.print(
-        f"[green]Pulled {len(server_files)} files to {target_path}[/green]"
-    )
+    console.print(f"[green]Pulled {len(server_files)} files to {target_path}[/green]")
     if stash_root is not None:
         console.print(f"[yellow]Dirty files stashed to {stash_root}[/yellow]")
 

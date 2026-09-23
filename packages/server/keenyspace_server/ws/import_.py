@@ -64,9 +64,7 @@ _IMPORT_REJECT_TOP_LEVEL: frozenset[str] = (
     IMPORT_REJECT_TOP_LEVEL_USER_STATE | IMPORT_REJECT_TOP_LEVEL_DENYLIST
 )
 
-_SLUG_RE = re.compile(
-    r"^[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}[a-zA-Z0-9]$|^[a-zA-Z0-9]$"
-)
+_SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-]{0,62}[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
 
 
 class WorkspaceImportError(ValueError):
@@ -149,8 +147,7 @@ def _validate_zip_sync(zip_path: Path) -> _ZipValidation:
             if total > MAX_IMPORT_UNCOMPRESSED_BYTES:
                 raise WorkspaceImportError(
                     "size_cap",
-                    f"uncompressed size exceeds cap "
-                    f"({MAX_IMPORT_UNCOMPRESSED_BYTES} bytes)",
+                    f"uncompressed size exceeds cap ({MAX_IMPORT_UNCOMPRESSED_BYTES} bytes)",
                 )
             if not info.is_dir() and name.endswith(".md"):
                 has_md = True
@@ -214,9 +211,7 @@ def _unpack_zip_sync(zip_path: Path, dest: Path) -> None:
         # Surface CRC / truncation failures during extraction as a typed 422
         # rather than a generic 500 (the outer try in import_workspace catches
         # WorkspaceImportError but not BadZipFile).
-        raise WorkspaceImportError(
-            "bad_zip", f"zip extraction failed: {exc}"
-        ) from exc
+        raise WorkspaceImportError("bad_zip", f"zip extraction failed: {exc}") from exc
 
 
 def _rename_and_fsync(src: Path, dst: Path) -> None:
@@ -363,6 +358,7 @@ async def import_workspace(
                 from keenyspace_server.db.session import (
                     get_db_session as _audit_session,
                 )
+
                 async with _audit_session() as audit_sess:
                     await write_audit(
                         audit_sess,

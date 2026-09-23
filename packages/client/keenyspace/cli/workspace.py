@@ -20,9 +20,7 @@ from keenyspace.__main__ import workspace_app
 
 @workspace_app.command("list")
 def list_cmd(
-    archived: bool = typer.Option(
-        False, "--archived", help="Include archived workspaces."
-    ),
+    archived: bool = typer.Option(False, "--archived", help="Include archived workspaces."),
 ) -> None:
     """List workspaces (active by default; pass --archived for all)."""
 
@@ -114,9 +112,7 @@ async def _run_list(archived: bool) -> None:
 
     status = "all" if archived else "active"
     async with await build_authed_http_client() as client:
-        resp = await client.get(
-            "/v1/api/workspaces/", params={"status": status}
-        )
+        resp = await client.get("/v1/api/workspaces/", params={"status": status})
         resp.raise_for_status()
         payload = resp.json()
     workspaces = payload.get("workspaces") or []
@@ -170,7 +166,7 @@ def _resolve_target_path(path: str | None) -> str:
         )
         if result.returncode == 0:
             return str(Path(result.stdout.strip()).resolve())
-    except (FileNotFoundError, OSError):
+    except FileNotFoundError, OSError:
         pass
     return str(Path(os.getcwd()).resolve())
 
@@ -202,10 +198,12 @@ async def _run_register(
             console.print(f"[red]workspace not found:[/red] {slug}")
             sys.exit(2)
         resp.raise_for_status()
-    except (httpx.ConnectError, httpx.ConnectTimeout):
+    except httpx.ConnectError, httpx.ConnectTimeout:
         # WHY: server unreachable at register time is non-fatal; the map entry
         # is still useful for local routing and can be validated later.
-        console.print("[yellow]warning: server unreachable, registering without validation[/yellow]")
+        console.print(
+            "[yellow]warning: server unreachable, registering without validation[/yellow]"
+        )
 
     if marker:
         marker_dir = Path(abs_path) / ".keenyspace"

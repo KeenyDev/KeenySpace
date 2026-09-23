@@ -4,9 +4,7 @@ from pathlib import Path
 
 import pytest
 
-_DEFAULT_BUDGETS_FM = (
-    "budgets:\n  max_steps: 10\n  max_tokens: 10000\n  max_seconds: 60"
-)
+_DEFAULT_BUDGETS_FM = "budgets:\n  max_steps: 10\n  max_tokens: 10000\n  max_seconds: 60"
 
 
 def _write_instruction(path: Path, frontmatter: str, body: str) -> None:
@@ -54,7 +52,9 @@ async def test_renders_body_with_context(tmp_path: Path) -> None:
     from keenyspace_server.ws.instructions import load_and_render_instructions
 
     instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
-    _write_instruction(instr_path, "tool_whitelist: []\nsteps: []", "Source: {{ context.source_path }}")
+    _write_instruction(
+        instr_path, "tool_whitelist: []\nsteps: []", "Source: {{ context.source_path }}"
+    )
 
     result = await load_and_render_instructions(
         tmp_path,
@@ -182,7 +182,9 @@ async def test_model_string_passes_through(tmp_path: Path) -> None:
     from keenyspace_server.ws.instructions import load_and_render_instructions
 
     instr_path = tmp_path / ".keenyspace" / "instructions" / "ingest.md"
-    _write_instruction(instr_path, "tool_whitelist: []\nsteps: []\nmodel: claude-sonnet-4-5", "body")
+    _write_instruction(
+        instr_path, "tool_whitelist: []\nsteps: []\nmodel: claude-sonnet-4-5", "body"
+    )
 
     result = await load_and_render_instructions(
         tmp_path,

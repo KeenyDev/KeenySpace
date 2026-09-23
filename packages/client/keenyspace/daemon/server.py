@@ -104,9 +104,7 @@ async def serve() -> None:
         log.info("daemon.stopped")
 
 
-async def _handle(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-) -> None:
+async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     from keenyspace.daemon.handlers import dispatch
 
     try:

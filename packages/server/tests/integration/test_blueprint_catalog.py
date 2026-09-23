@@ -13,9 +13,7 @@ PG_URL = os.environ.get("KEENYSPACE_DB__URL")
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
 ]
 
 
@@ -82,9 +80,7 @@ def _install_fixture_blueprint(
 ) -> None:
     bp_dir = fs_root / "blueprints" / name
     (bp_dir / ".keenyspace").mkdir(parents=True, exist_ok=True)
-    (bp_dir / ".keenyspace" / "blueprint.yaml").write_text(
-        yaml.safe_dump(blueprint_yaml_data)
-    )
+    (bp_dir / ".keenyspace" / "blueprint.yaml").write_text(yaml.safe_dump(blueprint_yaml_data))
     for relpath, content in (extras or {}).items():
         target = bp_dir / relpath
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -100,9 +96,7 @@ def _install_raw_blueprint_yaml(fs_root: Path, name: str, raw_yaml: str) -> None
 async def _seed_workspace(
     client: AsyncClient, slug: str, blueprint: str = "default"
 ) -> tuple[str, str]:
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": blueprint}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": blueprint})
     assert resp.status_code == 201, resp.text
     body = resp.json()
     return slug, body["uuid"]
@@ -145,8 +139,11 @@ async def test_list_blueprints_discovers_default(app, pg_url) -> None:
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
         transport = ASGITransport(app=app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test",
-                               headers={"Authorization": f"Bearer {plaintext}"}) as client:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
             health = await client.get("/healthz")
             if health.status_code in (500, 503):
                 pytest.skip("server not ready")
@@ -169,8 +166,11 @@ async def test_list_blueprints_discovers_fixture_blueprint(app, pg_url) -> None:
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
         transport = ASGITransport(app=app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test",
-                               headers={"Authorization": f"Bearer {plaintext}"}) as client:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
             health = await client.get("/healthz")
             if health.status_code in (500, 503):
                 pytest.skip("server not ready")
@@ -312,12 +312,7 @@ async def test_get_instructions_dunder_blocked_raises(app, pg_url) -> None:
             fs_root = app.state.settings.fs.root
             _, ws_uuid = await _seed_workspace(client, "sandbox-ws", blueprint="default")
         sandbox_path = (
-            fs_root
-            / "workspaces"
-            / ws_uuid
-            / ".keenyspace"
-            / "instructions"
-            / "sandbox-test.md"
+            fs_root / "workspaces" / ws_uuid / ".keenyspace" / "instructions" / "sandbox-test.md"
         )
         sandbox_path.parent.mkdir(parents=True, exist_ok=True)
         sandbox_path.write_text(
@@ -350,8 +345,11 @@ async def test_list_blueprints_skips_malformed_yaml(app, pg_url) -> None:
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
         transport = ASGITransport(app=app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test",
-                               headers={"Authorization": f"Bearer {plaintext}"}) as client:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        ) as client:
             health = await client.get("/healthz")
             if health.status_code in (500, 503):
                 pytest.skip("server not ready")
@@ -361,6 +359,4 @@ async def test_list_blueprints_skips_malformed_yaml(app, pg_url) -> None:
     data = resp.structured_content if hasattr(resp, "structured_content") else resp.data
     names = {b["name"] for b in data["blueprints"]}
     assert "bad-bp" not in names
-    assert any(
-        event.get("event") == "blueprint.yaml_parse_failed" for event in captured
-    )
+    assert any(event.get("event") == "blueprint.yaml_parse_failed" for event in captured)

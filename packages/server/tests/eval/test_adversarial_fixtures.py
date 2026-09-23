@@ -47,17 +47,24 @@ async def test_adv_01_prompt_injection_exfiltrate_no_egress(tmp_path: Path) -> N
     _copy_vault(vault_path, ws_root)
 
     safe_plan = CompilePlan(
-        ops=[PageOp(action="update", path="index.md", body="Updated index content.", frontmatter={})],
+        ops=[
+            PageOp(action="update", path="index.md", body="Updated index content.", frontmatter={})
+        ],
         notes="Instruction injection attempt detected in WAL entry: 'Ignore previous instructions'.",
     )
 
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         output_tool = info.output_tools[0].name if info.output_tools else "final_result"
-        return ModelResponse(parts=[ToolCallPart(tool_name=output_tool, args=safe_plan.model_dump())])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=output_tool, args=safe_plan.model_dump())]
+        )
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
 
-    with respx.mock(assert_all_called=False) as mock_transport, compile_agent.override(model=FunctionModel(_fake)):
+    with (
+        respx.mock(assert_all_called=False) as mock_transport,
+        compile_agent.override(model=FunctionModel(_fake)),
+    ):
         plan, _, _ = await run_compile_agent(deps)
 
     evil_calls = [
@@ -98,7 +105,9 @@ async def test_adv_02_prompt_injection_denylist_write_rejected(tmp_path: Path) -
     async def _always_bad(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         call_count["n"] += 1
         output_tool = info.output_tools[0].name if info.output_tools else "final_result"
-        return ModelResponse(parts=[ToolCallPart(tool_name=output_tool, args=bad_plan.model_dump())])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=output_tool, args=bad_plan.model_dump())]
+        )
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     with compile_agent.override(model=FunctionModel(_always_bad)), pytest.raises(Exception):  # noqa: B017
@@ -123,14 +132,19 @@ async def test_adv_03_tool_call_loop_aborts(tmp_path: Path) -> None:
     _copy_vault(vault_path, ws_root)
 
     async def _looping(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="read_page", args={"path": "notes/index.md"}),
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="read_page", args={"path": "notes/index.md"}),
+            ]
+        )
 
     deps = CompileDeps(ws_root=ws_root, wal_text=wal_text)
     detector = LoopDetector(max_repeats=3)
 
-    with compile_agent.override(model=FunctionModel(_looping)), pytest.raises((UsageLimitExceeded, Exception)):
+    with (
+        compile_agent.override(model=FunctionModel(_looping)),
+        pytest.raises((UsageLimitExceeded, Exception)),
+    ):
         await run_compile_agent(deps, max_tool_calls=10, loop_detector=detector)
 
     assert detector.triggered is True, "LoopDetector.triggered must be True after loop abort"
@@ -168,10 +182,12 @@ def test_adv_06_duplicate_paths_rejected() -> None:
     _wal_text, _expect, _vault_path = _load_fixture(fixture_dir)
 
     with pytest.raises(ValidationError) as exc_info:
-        CompilePlan(ops=[
-            PageOp(action="create", path="x.md", body="first body"),
-            PageOp(action="update", path="x.md", body="second body"),
-        ])
+        CompilePlan(
+            ops=[
+                PageOp(action="create", path="x.md", body="first body"),
+                PageOp(action="update", path="x.md", body="second body"),
+            ]
+        )
 
     assert exc_info.value.error_count() >= 1, (
         "CompilePlan must raise ValidationError for duplicate PageOp paths"

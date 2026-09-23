@@ -29,8 +29,7 @@ def _resolve_binary() -> Path:
     bin_path = shutil.which("keenyspace")
     if not bin_path:
         raise typer.BadParameter(
-            "keenyspace binary not found on PATH; install via "
-            "`uv tool install keenyspace` first"
+            "keenyspace binary not found on PATH; install via `uv tool install keenyspace` first"
         )
     return Path(bin_path).resolve()
 
@@ -52,12 +51,8 @@ def _install_macos() -> None:
     # 0600: documented setup puts the LLM API key in EnvironmentVariables.
     write_atomic_secret(dest, plist.encode("utf-8"))
     uid = os.getuid()
-    subprocess.run(
-        ["/bin/launchctl", "bootstrap", f"gui/{uid}", str(dest)], check=True
-    )
-    subprocess.run(
-        ["/bin/launchctl", "enable", f"gui/{uid}/{LAUNCHD_LABEL}"], check=True
-    )
+    subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{uid}", str(dest)], check=True)
+    subprocess.run(["/bin/launchctl", "enable", f"gui/{uid}/{LAUNCHD_LABEL}"], check=True)
     typer.echo(f"installed {dest}")
 
 
@@ -69,26 +64,20 @@ def _install_linux() -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(unit, encoding="utf-8")
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    subprocess.run(
-        ["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT], check=True
-    )
+    subprocess.run(["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT], check=True)
     typer.echo(f"installed {dest}")
 
 
 def _uninstall_macos() -> None:
     uid = os.getuid()
-    subprocess.run(
-        ["/bin/launchctl", "bootout", f"gui/{uid}/{LAUNCHD_LABEL}"], check=False
-    )
+    subprocess.run(["/bin/launchctl", "bootout", f"gui/{uid}/{LAUNCHD_LABEL}"], check=False)
     dest = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
     dest.unlink(missing_ok=True)
     typer.echo("uninstalled launchd agent")
 
 
 def _uninstall_linux() -> None:
-    subprocess.run(
-        ["systemctl", "--user", "disable", "--now", SYSTEMD_UNIT], check=False
-    )
+    subprocess.run(["systemctl", "--user", "disable", "--now", SYSTEMD_UNIT], check=False)
     dest = Path.home() / ".config" / "systemd" / "user" / SYSTEMD_UNIT
     dest.unlink(missing_ok=True)
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
@@ -104,9 +93,7 @@ def service_install() -> None:
     elif sysname == "Linux":
         _install_linux()
     else:
-        raise typer.BadParameter(
-            f"unsupported OS: {sysname} (Windows daemon deferred to v1.5+)"
-        )
+        raise typer.BadParameter(f"unsupported OS: {sysname} (Windows daemon deferred to v1.5+)")
 
 
 @service_app.command("uninstall")

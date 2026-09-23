@@ -85,7 +85,9 @@ async def test_append_returns_written_entry_ts(app, pg_url: str, fs_root: Path) 
     async with _client(app, pg_url) as client:
         slug, ws_uuid = await _create_workspace(client)
 
-        resp = await client.post(f"/v1/api/workspaces/{slug}/logs", json={"workspace": slug, "content": "a fact"})
+        resp = await client.post(
+            f"/v1/api/workspaces/{slug}/logs", json={"workspace": slug, "content": "a fact"}
+        )
 
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -100,7 +102,9 @@ async def test_empty_content_is_422(app, pg_url: str, content: str) -> None:  # 
     async with _client(app, pg_url) as client:
         slug, _ = await _create_workspace(client)
 
-        resp = await client.post(f"/v1/api/workspaces/{slug}/logs", json={"workspace": slug, "content": content})
+        resp = await client.post(
+            f"/v1/api/workspaces/{slug}/logs", json={"workspace": slug, "content": content}
+        )
 
         assert resp.status_code == 422, resp.text
 
@@ -136,7 +140,9 @@ async def test_archived_workspace_is_409(app, pg_url: str) -> None:  # type: ign
         archive = await client.post(f"/v1/api/workspaces/{slug}/archive")
         assert archive.status_code == 200, archive.text
 
-        resp = await client.post(f"/v1/api/workspaces/{slug}/logs", json={"workspace": slug, "content": "a fact"})
+        resp = await client.post(
+            f"/v1/api/workspaces/{slug}/logs", json={"workspace": slug, "content": "a fact"}
+        )
 
         assert resp.status_code == 409, resp.text
         assert "archived" in resp.json()["detail"]

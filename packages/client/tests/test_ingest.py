@@ -64,8 +64,7 @@ def _reload_modules() -> Any:
 def _default_instructions(tool_whitelist: list[str] | None = None) -> Instructions:
     return Instructions(
         prompt="be helpful",
-        tool_whitelist=tool_whitelist
-        or ["search_workspace", "read_page", "append_log"],
+        tool_whitelist=tool_whitelist or ["search_workspace", "read_page", "append_log"],
         steps=["one"],
         model=None,
         budgets=Budgets(max_steps=5, max_tokens=10_000, max_seconds=30),
@@ -95,9 +94,7 @@ async def test_ingest_calls_get_instructions_first(
         return "extracted=1"
 
     monkeypatch.setattr(ingest_mod, "get_instructions", _fake_get_instructions)
-    monkeypatch.setattr(
-        ingest_mod, "run_server_driven_command", _fake_run
-    )
+    monkeypatch.setattr(ingest_mod, "run_server_driven_command", _fake_run)
     await ingest_mod.run_ingest(source)
     assert order == ["get_instructions", "run_server_driven_command"]
 
@@ -222,9 +219,7 @@ async def test_ingest_context_overflow_clean_error(
         return _default_instructions()
 
     async def _fake_run(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError(
-            "messages: prompt too long: 200000 input tokens > 180000 context window"
-        )
+        raise RuntimeError("messages: prompt too long: 200000 input tokens > 180000 context window")
 
     monkeypatch.setattr(ingest_mod, "get_instructions", _fake_get_instructions)
     monkeypatch.setattr(ingest_mod, "run_server_driven_command", _fake_run)

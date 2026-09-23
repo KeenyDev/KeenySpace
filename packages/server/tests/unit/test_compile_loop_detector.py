@@ -19,9 +19,12 @@ def test_loop_detector_default_max_repeats() -> None:
 
 def _looping_model_factory():
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="read_page", args={"path": "notes/index.md"}),
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="read_page", args={"path": "notes/index.md"}),
+            ]
+        )
+
     return _fake
 
 
@@ -47,7 +50,9 @@ async def test_loop_detector_per_run_no_state_bleed(tmp_path: Path) -> None:
 
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         output_tool = info.output_tools[0].name if info.output_tools else "final_result"
-        return ModelResponse(parts=[ToolCallPart(tool_name=output_tool, args=target_plan.model_dump())])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=output_tool, args=target_plan.model_dump())]
+        )
 
     deps = CompileDeps(ws_root=tmp_path, wal_text="<wal_entry id='X'>x</wal_entry>")
 

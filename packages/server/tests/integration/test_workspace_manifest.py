@@ -5,6 +5,7 @@ Endpoint: GET /v1/api/workspaces/<slug>/manifest -> {files: {path: sha256:<hex>}
 Per D-13: manifest scope = .md anywhere + raw/ subtree only; .obsidian / .keenyspace /
 logs / tmp top-level dirs MUST be excluded.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -22,9 +23,7 @@ PG_URL = os.environ.get("KEENYSPACE_DB__URL")
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
 ]
 
 
@@ -83,9 +82,7 @@ async def _seed_api_key_post_lifespan() -> tuple[str, str]:
 
 async def _seed_workspace(client: AsyncClient, slug: str | None = None) -> str:
     slug = slug or f"mf-{uuid4().hex[:8]}"
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
     assert resp.status_code == 201, resp.text
     return slug
 
@@ -235,9 +232,7 @@ async def test_pages_raw_returns_bytes(app, pg_url) -> None:
             (ws_dir / "concepts").mkdir(parents=True, exist_ok=True)
             (ws_dir / "concepts" / "foo.md").write_bytes(payload)
 
-            resp = await client.get(
-                f"/v1/api/workspaces/{slug}/pages-raw/concepts/foo.md"
-            )
+            resp = await client.get(f"/v1/api/workspaces/{slug}/pages-raw/concepts/foo.md")
             assert resp.status_code == 200
             assert resp.content == payload
             assert resp.headers["content-type"].startswith("application/octet-stream")
@@ -265,9 +260,7 @@ async def test_pages_raw_rejects_dotfiles(app, pg_url) -> None:
                 "../etc/passwd",
                 "notes.txt",
             ):
-                resp = await client.get(
-                    f"/v1/api/workspaces/{slug}/pages-raw/{forbidden}"
-                )
+                resp = await client.get(f"/v1/api/workspaces/{slug}/pages-raw/{forbidden}")
                 assert resp.status_code in (400, 404), (
                     f"{forbidden!r} should be rejected, got {resp.status_code}"
                 )

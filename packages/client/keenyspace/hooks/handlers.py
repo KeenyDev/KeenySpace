@@ -54,6 +54,7 @@ def _augment(
         source = "unresolved"
     if source == "default":
         from keenyspace.hooks.dropped import increment
+
         increment("unmapped-workspace")
         # WHY stderr not structlog: hook <1s cold-boot budget forbids the
         # structlog import — matches uds_client.py / _read_stdin_envelope pattern.

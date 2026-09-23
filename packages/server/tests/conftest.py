@@ -39,9 +39,7 @@ def _ensure_auth_env():
     # /var/lib/keenyspace, which is not writable on the CI runner or a dev
     # laptop. Point it at a session temp dir for standalone tests that bypass
     # app_env (which sets its own per-test fs_root).
-    os.environ.setdefault(
-        "KEENYSPACE_FS__ROOT", tempfile.mkdtemp(prefix="ks-session-fs-")
-    )
+    os.environ.setdefault("KEENYSPACE_FS__ROOT", tempfile.mkdtemp(prefix="ks-session-fs-"))
 
     defaults = {
         "KEENYSPACE_AUTH__OIDC_ISSUER_URL": "http://localhost:9999/application/o/test/",

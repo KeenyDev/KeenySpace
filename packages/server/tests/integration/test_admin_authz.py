@@ -128,9 +128,7 @@ class TestMintExpiry:
 
 
 class TestKeysCannotMintKeys:
-    async def test_expiring_key_cannot_mint_a_successor(
-        self, app: Any, seed_api_key: Any
-    ) -> None:
+    async def test_expiring_key_cannot_mint_a_successor(self, app: Any, seed_api_key: Any) -> None:
         sub, key = await seed_api_key(
             groups=["keenyspace-users", ADMIN_GROUP],
             expires_at=datetime.now(UTC) + timedelta(days=1),
@@ -143,9 +141,7 @@ class TestKeysCannotMintKeys:
         assert "OIDC" in resp.json()["detail"]
         assert len(listed) == 1, f"no key may have been minted for {sub}"
 
-    async def test_key_can_still_list_and_revoke_its_owners_keys(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_key_can_still_list_and_revoke_its_owners_keys(self, client: AsyncClient) -> None:
         (item,) = (await client.get("/v1/api/auth/api-keys")).json()
 
         assert (await client.delete(f"/v1/api/auth/api-keys/{item['id']}")).status_code == 204

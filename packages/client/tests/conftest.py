@@ -61,9 +61,7 @@ def cli_runner() -> Any:
 
 
 @pytest.fixture
-def temp_config_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> dict[str, Path]:
+def temp_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     """Isolate XDG dirs under tmp_path; mirrors PROJECT.md ~/.config/keenyspace layout."""
 
     config_dir = tmp_path / ".config" / "keenyspace"
@@ -101,9 +99,7 @@ async def mock_daemon(
     sock_path.parent.mkdir(parents=True, exist_ok=True)
     sock_path.parent.chmod(0o700)
 
-    async def handler(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             line = await reader.readline()
             if line:

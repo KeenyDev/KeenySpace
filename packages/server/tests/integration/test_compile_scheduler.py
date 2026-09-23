@@ -17,7 +17,9 @@ def test_build_scheduler_can_register_jobs_and_shutdown() -> None:
         return None
 
     s.add_job(_noop, "interval", minutes=15, id="test_backstop", replace_existing=True)
-    s.add_job(_noop, "cron", hour=0, minute=0, timezone="UTC", id="test_cron", replace_existing=True)
+    s.add_job(
+        _noop, "cron", hour=0, minute=0, timezone="UTC", id="test_cron", replace_existing=True
+    )
 
     job_ids = {j.id for j in s.get_jobs()}
     assert {"test_backstop", "test_cron"} <= job_ids

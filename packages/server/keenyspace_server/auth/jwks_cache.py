@@ -58,7 +58,10 @@ class JwksCache:
         # request can carry a random kid), so they share the min-retry throttle.
         async with self._lock:
             now = time.monotonic()
-            if self._last_attempt_at is not None and (now - self._last_attempt_at) < self._min_retry:
+            if (
+                self._last_attempt_at is not None
+                and (now - self._last_attempt_at) < self._min_retry
+            ):
                 log.debug("auth.jwks.force_refresh_throttled")
                 return self._keyset
             await self._fetch(now)

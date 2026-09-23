@@ -68,13 +68,9 @@ async def test_daemon_uds_smoke_session_start_compact(
     importlib.reload(handlers_mod)
 
     transcript = tmp_path / "transcript.jsonl"
-    transcript.write_text(
-        '{"role":"user","content":"hello"}\n' * 5, encoding="utf-8"
-    )
+    transcript.write_text('{"role":"user","content":"hello"}\n' * 5, encoding="utf-8")
 
-    server = await asyncio.start_unix_server(
-        server_mod._handle, path=str(sock_path)
-    )
+    server = await asyncio.start_unix_server(server_mod._handle, path=str(sock_path))
     try:
         envelope = {
             "kind": "session-start",
@@ -120,9 +116,7 @@ async def test_daemon_uds_smoke_post_tool_fire_and_forget(
 
     importlib.reload(handlers_mod)
 
-    server = await asyncio.start_unix_server(
-        server_mod._handle, path=str(sock_path)
-    )
+    server = await asyncio.start_unix_server(server_mod._handle, path=str(sock_path))
     try:
         envelope = {"kind": "post-tool", "workspace_slug": "demo"}
         reader, writer = await asyncio.open_unix_connection(str(sock_path))
@@ -173,9 +167,7 @@ async def test_daemon_uds_smoke_missing_transcript_returns_ok_false(
 
     importlib.reload(handlers_mod)
 
-    server = await asyncio.start_unix_server(
-        server_mod._handle, path=str(sock_path)
-    )
+    server = await asyncio.start_unix_server(server_mod._handle, path=str(sock_path))
     try:
         envelope = {
             "kind": "session-start",

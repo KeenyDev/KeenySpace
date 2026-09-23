@@ -9,18 +9,16 @@ from pydantic import ValidationError
 
 def _reload_config() -> object:
     import keenyspace.paths as paths_mod
+
     importlib.reload(paths_mod)
     import keenyspace.config as cfg
+
     return importlib.reload(cfg)
 
 
 def test_yaml_overrides_defaults(temp_config_dir: dict[str, Path]) -> None:
     config_dir = temp_config_dir["config_dir"]
-    (config_dir / "config.yaml").write_text(
-        "server_url: http://test\n"
-        "llm:\n"
-        "  provider: openai\n"
-    )
+    (config_dir / "config.yaml").write_text("server_url: http://test\nllm:\n  provider: openai\n")
     cfg = _reload_config()
     settings = cfg.ClientSettings()  # type: ignore[attr-defined]
     assert settings.server_url == "http://test"

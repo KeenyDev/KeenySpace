@@ -27,7 +27,9 @@ class Workspace(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     compile_state: Mapped[str] = mapped_column(String(32), server_default="idle")
     compile_paused_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    compile_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    compile_paused_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint("status IN ('active', 'archived')", name="ck_workspaces_status"),
@@ -129,7 +131,9 @@ class CompileCursor(Base):
 
     workspace_uuid: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("workspaces.uuid", ondelete="CASCADE", name="compile_cursors_workspace_uuid_fkey"),
+        ForeignKey(
+            "workspaces.uuid", ondelete="CASCADE", name="compile_cursors_workspace_uuid_fkey"
+        ),
         primary_key=True,
     )
     last_wal_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
@@ -139,7 +143,9 @@ class CompileCursor(Base):
     pending_plan_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # JSON, not JSONB: JSONB reorders object keys and replayed frontmatter must keep
     # the agent-decided key order.
-    pending_plan: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    pending_plan: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint(

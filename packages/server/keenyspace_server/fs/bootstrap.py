@@ -15,9 +15,7 @@ BLUEPRINT_SYNC_MANIFEST = ".image-sync.json"
 _MANIFEST_SCHEMA_VERSION = 1
 
 
-def ensure_fs_root_layout(
-    fs_root: Path, server_blueprints_image_dir: Path
-) -> None:
+def ensure_fs_root_layout(fs_root: Path, server_blueprints_image_dir: Path) -> None:
     for subdir in ("workspaces", "blueprints", ".tmp"):
         (fs_root / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -66,9 +64,7 @@ def _digest_tree(src: Path) -> dict[str, str]:
     digests: dict[str, str] = {}
     for src_root, dirnames, filenames in os.walk(src, followlinks=False):
         rel_root = Path(src_root).relative_to(src)
-        dirnames[:] = [
-            d for d in dirnames if not (Path(src_root) / d).is_symlink()
-        ]
+        dirnames[:] = [d for d in dirnames if not (Path(src_root) / d).is_symlink()]
         for filename in filenames:
             src_file = Path(src_root) / filename
             if src_file.is_symlink():
@@ -121,9 +117,7 @@ def _load_manifest(blueprints_root: Path) -> dict[str, dict[str, str]]:
     }
 
 
-def _save_manifest(
-    blueprints_root: Path, manifest: dict[str, dict[str, str]]
-) -> None:
+def _save_manifest(blueprints_root: Path, manifest: dict[str, dict[str, str]]) -> None:
     payload = {
         "schema_version": _MANIFEST_SCHEMA_VERSION,
         "blueprints": manifest,
@@ -141,9 +135,7 @@ def _save_manifest(
         )
 
 
-def _merge_blueprint_tree(
-    src: Path, dst: Path, shipped: dict[str, str] | None = None
-) -> None:
+def _merge_blueprint_tree(src: Path, dst: Path, shipped: dict[str, str] | None = None) -> None:
     """Reconcile ``dst`` against the image tree ``src``.
 
     Per file: absent on disk means copy; byte-identical to the digest the image
@@ -160,9 +152,7 @@ def _merge_blueprint_tree(
         rel_root = Path(src_root).relative_to(src)
         # Skip symlinked sub-directories defence-in-depth (os.walk followlinks=False
         # already refuses to descend, but pruning here avoids touching the entries).
-        dirnames[:] = [
-            d for d in dirnames if not (Path(src_root) / d).is_symlink()
-        ]
+        dirnames[:] = [d for d in dirnames if not (Path(src_root) / d).is_symlink()]
         dst_root = dst / rel_root
         try:
             dst_root.mkdir(parents=True, exist_ok=True)

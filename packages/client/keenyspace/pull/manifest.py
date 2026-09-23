@@ -65,9 +65,7 @@ def resolve_vault_path(root: Path, rel: str) -> Path:
     return candidate
 
 
-def diff_manifests(
-    local: dict[str, str], server: dict[str, str]
-) -> ManifestDiff:
+def diff_manifests(local: dict[str, str], server: dict[str, str]) -> ManifestDiff:
     diff = ManifestDiff()
     for path, server_hash in server.items():
         if path not in local:

@@ -69,9 +69,7 @@ def test_validate_rejects_bad_zip(tmp_path: Path) -> None:
 
 
 def test_validate_rejects_size_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "keenyspace_server.ws.import_.MAX_IMPORT_UNCOMPRESSED_BYTES", 4
-    )
+    monkeypatch.setattr("keenyspace_server.ws.import_.MAX_IMPORT_UNCOMPRESSED_BYTES", 4)
     zp = _make_zip(tmp_path, [("index.md", b"hello, world\n")])
     with pytest.raises(WorkspaceImportError) as exc:
         _validate_zip_sync(zp)
@@ -189,9 +187,7 @@ def test_validate_denylist_covers_operator_smuggle_names() -> None:
 
 
 def test_validate_still_rejects_path_traversal_after_relax(tmp_path: Path) -> None:
-    zp = _make_zip(
-        tmp_path, [("../etc/passwd", b"x"), ("index.md", b"# x")]
-    )
+    zp = _make_zip(tmp_path, [("../etc/passwd", b"x"), ("index.md", b"# x")])
     with pytest.raises(WorkspaceImportError) as exc:
         _validate_zip_sync(zp)
     assert exc.value.code == "path_traversal"
@@ -207,9 +203,7 @@ def test_validate_still_rejects_symlink_after_relax(tmp_path: Path) -> None:
 def test_validate_rejects_size_cap_without_decompressing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        "keenyspace_server.ws.import_.MAX_IMPORT_UNCOMPRESSED_BYTES", 4
-    )
+    monkeypatch.setattr("keenyspace_server.ws.import_.MAX_IMPORT_UNCOMPRESSED_BYTES", 4)
 
     def _fail_testzip(self: zipfile.ZipFile) -> str | None:
         raise AssertionError("testzip must not run before the size cap check")

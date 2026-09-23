@@ -39,15 +39,19 @@ def test_system_prompt_frames_wal_as_data_not_instructions() -> None:
 @pytest.mark.asyncio
 async def test_run_compile_agent_returns_function_model_plan(tmp_path: Path) -> None:
     target_plan = CompilePlan(
-        ops=[PageOp(action="create", path="notes/test.md", body="hello", frontmatter={"title": "T"})],
+        ops=[
+            PageOp(action="create", path="notes/test.md", body="hello", frontmatter={"title": "T"})
+        ],
         notes="",
     )
 
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         output_tool_name = info.output_tools[0].name if info.output_tools else "final_result"
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name=output_tool_name, args=target_plan.model_dump()),
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name=output_tool_name, args=target_plan.model_dump()),
+            ]
+        )
 
     deps = CompileDeps(ws_root=tmp_path, wal_text='<wal_entry id="01HX">x</wal_entry>')
     with compile_agent.override(model=FunctionModel(_fake)):
@@ -69,9 +73,11 @@ async def test_run_compile_agent_passes_temperature_zero_and_budgets(tmp_path: P
 
         async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
             output_tool_name = info.output_tools[0].name if info.output_tools else "final_result"
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name=output_tool_name, args=CompilePlan(ops=[]).model_dump()),
-            ])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name=output_tool_name, args=CompilePlan(ops=[]).model_dump()),
+                ]
+            )
 
         with compile_agent.override(model=FunctionModel(_fake)):
             return await original_run(*args, **kwargs)
@@ -79,7 +85,10 @@ async def test_run_compile_agent_passes_temperature_zero_and_budgets(tmp_path: P
     deps = CompileDeps(ws_root=tmp_path, wal_text="<wal_entry id='X'>q</wal_entry>")
     with patch.object(compile_agent, "run", side_effect=_spy_run):
         await run_compile_agent(
-            deps, model_name="claude-sonnet-4-6", max_tool_calls=20, max_output_tokens_per_call=20_000
+            deps,
+            model_name="claude-sonnet-4-6",
+            max_tool_calls=20,
+            max_output_tokens_per_call=20_000,
         )
 
     ms = captured["model_settings"]

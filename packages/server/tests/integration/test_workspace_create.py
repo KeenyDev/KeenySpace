@@ -40,6 +40,7 @@ async def test_create_workspace_returns_201(client, fs_root):
     assert "Index" in (ws_dir / "index.md").read_text()
 
     import yaml
+
     config_text = (ws_dir / ".keenyspace" / "config.yaml").read_text()
     config = yaml.safe_load(config_text)
     assert config["blueprint"] == "default@v0.1"
@@ -103,15 +104,13 @@ async def test_create_releases_db_connection_and_reaps_dir_on_slug_race(
         checked_out_during_clone.append(engine.pool.checkedout())
         ws_dir = real_clone(*args, **kwargs)
         cloned_dirs.append(ws_dir)
-        asyncio.run_coroutine_threadsafe(
-            _insert_workspace_row(kwargs["slug"]), loop
-        ).result(timeout=10)
+        asyncio.run_coroutine_threadsafe(_insert_workspace_row(kwargs["slug"]), loop).result(
+            timeout=10
+        )
         return ws_dir
 
     monkeypatch.setattr(workspaces_api, "clone_default_blueprint", _racing_clone)
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": "raced", "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": "raced", "blueprint": "default"})
 
     assert resp.status_code == 409, resp.text
     assert checked_out_during_clone == [0]

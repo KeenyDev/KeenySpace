@@ -1,0 +1,1 @@
+- [Perf case law](project_perf_case_law.md) — recorded tradeoffs (no FTS, single-worker), argon2 verify 37ms baseline, hot paths from 2026-09-22 review

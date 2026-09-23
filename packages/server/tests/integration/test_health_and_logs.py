@@ -81,10 +81,7 @@ async def test_healthz_twice(client, capsys):
 
     rec = marker_records[0]
     missing = [k for k in ("event", "timestamp", "level") if k not in rec]
-    assert not missing, (
-        f"Structlog JSON record missing required keys: {missing}. "
-        f"Record was: {rec}"
-    )
+    assert not missing, f"Structlog JSON record missing required keys: {missing}. Record was: {rec}"
 
     for key in ("event", "timestamp", "level"):
         value = rec[key]

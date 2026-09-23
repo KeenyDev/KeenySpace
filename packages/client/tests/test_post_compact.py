@@ -29,8 +29,7 @@ def _make_instructions(
 ) -> Instructions:
     return Instructions(
         prompt="You select workspace context after compaction.",
-        tool_whitelist=tool_whitelist
-        or ["search_workspace", "read_page", "list_pages"],
+        tool_whitelist=tool_whitelist or ["search_workspace", "read_page", "list_pages"],
         steps=["read", "search", "assemble"],
         model=None,
         budgets=Budgets(max_steps=10, max_tokens=20_000, max_seconds=45),
@@ -39,9 +38,7 @@ def _make_instructions(
 
 @pytest.fixture
 def auth_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        pc_mod, "read_auth", lambda: {"api_key": "ks_live_test"}
-    )
+    monkeypatch.setattr(pc_mod, "read_auth", lambda: {"api_key": "ks_live_test"})
 
 
 @pytest.fixture
@@ -137,9 +134,7 @@ async def test_assemble_context_happy_path(
 
 @pytest.mark.asyncio
 async def test_assemble_context_no_workspace_slug() -> None:
-    response = await pc_mod.assemble_context(
-        {"transcript_path": "/tmp/anything.jsonl"}
-    )
+    response = await pc_mod.assemble_context({"transcript_path": "/tmp/anything.jsonl"})
     assert response["ok"] is False
     assert response["error"] == "no_workspace_slug"
     assert response["content"] is None
@@ -266,9 +261,7 @@ async def test_server_driven_post_compact_calls_get_instructions_first(
     _install_stubs(
         monkeypatch,
         instructions=_make_instructions(),
-        agent_output=PostCompactInjection(
-            base_layer="b", selected_pages=[], assembled_text="ok"
-        ),
+        agent_output=PostCompactInjection(base_layer="b", selected_pages=[], assembled_text="ok"),
         call_order=order,
     )
     await pc_mod.assemble_context(

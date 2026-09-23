@@ -21,9 +21,7 @@ HAS_PG_DUMP = shutil.which("pg_dump") is not None and shutil.which("psql") is no
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"
-    ),
+    pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
     pytest.mark.skipif(not HAS_PG_DUMP, reason="pg_dump/psql binary unavailable"),
 ]
 
@@ -100,9 +98,7 @@ async def _capture_backup(
 
 async def _seed_workspace(client: AsyncClient) -> str:
     slug = f"restore-{uuid4().hex[:8]}"
-    resp = await client.post(
-        "/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"}
-    )
+    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
     assert resp.status_code == 201, resp.text
     return slug
 
@@ -179,9 +175,7 @@ async def test_restore_schema_mismatch_returns_422(app: Any, pg_url: str) -> Non
     await _reset_schema(pg_url)
     async with app.router.lifespan_context(app):
         _, plaintext = await _seed_api_key_post_lifespan()
-        manifest = _default_manifest(
-            keenyspace_version="0.1.0", alembic_head="0001_bogus"
-        )
+        manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head="0001_bogus")
         tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(
@@ -216,9 +210,7 @@ async def test_restore_target_not_empty_returns_409(app: Any, pg_url: str) -> No
                 pytest.skip("server not ready")
             await _seed_workspace(client)
             head = await _current_alembic_head()
-            manifest = _default_manifest(
-                keenyspace_version="0.1.0", alembic_head=head
-            )
+            manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head=head)
             tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
             resp = await client.post(
                 "/v1/admin/restore",
@@ -248,9 +240,7 @@ async def test_restore_force_wipes_existing(app: Any, pg_url: str) -> None:
                 pytest.skip("server not ready")
             await _seed_workspace(client)
             head = await _current_alembic_head()
-            manifest = _default_manifest(
-                keenyspace_version="0.1.0", alembic_head=head
-            )
+            manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head=head)
             tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
             resp = await client.post(
                 "/v1/admin/restore",
@@ -283,9 +273,7 @@ async def test_restore_force_wipe_audit_log_row(app: Any, pg_url: str) -> None:
                 pytest.skip("server not ready")
             await _seed_workspace(client)
             head = await _current_alembic_head()
-            manifest = _default_manifest(
-                keenyspace_version="0.1.0", alembic_head=head
-            )
+            manifest = _default_manifest(keenyspace_version="0.1.0", alembic_head=head)
             tarball = _make_tarball(manifest, _EMPTY_PG_DUMP)
             resp = await client.post(
                 "/v1/admin/restore",
@@ -296,19 +284,23 @@ async def test_restore_force_wipe_audit_log_row(app: Any, pg_url: str) -> None:
 
             async with get_db_session() as session:
                 wipe_rows = (
-                    await session.execute(
-                        select(AuditLog).where(
-                            AuditLog.action == "admin.restore.wipe"
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "admin.restore.wipe")
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 applied_rows = (
-                    await session.execute(
-                        select(AuditLog).where(
-                            AuditLog.action == "admin.restore.applied"
+                    (
+                        await session.execute(
+                            select(AuditLog).where(AuditLog.action == "admin.restore.applied")
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert wipe_rows, "admin.restore.wipe row missing"
             assert applied_rows, "admin.restore.applied row missing"
             assert wipe_rows[0].actor_sub == user_sub

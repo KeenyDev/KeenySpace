@@ -171,7 +171,9 @@ class CompileCoordinator:
             try:
                 result = await self._run_compile_pass(ws_uuid, ws_root, run_id, source)
             except Exception:
-                log.error("compile.pass_failed", workspace=str(ws_uuid), run_id=run_id, exc_info=True)
+                log.error(
+                    "compile.pass_failed", workspace=str(ws_uuid), run_id=run_id, exc_info=True
+                )
             finally:
                 self._inflight.pop(ws_uuid, None)
         if result is not None and result.backlog_remaining:
@@ -211,18 +213,30 @@ class CompileCoordinator:
         """
         try:
             async with get_db_session() as session:
-                runs = (await session.execute(
-                    update(CompileRun)
-                    .where(CompileRun.status == "running")
-                    .values(status="abort_interrupted", completed_at=datetime.now(UTC))
-                    .returning(CompileRun.id)
-                )).scalars().all()
-                workspaces = (await session.execute(
-                    update(Workspace)
-                    .where(Workspace.compile_state == "running")
-                    .values(compile_state="idle")
-                    .returning(Workspace.uuid)
-                )).scalars().all()
+                runs = (
+                    (
+                        await session.execute(
+                            update(CompileRun)
+                            .where(CompileRun.status == "running")
+                            .values(status="abort_interrupted", completed_at=datetime.now(UTC))
+                            .returning(CompileRun.id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                workspaces = (
+                    (
+                        await session.execute(
+                            update(Workspace)
+                            .where(Workspace.compile_state == "running")
+                            .values(compile_state="idle")
+                            .returning(Workspace.uuid)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 await session.commit()
         except DBAPIError as exc:
             if getattr(exc.orig, "sqlstate", None) != _PG_UNDEFINED_TABLE:
@@ -232,26 +246,35 @@ class CompileCoordinator:
         if runs or workspaces:
             log.warning(
                 "compile.reconciled_interrupted",
-                runs=len(runs), workspaces=len(workspaces),
+                runs=len(runs),
+                workspaces=len(workspaces),
             )
 
     async def status(self, ws_uuid: UUID) -> CompileStatusResponse:
         async with get_db_session() as session:
-            ws_row = (await session.execute(
-                select(Workspace).where(Workspace.uuid == ws_uuid)
-            )).scalar_one_or_none()
-            cur_row = (await session.execute(
-                select(CompileCursor).where(CompileCursor.workspace_uuid == ws_uuid)
-            )).scalar_one_or_none()
-            last_run = (await session.execute(
-                select(CompileRun)
-                .where(CompileRun.workspace_uuid == ws_uuid)
-                .order_by(CompileRun.started_at.desc())
-                .limit(1)
-            )).scalar_one_or_none()
+            ws_row = (
+                await session.execute(select(Workspace).where(Workspace.uuid == ws_uuid))
+            ).scalar_one_or_none()
+            cur_row = (
+                await session.execute(
+                    select(CompileCursor).where(CompileCursor.workspace_uuid == ws_uuid)
+                )
+            ).scalar_one_or_none()
+            last_run = (
+                await session.execute(
+                    select(CompileRun)
+                    .where(CompileRun.workspace_uuid == ws_uuid)
+                    .order_by(CompileRun.started_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
         if ws_row is None:
             return CompileStatusResponse(state="idle")
-        safe_state = ws_row.compile_state if ws_row.compile_state in ("idle", "running", "paused") else "idle"
+        safe_state = (
+            ws_row.compile_state
+            if ws_row.compile_state in ("idle", "running", "paused")
+            else "idle"
+        )
         return CompileStatusResponse(
             state=cast(Literal["idle", "running", "paused"], safe_state),
             last_wal_id=cur_row.last_wal_id if cur_row else None,
@@ -263,9 +286,11 @@ class CompileCoordinator:
     async def backstop_all_workspaces(self) -> None:
         """Scheduler entry point: trigger a compile pass for every active workspace."""
         async with get_db_session() as session:
-            rows = (await session.execute(
-                select(Workspace.uuid).where(Workspace.status == "active")
-            )).scalars().all()
+            rows = (
+                (await session.execute(select(Workspace.uuid).where(Workspace.status == "active")))
+                .scalars()
+                .all()
+            )
         for ws_uuid in rows:
             try:
                 await self.trigger(ws_uuid, source="backstop")
@@ -300,6 +325,7 @@ class CompileCoordinator:
 
     async def _workspace_root(self, ws_uuid: UUID) -> Path | None:
         from keenyspace_server.config import get_settings
+
         settings = get_settings()
         root = workspace_root(settings.fs.root, ws_uuid)
         return root if root.is_dir() else None
@@ -307,9 +333,13 @@ class CompileCoordinator:
     async def _workspace_state(self, ws_uuid: UUID) -> str:
         """compile_state, except 'archived' for an archived workspace whatever its compile_state."""
         async with get_db_session() as session:
-            row = (await session.execute(
-                select(Workspace.status, Workspace.compile_state).where(Workspace.uuid == ws_uuid)
-            )).one_or_none()
+            row = (
+                await session.execute(
+                    select(Workspace.status, Workspace.compile_state).where(
+                        Workspace.uuid == ws_uuid
+                    )
+                )
+            ).one_or_none()
         if row is None:
             return "idle"
         return "archived" if row.status == "archived" else row.compile_state
@@ -348,7 +378,9 @@ class CompileCoordinator:
         try:
             return await self._execute_pass(ws_uuid, ws_root, run_id, source, started_at, progress)
         except BaseException as exc:
-            await self._finalize_failed_pass(ws_uuid, run_id, exc, tokens_spent=progress.tokens_spent)
+            await self._finalize_failed_pass(
+                ws_uuid, run_id, exc, tokens_spent=progress.tokens_spent
+            )
             raise
 
     async def _execute_pass(
@@ -362,7 +394,9 @@ class CompileCoordinator:
     ) -> CompileRunResult:
         cursor_row = await self._read_cursor(ws_uuid)
         if cursor_row is not None and cursor_row.pending_wal_last_id is not None:
-            return await self._replay_intent(ws_uuid, ws_root, run_id, source, started_at, cursor_row)
+            return await self._replay_intent(
+                ws_uuid, ws_root, run_id, source, started_at, cursor_row
+            )
         last_wal_id = cursor_row.last_wal_id if cursor_row else None
         slice_ = await asyncio.to_thread(
             extract_wal_slice, ws_root, last_wal_id, max_bytes=self.settings.max_slice_bytes
@@ -370,25 +404,40 @@ class CompileCoordinator:
 
         if not slice_.entries:
             await self._release_running(ws_uuid)
-            log.info("compile.idempotent_noop", workspace=str(ws_uuid), run_id=run_id, reason="empty_slice")
+            log.info(
+                "compile.idempotent_noop",
+                workspace=str(ws_uuid),
+                run_id=run_id,
+                reason="empty_slice",
+            )
             COMPILE_RUNS_TOTAL.labels(workspace=str(ws_uuid), status="idempotent_noop").inc()
             return CompileRunResult(status="idempotent_noop", pages_written=0)
 
         budget_abort: tuple[str, str, str] | None = None
         if self._daily_tokens.get(ws_uuid, 0) >= self.settings.daily_token_ceiling:
             budget_abort = ("abort_ceiling", "daily_ceiling", "daily token ceiling reached")
-        elif self._output_tokens_per_space.get(ws_uuid, 0) >= self.settings.max_output_tokens_per_space:
+        elif (
+            self._output_tokens_per_space.get(ws_uuid, 0)
+            >= self.settings.max_output_tokens_per_space
+        ):
             budget_abort = (
-                "abort_space_budget", "space_budget_exceeded",
+                "abort_space_budget",
+                "space_budget_exceeded",
                 "per-space daily output token budget reached",
             )
         if budget_abort is not None:
             status, reason, error = budget_abort
             await self._pause(ws_uuid, reason=reason, error=error)
             await self._write_run_row(
-                ws_uuid, run_id, started_at, source,
-                status=status, pages_written=0,
-                wal_first_id=slice_.wal_first_id, wal_last_id=slice_.wal_last_id, plan_hash=None,
+                ws_uuid,
+                run_id,
+                started_at,
+                source,
+                status=status,
+                pages_written=0,
+                wal_first_id=slice_.wal_first_id,
+                wal_last_id=slice_.wal_last_id,
+                plan_hash=None,
                 completed_at=datetime.now(UTC),
             )
             log.warning("compile.aborted", workspace=str(ws_uuid), reason=reason)
@@ -396,9 +445,15 @@ class CompileCoordinator:
             return CompileRunResult(status="paused", pages_written=0)
 
         await self._write_run_row(
-            ws_uuid, run_id, started_at, source,
-            status="running", pages_written=0,
-            wal_first_id=slice_.wal_first_id, wal_last_id=slice_.wal_last_id, plan_hash=None,
+            ws_uuid,
+            run_id,
+            started_at,
+            source,
+            status="running",
+            pages_written=0,
+            wal_first_id=slice_.wal_first_id,
+            wal_last_id=slice_.wal_last_id,
+            plan_hash=None,
         )
 
         deps = CompileDeps(ws_root=ws_root, wal_text=slice_.formatted_text)
@@ -427,7 +482,11 @@ class CompileCoordinator:
             )
         except TimeoutError:
             return await self._abort(
-                ws_uuid, run_id, status="abort_budget", reason="budget_exceeded", error="agent timeout"
+                ws_uuid,
+                run_id,
+                status="abort_budget",
+                reason="budget_exceeded",
+                error="agent timeout",
             )
         except (ModelAPIError, UnexpectedModelBehavior) as exc:
             return await self._abort(
@@ -452,8 +511,12 @@ class CompileCoordinator:
             check_plan_safety(ws_root, plan)
         except CompilePlanSafetyError as exc:
             return await self._abort(
-                ws_uuid, run_id, status="abort_plan_invalid", reason="plan_invalid",
-                error=str(exc), plan_hash=plan_hash_value,
+                ws_uuid,
+                run_id,
+                status="abort_plan_invalid",
+                reason="plan_invalid",
+                error=str(exc),
+                plan_hash=plan_hash_value,
             )
 
         # The intent is committed before any page is written, so a crash between the
@@ -465,8 +528,12 @@ class CompileCoordinator:
         except CompilePlanSafetyError as exc:
             await self._discard_intent(ws_uuid, plan_hash_value)
             return await self._abort(
-                ws_uuid, run_id, status="abort_plan_invalid", reason="plan_invalid",
-                error=str(exc), plan_hash=plan_hash_value,
+                ws_uuid,
+                run_id,
+                status="abort_plan_invalid",
+                reason="plan_invalid",
+                error=str(exc),
+                plan_hash=plan_hash_value,
             )
         except Exception:
             # A failed (not interrupted) apply drops the intent so a resume recompiles
@@ -481,7 +548,8 @@ class CompileCoordinator:
         COMPILE_RUNS_TOTAL.labels(workspace=str(ws_uuid), status="success").inc()
 
         await self._update_run_row(
-            ws_uuid, run_id,
+            ws_uuid,
+            run_id,
             status="success",
             pages_written=pages_written,
             plan_hash=plan_hash_value,
@@ -491,15 +559,18 @@ class CompileCoordinator:
         # This run succeeded; pause future runs if it pushed the space over its daily budget.
         if self._output_tokens_per_space[ws_uuid] >= self.settings.max_output_tokens_per_space:
             await self._pause(
-                ws_uuid, reason="space_budget_exceeded",
+                ws_uuid,
+                reason="space_budget_exceeded",
                 error="per-space daily output token budget reached",
             )
         else:
             await self._release_running(ws_uuid)
         log.info(
             "compile.finished",
-            workspace=str(ws_uuid), run_id=run_id,
-            pages_written=pages_written, plan_hash=plan_hash_value,
+            workspace=str(ws_uuid),
+            run_id=run_id,
+            pages_written=pages_written,
+            plan_hash=plan_hash_value,
             backlog_remaining=slice_.has_more,
         )
         return CompileRunResult(
@@ -521,21 +592,32 @@ class CompileCoordinator:
         pending_last = cursor_row.pending_wal_last_id
         plan_hash_value = cursor_row.pending_plan_hash
         if pending_last is None or plan_hash_value is None:
-            raise CompileCursorConflictError(f"compile cursor for {ws_uuid} holds an incomplete intent")
+            raise CompileCursorConflictError(
+                f"compile cursor for {ws_uuid} holds an incomplete intent"
+            )
         if await self._workspace_state(ws_uuid) == "archived":
             # Archive landed after the claim. The intent stays pending: unarchive restores
             # the exact pages and WAL the plan was compiled from, so replaying it then is
             # correct and free, whereas discarding it would re-buy the same slice from the LLM.
             await self._release_running(ws_uuid)
             log.info(
-                "compile.intent_deferred", workspace=str(ws_uuid), run_id=run_id,
-                reason="archived", wal_last_id=pending_last,
+                "compile.intent_deferred",
+                workspace=str(ws_uuid),
+                run_id=run_id,
+                reason="archived",
+                wal_last_id=pending_last,
             )
             return CompileRunResult(status="paused", pages_written=0, plan_hash=plan_hash_value)
         await self._write_run_row(
-            ws_uuid, run_id, started_at, source,
-            status="running", pages_written=0,
-            wal_first_id=None, wal_last_id=pending_last, plan_hash=plan_hash_value,
+            ws_uuid,
+            run_id,
+            started_at,
+            source,
+            status="running",
+            pages_written=0,
+            wal_first_id=None,
+            wal_last_id=pending_last,
+            plan_hash=plan_hash_value,
         )
         try:
             plan = CompilePlan.model_validate(cursor_row.pending_plan)
@@ -543,8 +625,12 @@ class CompileCoordinator:
         except CompilePlanSafetyError as exc:
             await self._discard_intent(ws_uuid, plan_hash_value)
             return await self._abort(
-                ws_uuid, run_id, status="abort_plan_invalid", reason="plan_invalid",
-                error=str(exc), plan_hash=plan_hash_value,
+                ws_uuid,
+                run_id,
+                status="abort_plan_invalid",
+                reason="plan_invalid",
+                error=str(exc),
+                plan_hash=plan_hash_value,
             )
         except Exception:
             await self._discard_intent(ws_uuid, plan_hash_value)
@@ -555,31 +641,49 @@ class CompileCoordinator:
             COMPILE_PAGES_WRITTEN_TOTAL.labels(workspace=str(ws_uuid), action=op.action).inc()
         COMPILE_RUNS_TOTAL.labels(workspace=str(ws_uuid), status="success").inc()
         await self._update_run_row(
-            ws_uuid, run_id,
-            status="success", pages_written=pages_written,
-            plan_hash=plan_hash_value, completed_at=datetime.now(UTC),
+            ws_uuid,
+            run_id,
+            status="success",
+            pages_written=pages_written,
+            plan_hash=plan_hash_value,
+            completed_at=datetime.now(UTC),
         )
         await self._release_running(ws_uuid)
         log.info(
             "compile.intent_replayed",
-            workspace=str(ws_uuid), run_id=run_id,
-            pages_written=pages_written, plan_hash=plan_hash_value, wal_last_id=pending_last,
+            workspace=str(ws_uuid),
+            run_id=run_id,
+            pages_written=pages_written,
+            plan_hash=plan_hash_value,
+            wal_last_id=pending_last,
         )
         # WAL appended after the interrupted slice is unknown here; a follow-up pass
         # finds out, and costs nothing when the slice is empty.
         return CompileRunResult(
-            status="success", pages_written=pages_written,
-            plan_hash=plan_hash_value, backlog_remaining=True,
+            status="success",
+            pages_written=pages_written,
+            plan_hash=plan_hash_value,
+            backlog_remaining=True,
         )
 
     async def _abort(
-        self, ws_uuid: UUID, run_id: str,
-        *, status: str, reason: str, error: str, plan_hash: str | None = None,
+        self,
+        ws_uuid: UUID,
+        run_id: str,
+        *,
+        status: str,
+        reason: str,
+        error: str,
+        plan_hash: str | None = None,
     ) -> CompileRunResult:
         await self._pause(ws_uuid, reason=reason, error=error)
         await self._update_run_row(
-            ws_uuid, run_id, status=status, error_message=error,
-            plan_hash=plan_hash, completed_at=datetime.now(UTC),
+            ws_uuid,
+            run_id,
+            status=status,
+            error_message=error,
+            plan_hash=plan_hash,
+            completed_at=datetime.now(UTC),
         )
         COMPILE_RUNS_TOTAL.labels(workspace=str(ws_uuid), status=status).inc()
         log.warning("compile.aborted", workspace=str(ws_uuid), run_id=run_id, reason=reason)
@@ -593,8 +697,12 @@ class CompileCoordinator:
         error = "compile pass interrupted" if interrupted else f"{type(exc).__name__}: {exc}"
         try:
             await self._update_run_row(
-                ws_uuid, run_id, status=status, error_message=error,
-                completed_at=datetime.now(UTC), only_if_running=True,
+                ws_uuid,
+                run_id,
+                status=status,
+                error_message=error,
+                completed_at=datetime.now(UTC),
+                only_if_running=True,
             )
             if tokens_spent and not interrupted:
                 # Pausing (not idling) stops the backstop from re-spending LLM tokens
@@ -606,8 +714,10 @@ class CompileCoordinator:
         except Exception as finalize_exc:
             log.error(
                 "compile.finalize_failed",
-                workspace=str(ws_uuid), run_id=run_id,
-                error=str(finalize_exc), original_error=error,
+                workspace=str(ws_uuid),
+                run_id=run_id,
+                error=str(finalize_exc),
+                original_error=error,
             )
         COMPILE_RUNS_TOTAL.labels(workspace=str(ws_uuid), status=status).inc()
         if interrupted:
@@ -638,16 +748,18 @@ class CompileCoordinator:
 
     async def _claim_running(self, ws_uuid: UUID) -> bool:
         async with get_db_session() as session:
-            claimed = (await session.execute(
-                update(Workspace)
-                .where(
-                    Workspace.uuid == ws_uuid,
-                    Workspace.status == "active",
-                    Workspace.compile_state != "paused",
+            claimed = (
+                await session.execute(
+                    update(Workspace)
+                    .where(
+                        Workspace.uuid == ws_uuid,
+                        Workspace.status == "active",
+                        Workspace.compile_state != "paused",
+                    )
+                    .values(compile_state="running")
+                    .returning(Workspace.uuid)
                 )
-                .values(compile_state="running")
-                .returning(Workspace.uuid)
-            )).scalar_one_or_none()
+            ).scalar_one_or_none()
             await session.commit()
         return claimed is not None
 
@@ -662,9 +774,11 @@ class CompileCoordinator:
 
     async def _read_cursor(self, ws_uuid: UUID) -> CompileCursor | None:
         async with get_db_session() as session:
-            return (await session.execute(
-                select(CompileCursor).where(CompileCursor.workspace_uuid == ws_uuid)
-            )).scalar_one_or_none()
+            return (
+                await session.execute(
+                    select(CompileCursor).where(CompileCursor.workspace_uuid == ws_uuid)
+                )
+            ).scalar_one_or_none()
 
     async def _record_intent(
         self,
@@ -681,23 +795,32 @@ class CompileCoordinator:
             "updated_at": datetime.now(UTC),
         }
         async with get_db_session() as session:
-            recorded = (await session.execute(
-                update(CompileCursor)
-                .where(
-                    CompileCursor.workspace_uuid == ws_uuid,
-                    CompileCursor.last_wal_id.is_not_distinct_from(expected_last_wal_id),
-                    CompileCursor.pending_wal_last_id.is_(None),
-                )
-                .values(**intent)
-                .returning(CompileCursor.workspace_uuid)
-            )).scalar_one_or_none()
-            if recorded is None and expected_last_wal_id is None:
-                recorded = (await session.execute(
-                    pg_insert(CompileCursor)
-                    .values(workspace_uuid=ws_uuid, last_wal_id=None, last_compile_hash=None, **intent)
-                    .on_conflict_do_nothing(index_elements=[CompileCursor.workspace_uuid])
+            recorded = (
+                await session.execute(
+                    update(CompileCursor)
+                    .where(
+                        CompileCursor.workspace_uuid == ws_uuid,
+                        CompileCursor.last_wal_id.is_not_distinct_from(expected_last_wal_id),
+                        CompileCursor.pending_wal_last_id.is_(None),
+                    )
+                    .values(**intent)
                     .returning(CompileCursor.workspace_uuid)
-                )).scalar_one_or_none()
+                )
+            ).scalar_one_or_none()
+            if recorded is None and expected_last_wal_id is None:
+                recorded = (
+                    await session.execute(
+                        pg_insert(CompileCursor)
+                        .values(
+                            workspace_uuid=ws_uuid,
+                            last_wal_id=None,
+                            last_compile_hash=None,
+                            **intent,
+                        )
+                        .on_conflict_do_nothing(index_elements=[CompileCursor.workspace_uuid])
+                        .returning(CompileCursor.workspace_uuid)
+                    )
+                ).scalar_one_or_none()
             if recorded is None:
                 raise CompileCursorConflictError(
                     f"compile cursor for {ws_uuid} moved from {expected_last_wal_id!r} during the pass"
@@ -752,28 +875,52 @@ class CompileCoordinator:
             await session.commit()
 
     async def _write_run_row(
-        self, ws_uuid: UUID, run_id: str, started_at: datetime, source: str,
-        *, status: str, pages_written: int,
-        wal_first_id: str | None, wal_last_id: str | None, plan_hash: str | None,
+        self,
+        ws_uuid: UUID,
+        run_id: str,
+        started_at: datetime,
+        source: str,
+        *,
+        status: str,
+        pages_written: int,
+        wal_first_id: str | None,
+        wal_last_id: str | None,
+        plan_hash: str | None,
         completed_at: datetime | None = None,
     ) -> None:
         async with get_db_session() as session:
-            session.add(CompileRun(
-                id=UUID(run_id), workspace_uuid=ws_uuid,
-                started_at=started_at, completed_at=completed_at,
-                status=status, trigger_source=source,
-                wal_first_id=wal_first_id, wal_last_id=wal_last_id, plan_hash=plan_hash,
-                pages_written=pages_written,
-                tokens_input=0, tokens_output=0, duration_ms=None,
-                model=self.settings.model, error_message=None,
-            ))
+            session.add(
+                CompileRun(
+                    id=UUID(run_id),
+                    workspace_uuid=ws_uuid,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    status=status,
+                    trigger_source=source,
+                    wal_first_id=wal_first_id,
+                    wal_last_id=wal_last_id,
+                    plan_hash=plan_hash,
+                    pages_written=pages_written,
+                    tokens_input=0,
+                    tokens_output=0,
+                    duration_ms=None,
+                    model=self.settings.model,
+                    error_message=None,
+                )
+            )
             await session.commit()
 
     async def _update_run_row(
-        self, ws_uuid: UUID, run_id: str,
-        *, status: str | None = None, pages_written: int | None = None,
-        plan_hash: str | None = None, completed_at: datetime | None = None,
-        error_message: str | None = None, tokens_output: int | None = None,
+        self,
+        ws_uuid: UUID,
+        run_id: str,
+        *,
+        status: str | None = None,
+        pages_written: int | None = None,
+        plan_hash: str | None = None,
+        completed_at: datetime | None = None,
+        error_message: str | None = None,
+        tokens_output: int | None = None,
         only_if_running: bool = False,
     ) -> None:
         async with get_db_session() as session:
@@ -802,16 +949,18 @@ class CompileCoordinator:
         # that landed mid-pass keeps its reason instead of being overwritten by a
         # budget reason the 00:00 UTC cron would later clear.
         async with get_db_session() as session:
-            paused = (await session.execute(
-                update(Workspace)
-                .where(Workspace.uuid == ws_uuid, Workspace.compile_state == "running")
-                .values(
-                    compile_state="paused",
-                    compile_paused_reason=reason,
-                    compile_paused_at=datetime.now(UTC),
+            paused = (
+                await session.execute(
+                    update(Workspace)
+                    .where(Workspace.uuid == ws_uuid, Workspace.compile_state == "running")
+                    .values(
+                        compile_state="paused",
+                        compile_paused_reason=reason,
+                        compile_paused_at=datetime.now(UTC),
+                    )
+                    .returning(Workspace.uuid)
                 )
-                .returning(Workspace.uuid)
-            )).scalar_one_or_none()
+            ).scalar_one_or_none()
             await session.commit()
         if paused is None:
             log.info("compile.pause_skipped", workspace=str(ws_uuid), reason=reason, error=error)
@@ -819,7 +968,9 @@ class CompileCoordinator:
         COMPILE_PAUSED_TOTAL.labels(workspace=str(ws_uuid), reason=reason).inc()
         log.warning(
             "compile.paused",
-            workspace=str(ws_uuid), reason=reason, error=error,
+            workspace=str(ws_uuid),
+            reason=reason,
+            error=error,
         )
 
 

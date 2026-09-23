@@ -81,9 +81,7 @@ async def test_observation_keeps_profile_fields_of_existing_user() -> None:
 async def test_older_token_cannot_overwrite_newer_snapshot() -> None:
     await _store().observe(_token_user("u-roll", [], T0 + timedelta(minutes=10)))
 
-    snapshot, wrote = await _store().observe(
-        _token_user("u-roll", ["keenyspace-admins"], T0)
-    )
+    snapshot, wrote = await _store().observe(_token_user("u-roll", ["keenyspace-admins"], T0))
 
     assert wrote is False
     assert snapshot == GroupSnapshot((), T0 + timedelta(minutes=10))

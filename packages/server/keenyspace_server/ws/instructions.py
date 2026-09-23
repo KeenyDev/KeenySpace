@@ -118,25 +118,18 @@ async def load_and_render_instructions(
     raw_bytes = instructions_path.read_bytes()
     if len(raw_bytes) > _INSTRUCTIONS_MAX_BYTES:
         raise InstructionTemplateError(
-            f"instructions file too large: {len(raw_bytes)} bytes "
-            f"(max {_INSTRUCTIONS_MAX_BYTES})"
+            f"instructions file too large: {len(raw_bytes)} bytes (max {_INSTRUCTIONS_MAX_BYTES})"
         )
     content = raw_bytes.decode("utf-8", errors="replace")
 
     frontmatter, body = split_frontmatter(content)
 
     tool_whitelist = frontmatter.get("tool_whitelist", [])
-    if not isinstance(tool_whitelist, list) or not all(
-        isinstance(t, str) for t in tool_whitelist
-    ):
-        raise InstructionTemplateError(
-            "frontmatter.tool_whitelist must be a list of strings"
-        )
+    if not isinstance(tool_whitelist, list) or not all(isinstance(t, str) for t in tool_whitelist):
+        raise InstructionTemplateError("frontmatter.tool_whitelist must be a list of strings")
 
     steps_raw = frontmatter.get("steps", [])
-    if not isinstance(steps_raw, list) or not all(
-        isinstance(s, str) for s in steps_raw
-    ):
+    if not isinstance(steps_raw, list) or not all(isinstance(s, str) for s in steps_raw):
         raise InstructionTemplateError("frontmatter.steps must be a list of strings")
 
     model_raw = frontmatter.get("model")

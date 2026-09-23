@@ -181,9 +181,7 @@ async def test_get_recent_changes_descending_mtime(tmp_path) -> None:
             headers=headers,
         )
         async with Client(transport) as mcp_client:
-            result = await mcp_client.call_tool(
-                "get_recent_changes", {"workspace": slug}
-            )
+            result = await mcp_client.call_tool("get_recent_changes", {"workspace": slug})
             result_str = str(result)
             assert "b.md" in result_str
             assert "c.md" in result_str
@@ -291,10 +289,14 @@ async def test_get_recent_changes_cursor_stable(tmp_path) -> None:
                     if name in result_str and name not in collected_paths:
                         collected_paths.append(name)
 
-                if "next_cursor" not in result_str or "None" in result_str.split("next_cursor")[1][:20]:
+                if (
+                    "next_cursor" not in result_str
+                    or "None" in result_str.split("next_cursor")[1][:20]
+                ):
                     break
 
                 import re
+
                 match = re.search(r"next_cursor='([^']+)'", result_str)
                 if not match:
                     match = re.search(r'"next_cursor":\s*"([^"]+)"', result_str)
@@ -482,9 +484,11 @@ async def test_get_recent_changes_invalid_since_rejected(tmp_path) -> None:
                     {"workspace": slug, "since": "not-a-timestamp"},
                 )
                 result_str = str(result)
-                assert "isError" in result_str or "error" in result_str.lower() or "invalid" in result_str.lower(), (
-                    f"Expected error for invalid since, got: {result_str}"
-                )
+                assert (
+                    "isError" in result_str
+                    or "error" in result_str.lower()
+                    or "invalid" in result_str.lower()
+                ), f"Expected error for invalid since, got: {result_str}"
             except Exception as exc:
                 assert "invalid" in str(exc).lower() or "error" in str(exc).lower(), (
                     f"Expected ToolError for invalid since, got: {exc}"
@@ -566,9 +570,11 @@ async def test_get_recent_changes_malformed_cursor_rejected(tmp_path) -> None:
                     {"workspace": slug, "cursor": "not-base64!!!"},
                 )
                 result_str = str(result)
-                assert "isError" in result_str or "error" in result_str.lower() or "malformed" in result_str.lower(), (
-                    f"Expected error for malformed cursor, got: {result_str}"
-                )
+                assert (
+                    "isError" in result_str
+                    or "error" in result_str.lower()
+                    or "malformed" in result_str.lower()
+                ), f"Expected error for malformed cursor, got: {result_str}"
             except Exception as exc:
                 assert "malformed" in str(exc).lower() or "error" in str(exc).lower(), (
                     f"Expected ToolError for malformed cursor, got: {exc}"

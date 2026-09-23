@@ -24,9 +24,7 @@ class LoopDetector(AbstractCapability[Any]):
     """
 
     max_repeats: int = 3
-    _call_counts: dict[tuple[str, str], int] = field(
-        default_factory=lambda: defaultdict(int)
-    )
+    _call_counts: dict[tuple[str, str], int] = field(default_factory=lambda: defaultdict(int))
     triggered: bool = False
 
     async def wrap_tool_execute(

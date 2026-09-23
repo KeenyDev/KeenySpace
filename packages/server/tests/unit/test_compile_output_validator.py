@@ -13,6 +13,7 @@ def _model_returns(plan: CompilePlan):  # type: ignore[no-untyped-def]
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         output_tool = info.output_tools[0].name if info.output_tools else "final_result"
         return ModelResponse(parts=[ToolCallPart(tool_name=output_tool, args=plan.model_dump())])
+
     return _fake
 
 
@@ -27,7 +28,9 @@ async def test_output_validator_rejects_denylist_paths(tmp_path: Path) -> None:
         call_count["n"] += 1
         output_tool = info.output_tools[0].name if info.output_tools else "final_result"
         plan_to_return = bad_plan if call_count["n"] == 1 else good_plan
-        return ModelResponse(parts=[ToolCallPart(tool_name=output_tool, args=plan_to_return.model_dump())])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=output_tool, args=plan_to_return.model_dump())]
+        )
 
     deps = CompileDeps(ws_root=tmp_path, wal_text="<wal_entry id='X'>data</wal_entry>")
     with compile_agent.override(model=FunctionModel(_alternating)):
@@ -45,13 +48,16 @@ async def test_output_validator_passes_clean_plan(tmp_path: Path) -> None:
     assert plan.ops[0].path == "notes/ok.md"
 
 
-@pytest.mark.parametrize("denied_path", [
-    ".keenyspace/config.yaml",
-    "logs/2026-05-10.md",
-    "_templates/concept.md",
-    "raw/asset.md",
-    "CLAUDE.md",
-])
+@pytest.mark.parametrize(
+    "denied_path",
+    [
+        ".keenyspace/config.yaml",
+        "logs/2026-05-10.md",
+        "_templates/concept.md",
+        "raw/asset.md",
+        "CLAUDE.md",
+    ],
+)
 def test_validator_constants_match_path_safety_denylist(denied_path: str) -> None:
     """Defense-in-depth invariant: agent.py's denylist constants and
     fs/path_safety.py::is_compile_writable must reject the same set of paths."""
@@ -60,6 +66,7 @@ def test_validator_constants_match_path_safety_denylist(denied_path: str) -> Non
         _COMPILE_DENYLIST_PREFIXES,
     )
     from keenyspace_server.fs.path_safety import is_compile_writable
+
     assert is_compile_writable(Path("/tmp"), denied_path) is False
     rejected = (
         any(denied_path.startswith(p) for p in _COMPILE_DENYLIST_PREFIXES)

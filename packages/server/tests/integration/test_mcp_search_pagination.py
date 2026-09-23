@@ -86,7 +86,9 @@ async def test_search_honours_legacy_offset_cursor(search_ws: Path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cursor", ["!!!not-base64", base64.urlsafe_b64encode(b'{"x": 1}').decode()])
+@pytest.mark.parametrize(
+    "cursor", ["!!!not-base64", base64.urlsafe_b64encode(b'{"x": 1}').decode()]
+)
 async def test_search_rejects_malformed_cursor(search_ws: Path, cursor: str) -> None:
     from keenyspace_server.mcp.page_tools import search_workspace_tool
 

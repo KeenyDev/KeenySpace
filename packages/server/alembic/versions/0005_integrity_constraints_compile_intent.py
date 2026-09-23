@@ -67,7 +67,11 @@ COMPILE_CURSOR_CHECKS = {
 PREEXISTING_CHECKS = {
     "workspaces": WORKSPACE_CHECKS,
     "compile_runs": COMPILE_RUN_CHECKS,
-    "compile_cursors": {"ck_compile_cursors_committed_pair": COMPILE_CURSOR_CHECKS["ck_compile_cursors_committed_pair"]},
+    "compile_cursors": {
+        "ck_compile_cursors_committed_pair": COMPILE_CURSOR_CHECKS[
+            "ck_compile_cursors_committed_pair"
+        ]
+    },
 }
 
 
@@ -80,10 +84,12 @@ def _preflight(bind: sa.engine.Connection) -> None:
             ).scalar_one()
             if count:
                 violations.append(f"{table}: {count} row(s) violate {name} ({predicate})")
-    orphans = bind.execute(sa.text(
-        "SELECT count(*) FROM compile_cursors c "
-        "WHERE NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.uuid = c.workspace_uuid)"
-    )).scalar_one()
+    orphans = bind.execute(
+        sa.text(
+            "SELECT count(*) FROM compile_cursors c "
+            "WHERE NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.uuid = c.workspace_uuid)"
+        )
+    ).scalar_one()
     if orphans:
         violations.append(
             f"compile_cursors: {orphans} row(s) reference a missing workspace "
@@ -109,12 +115,16 @@ def upgrade() -> None:
 
     op.create_foreign_key(
         "compile_cursors_workspace_uuid_fkey",
-        "compile_cursors", "workspaces",
-        ["workspace_uuid"], ["uuid"],
+        "compile_cursors",
+        "workspaces",
+        ["workspace_uuid"],
+        ["uuid"],
         ondelete="CASCADE",
     )
     op.alter_column("compile_cursors", "last_wal_id", existing_type=sa.String(26), nullable=True)
-    op.alter_column("compile_cursors", "last_compile_hash", existing_type=sa.String(64), nullable=True)
+    op.alter_column(
+        "compile_cursors", "last_compile_hash", existing_type=sa.String(64), nullable=True
+    )
     op.add_column("compile_cursors", sa.Column("pending_wal_last_id", sa.String(26), nullable=True))
     op.add_column("compile_cursors", sa.Column("pending_plan_hash", sa.String(64), nullable=True))
     # JSON, not JSONB: JSONB reorders object keys, and a replayed plan must write the
@@ -134,7 +144,9 @@ def downgrade() -> None:
     op.drop_column("compile_cursors", "pending_plan")
     op.drop_column("compile_cursors", "pending_plan_hash")
     op.drop_column("compile_cursors", "pending_wal_last_id")
-    op.alter_column("compile_cursors", "last_compile_hash", existing_type=sa.String(64), nullable=False)
+    op.alter_column(
+        "compile_cursors", "last_compile_hash", existing_type=sa.String(64), nullable=False
+    )
     op.alter_column("compile_cursors", "last_wal_id", existing_type=sa.String(26), nullable=False)
     op.drop_constraint("compile_cursors_workspace_uuid_fkey", "compile_cursors", type_="foreignkey")
 

@@ -37,7 +37,7 @@ async def test_socket_mode_is_0600_and_parent_dir_is_0700(
         task.cancel()
         try:  # noqa: SIM105 — await cannot live inside contextlib.suppress
             await task
-        except (asyncio.CancelledError, SystemExit):
+        except asyncio.CancelledError, SystemExit:
             pass
         paths_mod.DAEMON_SOCK.unlink(missing_ok=True)
         paths_mod.DAEMON_PID.unlink(missing_ok=True)
