@@ -98,7 +98,7 @@ async def test_validate_import_zip_async_wrapper(tmp_path: Path) -> None:
     assert result.total_bytes == 4
 
 
-# --- G-4 symmetric top-level dotfile policy --------------------------------
+# --- symmetric top-level dotfile policy ------------------------------------
 
 
 def test_validate_accepts_nested_gitkeep(tmp_path: Path) -> None:
@@ -177,12 +177,12 @@ def test_validate_rejects_top_level_ds_store(tmp_path: Path) -> None:
 
 
 def test_validate_constant_matches_export() -> None:
-    """G-4 symmetry pin: import user-state reject set IS the export skip set."""
+    """Symmetry pin: import user-state reject set IS the export skip set."""
     assert IMPORT_REJECT_TOP_LEVEL_USER_STATE == EXPORT_SKIP_TOP_LEVEL
 
 
 def test_validate_denylist_covers_operator_smuggle_names() -> None:
-    """G-4 denylist pin: top-level operator-smuggle names are rejected."""
+    """Denylist pin: top-level operator-smuggle names are rejected."""
     assert {".git", ".env", ".envrc", ".htaccess", ".ssh", ".aws", ".DS_Store"} <= set(
         IMPORT_REJECT_TOP_LEVEL_DENYLIST
     )

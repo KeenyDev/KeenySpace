@@ -2,35 +2,10 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path
 
 import pytest
 
-PG_URL = os.environ.get("KEENYSPACE_DB__URL")
-SERVER_DIR = Path(__file__).parent.parent
-
-
-def _reset_schema() -> None:
-    """Start from an empty public schema.
-
-    These tests drive alembic against the shared CI database. Other tests seed
-    rows (e.g. api_keys, which migration 0003 guards against being non-empty)
-    and leave partial schema state, so a bare upgrade/downgrade cycle is not
-    reproducible without first wiping the schema.
-    """
-    import asyncio
-
-    import sqlalchemy as sa
-    from sqlalchemy.ext.asyncio import create_async_engine
-
-    async def _drop() -> None:
-        eng = create_async_engine(PG_URL or "", isolation_level="AUTOCOMMIT")
-        async with eng.connect() as conn:
-            await conn.execute(sa.text("DROP SCHEMA public CASCADE"))
-            await conn.execute(sa.text("CREATE SCHEMA public"))
-        await eng.dispose()
-
-    asyncio.run(_drop())
+from tests.integration.conftest import PG_URL, SERVER_DIR, _reset_schema
 
 
 @pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set")

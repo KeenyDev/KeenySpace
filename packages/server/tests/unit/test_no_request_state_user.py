@@ -1,6 +1,6 @@
 """Regression guard: production source must not read request.state.user.
 
-Phase 4 UAT G-2: Starlette AuthMiddleware populates request.user (BaseUser via
+Starlette AuthMiddleware populates request.user (BaseUser via
 conn.scope["user"]). The three workspace endpoints (archive/export/import)
 initially read request.state.user, which yielded HTTP 500 (AttributeError)
 because nothing populates state.user. This grep guard prevents reintroduction.
@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 _FORBIDDEN = re.compile(r"\brequest\s*\.\s*state\s*\.\s*user\b")
-_PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "keenyspace_server"
+_PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "keenyspace_server"
 
 
 def _iter_py_files(root: Path) -> Iterator[Path]:

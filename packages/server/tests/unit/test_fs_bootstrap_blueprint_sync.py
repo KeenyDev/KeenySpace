@@ -1,7 +1,7 @@
-"""Phase 4 UAT G-3 regression: blueprint catalog merge-on-boot.
+"""Regression guard: blueprint catalog merge-on-boot.
 
 ensure_fs_root_layout previously only seeded fs_root/blueprints/default/ on
-first boot. Phase 4 Plan 01 added _instructions/ingest.md to the image
+first boot. A later change added _instructions/ingest.md to the image
 blueprint, but existing fs_root volumes never received the file, breaking
 MCP get_instructions on upgrade-deploys. _merge_blueprint_tree fills the
 gap with idempotent skip-on-exists semantics.
@@ -73,7 +73,7 @@ def test_second_boot_adds_missing_file_without_overwriting(tmp_path: Path) -> No
     _seed_image(image_dir)
 
     # Simulate an existing-volume deploy: target exists, has operator-edited
-    # index.md, but lacks _instructions/ingest.md (the new-in-Plan-01 file).
+    # index.md, but lacks _instructions/ingest.md (the newly shipped file).
     target = fs_root / "blueprints" / "default"
     target.mkdir(parents=True)
     (target / "index.md").write_text("# OPERATOR EDIT\n")

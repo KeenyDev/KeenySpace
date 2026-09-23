@@ -27,7 +27,7 @@ def test_settings_compile_field_loads_env() -> None:
         "KEENYSPACE_DB__URL": "postgresql+asyncpg://x:x@localhost/x",
         "KEENYSPACE_COMPILE__MODEL": "claude-opus-4-7",
         "KEENYSPACE_COMPILE__MAX_TOOL_CALLS": "10",
-        # Wave 0 AuthSettings required fields.
+        # AuthSettings required fields.
         "KEENYSPACE_AUTH__OIDC_ISSUER_URL": "http://localhost:9999/application/o/test/",
         "KEENYSPACE_AUTH__OIDC_CLIENT_ID": "test-client",
         "KEENYSPACE_AUTH__OIDC_CLIENT_SECRET": "test-secret",
@@ -44,10 +44,10 @@ def test_settings_compile_field_loads_env() -> None:
 
 
 def test_resolve_model_id_provider_neutral() -> None:
-    """Phase 6 dogfood: compile must be provider-neutral (default anthropic)."""
+    """Compile must be provider-neutral (default anthropic)."""
     from keenyspace_server.compile.agent import resolve_model_id
 
-    # bare name qualified with default provider (anthropic) — D-04 default preserved
+    # bare name qualified with the default provider (anthropic)
     assert resolve_model_id("claude-sonnet-4-6") == "anthropic:claude-sonnet-4-6"
     # bare name qualified with an explicit provider
     assert resolve_model_id("gpt-4o", "openai") == "openai:gpt-4o"
@@ -59,5 +59,5 @@ def test_resolve_model_id_provider_neutral() -> None:
 def test_compile_settings_provider_default_and_override() -> None:
     from keenyspace_server.compile.settings import CompileSettings
 
-    assert CompileSettings().provider == "anthropic"  # locked D-04 default
+    assert CompileSettings().provider == "anthropic"
     assert CompileSettings(provider="openai", model="gpt-4o").provider == "openai"

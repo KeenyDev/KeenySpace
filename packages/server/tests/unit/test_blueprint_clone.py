@@ -66,7 +66,7 @@ def test_clone_writes_config_yaml(tmp_path: Path) -> None:
 
 
 def test_move_instructions_to_keenyspace(tmp_path: Path) -> None:
-    """Phase 6 dogfood (Fix A): the canonical layout-normalisation helper that
+    """The canonical layout-normalisation helper that
     both blueprint-clone create and workspace import reuse so get_instructions
     can resolve `.keenyspace/instructions/<command>.md`."""
     from keenyspace_server.fs.blueprint import _move_instructions_to_keenyspace

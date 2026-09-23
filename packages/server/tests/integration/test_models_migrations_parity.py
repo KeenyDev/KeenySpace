@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from tests.test_compile_alembic import SERVER_DIR, _reset_schema
+from tests.integration.conftest import SERVER_DIR, _reset_schema
 
 PG_URL = os.environ.get("KEENYSPACE_DB__URL")
 

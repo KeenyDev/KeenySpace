@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def pytest_configure(config):  # type: ignore[no-untyped-def]
-    config.addinivalue_line("markers", "eval: marker for compile evaluation suite (Plans 06-08)")
+    config.addinivalue_line("markers", "eval: marker for the compile evaluation suite")
     config.addinivalue_line(
         "markers", "requires_anthropic: marker for fixtures that hit the real Anthropic API"
     )
@@ -26,7 +26,7 @@ def pytest_configure(config):  # type: ignore[no-untyped-def]
 def _ensure_auth_env():
     """Provide test auth/OIDC settings for the whole session.
 
-    Settings.auth is required (Phase 3). Standalone tests that build the app or
+    Settings.auth is required. Standalone tests that build the app or
     spawn a subprocess (alembic, uvicorn) without the function-scoped app_env
     fixture would otherwise fail Settings validation with "auth Field required".
     Set via os.environ (not monkeypatch) so child processes inherit it; tests
@@ -138,7 +138,7 @@ def app_env(fs_root, pg_url, monkeypatch):
     )
     monkeypatch.setenv("KEENYSPACE_AUTH__COOKIE_SECURE", "false")
     monkeypatch.setenv("KEENYSPACE_AUTO_MIGRATE", "true")
-    # CR-02: admin routes are disabled by default in production; enable
+    # Admin routes are disabled by default in production; enable them
     # explicitly for tests so integration suites exercise /v1/admin/*.
     monkeypatch.setenv("KEENYSPACE_ADMIN_API_ENABLED", "1")
     return {"fs_root": fs_root, "pg_url": pg_url}
@@ -185,8 +185,8 @@ async def _engine_lifespan_ctx(app, pg_url):
 async def client(app, _engine_lifespan_ctx, api_key_user):
     """Default client: authenticated через real CompositeAuthBackend + Bearer ks_live_*.
 
-    Wave 2 cutover (D-19/D-21): integration tests proxy через настоящую auth chain,
-    no middleware-bypass. Negative-auth assertions используют `anon_client`.
+    Integration tests go through the real auth chain, with no middleware
+    bypass. Negative-auth assertions use `anon_client` instead.
     """
     _, plaintext = api_key_user
     transport = ASGITransport(app=app, raise_app_exceptions=False)
@@ -210,10 +210,10 @@ async def anon_client(app, _engine_lifespan_ctx):
 async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
     """Router-level fast-path: authenticated через test-only AuthenticationBackend stub.
 
-    Используется Wave 1 router tests для изоляции от composite resolver chain
-    (быстрая обратная связь без full DB verify roundtrip). Production path
-    тестируется через default `client` fixture + integration tests против
-    real composite backend.
+    Used by router tests to isolate them from the composite resolver chain
+    (fast feedback without the full DB verify roundtrip). The production path
+    is covered by the default `client` fixture and the integration tests that
+    run against the real composite backend.
     """
     from keenyspace_server.auth.user import User
     from starlette.authentication import AuthCredentials, AuthenticationBackend
@@ -252,7 +252,7 @@ async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
 
 @pytest_asyncio.fixture
 async def api_key_user(app, _engine_lifespan_ctx):
-    """D-20a fast-path API-key fixture — direct DB seed bypassing OIDC.
+    """Fast-path API-key fixture — direct DB seed bypassing OIDC.
 
     Returns: (user_sub: str, plaintext_key: str). The owner has no group
     snapshot (never logged in via OIDC), so the key is not an admin key.
@@ -365,7 +365,7 @@ async def _seed_api_keys(pg_url):
 
 @pytest.fixture
 def rsa_keypair():
-    """Generate RSA keypair для подписи test JWT (D-20b)."""
+    """Generate an RSA keypair for signing test JWTs."""
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
 
@@ -380,7 +380,7 @@ def rsa_keypair():
 
 @pytest.fixture
 def mock_authentik_provider(httpserver, rsa_keypair):
-    """D-20b — pytest-httpserver mock Authentik (discovery + JWKS + token + end_session).
+    """pytest-httpserver mock Authentik (discovery + JWKS + token + end_session).
 
     Returns dict {issuer, jwks_uri, token_endpoint, end_session_endpoint,
     sign_jwt, httpserver}. sign_jwt(claims, kid="test-kid-1") -> JWT signed via
