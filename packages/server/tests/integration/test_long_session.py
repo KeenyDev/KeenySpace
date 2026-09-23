@@ -1,12 +1,11 @@
-"""MCP-10 + AUTH-09 + Success Criterion #3.
+"""A long-running MCP-like session on an API key must never start 401-ing.
 
-1h MCP-like session с API key — НИКОГДА не 401.
-Стратегия: ASGITransport + freezegun (без real subprocess uvicorn —
-быстрый детерминированный feedback; PROJECT.md «Single-worker uvicorn v1»
-делает ASGITransport архитектурно эквивалентным subprocess на уровне auth).
+Driven with ASGITransport + freezegun rather than a real uvicorn subprocess: the server
+runs single-worker, so at the auth layer ASGITransport is equivalent and gives fast,
+deterministic feedback.
 
-API keys по дизайну (D-13 + AUTH-03) не имеют exp — verify path просто
-проверяет revoked_at IS NULL и lookup_hash match. Этот тест pin'ит контракт.
+API keys carry no expiry by design — the verify path only checks revoked_at IS NULL and
+a lookup_hash match. These tests pin that contract.
 """
 
 from __future__ import annotations
@@ -20,13 +19,13 @@ from httpx import ASGITransport, AsyncClient
 
 @pytest.mark.asyncio
 async def test_1h_api_key_session_no_401(app, _engine_lifespan_ctx, api_key_user) -> None:
-    """Success Criterion #3: 1-hour session с API key — никогда 401.
+    """A one-hour session on an API key never 401s.
 
-    12 итераций по 5 мин = 60 мин simulated wall-clock; на каждой делаем
-    authed call к `/v1/api/auth/api-keys` (representative endpoint behind
-    composite backend + refresh_dep dependency). Любой 401 на mid-session
-    итерации = regression (API key expired by accident, or refresh_dep
-    triggered false-positive auto-refresh path).
+    Thirteen calls at 5-minute steps over 60 minutes of simulated wall-clock, each an
+    authenticated call to `/v1/api/auth/api-keys` (representative of an endpoint behind
+    the composite backend plus the refresh dependency). A 401 mid-session would mean the
+    key expired by accident, or the refresh dependency took a false-positive
+    auto-refresh path.
     """
     _, plaintext = api_key_user
     headers = {"Authorization": f"Bearer {plaintext}"}
@@ -48,13 +47,12 @@ async def test_1h_api_key_session_no_401(app, _engine_lifespan_ctx, api_key_user
 
 @pytest.mark.asyncio
 async def test_api_key_path_is_idp_independent(app, _engine_lifespan_ctx, api_key_user) -> None:
-    """D-17 + Success Criterion #3 sanity: API-key path работает независимо от IdP.
+    """Sanity: the API-key path resolves without depending on the IdP.
 
-    CompositeAuthBackend resolver order = cookie → api_key → oidc_bearer.
-    Cookie path возвращает None (нет ks_at в request), api_key path резолвит
-    User через `ApiKeyService.verify` БЕЗ touching OidcClient. Тест pin'ит:
-    даже если бы OidcClient не мог fetch'нуть JWKS, api_key path всё равно
-    отдаёт 200.
+    The resolver order is cookie → api_key → oidc_bearer. With no ks_at in the request
+    the cookie path returns None and the api_key path resolves the User through
+    `ApiKeyService.verify` without touching OidcClient — so an IdP that could not serve
+    JWKS would still leave this call at 200.
     """
     _, plaintext = api_key_user
     headers = {"Authorization": f"Bearer {plaintext}"}

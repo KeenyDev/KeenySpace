@@ -38,7 +38,7 @@ async def _append_log(client: AsyncClient, slug: str, content: str) -> None:
 
 
 async def test_post_compile_writes_a_page_end_to_end(app, fs_root: Path, pg_url) -> None:
-    """E2E через настоящую auth chain: Bearer ks_live_* -> CompositeAuthBackend -> route."""
+    """End-to-end over the real auth chain: Bearer ks_live_* -> CompositeAuthBackend -> route."""
     import sqlalchemy as sa
     from sqlalchemy.ext.asyncio import create_async_engine
 

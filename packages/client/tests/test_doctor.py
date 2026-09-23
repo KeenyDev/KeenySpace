@@ -1,4 +1,4 @@
-"""`keenyspace doctor` >= 7 checks (CLI-10) + JSON output + warn/fail flags."""
+"""`keenyspace doctor` runs at least 7 checks, with JSON output and warn/fail flags."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Tests for cli/query.py — CLI-13 invariant + Pitfall #7 defence-in-depth."""
+"""Tests for cli/query.py — instructions-first plus the client-side read-only defence."""
 
 from __future__ import annotations
 

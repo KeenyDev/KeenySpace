@@ -131,7 +131,10 @@ async def test_edge_03_malformed_frontmatter_overwrites_cleanly(tmp_path: Path) 
             PageOp(
                 action="update",
                 path=target_path,
-                body="The broken page frontmatter has been corrected. Title: Broken Page Fixed. Status: active.",
+                body=(
+                    "The broken page frontmatter has been corrected. "
+                    "Title: Broken Page Fixed. Status: active."
+                ),
                 frontmatter={"title": "Broken Page Fixed", "status": "active"},
             )
         ],
@@ -180,7 +183,10 @@ async def test_edge_04_nonexistent_page_creates_not_loops(tmp_path: Path) -> Non
             PageOp(
                 action="create",
                 path=expected_op["path"],
-                body="Docker Compose quickstart: set KEENYSPACE_DB__URL and KEENYSPACE_FS__ROOT environment variables.",
+                body=(
+                    "Docker Compose quickstart: set KEENYSPACE_DB__URL and "
+                    "KEENYSPACE_FS__ROOT environment variables."
+                ),
                 frontmatter={},
             )
         ],
@@ -215,7 +221,10 @@ async def test_edge_05_terse_fragment_does_not_confabulate(tmp_path: Path) -> No
             PageOp(
                 action="create",
                 path="notes/auth.md",
-                body="<!-- TBD: WAL entry was too terse to compile faithfully. Original: 'update auth' -->",
+                body=(
+                    "<!-- TBD: WAL entry was too terse to compile faithfully. "
+                    "Original: 'update auth' -->"
+                ),
                 frontmatter={},
             )
         ],
@@ -235,7 +244,8 @@ async def test_edge_05_terse_fragment_does_not_confabulate(tmp_path: Path) -> No
     has_tbd_in_body = any("TBD" in op.body for op in plan.ops)
     has_notes = bool(plan.notes)
     assert has_tbd_in_body or has_notes, (
-        "Terse-fragment agent should either place a TBD marker in op.body or surface ambiguity in plan.notes"
+        "Terse-fragment agent should either place a TBD marker in op.body "
+        "or surface ambiguity in plan.notes"
     )
 
 

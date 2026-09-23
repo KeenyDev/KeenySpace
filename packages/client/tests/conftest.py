@@ -125,7 +125,7 @@ async def mock_daemon(
 async def function_model_agent() -> AsyncIterator[Any]:
     """FunctionModel-based pydantic-ai test double for deterministic outputs.
 
-    Mirrors the Phase 2 eval pattern; tests substitute this for a live LLM call.
+    Mirrors the compile-agent eval pattern; tests substitute this for a live LLM call.
     Yields None when pydantic_ai is not importable so collection still succeeds.
     """
 

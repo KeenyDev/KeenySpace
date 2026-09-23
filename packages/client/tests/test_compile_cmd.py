@@ -173,7 +173,12 @@ async def test_compile_no_workspace_resolved_exits_2(
     # config without default_workspace + clear env
     config_dir = temp_config_dir["config_dir"]
     (config_dir / "config.yaml").write_text(
-        "server_url: http://localhost:8000\nllm:\n  provider: anthropic\n  model: claude-sonnet-4-6\n  api_key_env: ANTHROPIC_API_KEY\n  timeout_seconds: 120\n"
+        "server_url: http://localhost:8000\n"
+        "llm:\n"
+        "  provider: anthropic\n"
+        "  model: claude-sonnet-4-6\n"
+        "  api_key_env: ANTHROPIC_API_KEY\n"
+        "  timeout_seconds: 120\n"
     )
     _seed_auth(temp_config_dir["config_dir"])
     monkeypatch.delenv("KEENYSPACE_WORKSPACE", raising=False)

@@ -1,3 +1,10 @@
+"""The MCP tool surface and the API router modules are wired up as expected.
+
+`build_mcp()` must expose exactly the eleven Tier-1 tools — an extra one is as much a
+regression as a missing one, since the tool list is the agent-facing contract — and the
+router and tool modules they are assembled from must import cleanly.
+"""
+
 from __future__ import annotations
 
 import pytest

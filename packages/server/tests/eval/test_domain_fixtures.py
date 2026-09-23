@@ -226,7 +226,10 @@ async def test_domain_04_page_targeting_deepest(tmp_path: Path) -> None:
             PageOp(
                 action="update",
                 path=expected_path,
-                body="# Google OAuth\n\nGoogle OAuth now requires PKCE for all new integrations as of 2026.\n",
+                body=(
+                    "# Google OAuth\n\nGoogle OAuth now requires PKCE for all new "
+                    "integrations as of 2026.\n"
+                ),
                 frontmatter={},
             )
         ],

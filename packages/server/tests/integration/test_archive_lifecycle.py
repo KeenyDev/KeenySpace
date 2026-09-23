@@ -1,4 +1,4 @@
-"""Phase 4 archive lifecycle integration tests (WS-05 / D-01..D-03).
+"""Workspace archive/unarchive lifecycle integration tests.
 
 Full lifespan + real Postgres; uses ASGITransport with API-key Bearer auth.
 """
@@ -300,8 +300,8 @@ async def test_archive_mid_compile_race(app, pg_url) -> None:  # type: ignore[no
 
             ws_after = await _ws_row(slug)
             # Archive UPDATE wins; the (synthetic) "running" state is overwritten
-            # to paused/archived. A real running task self-terminates on next
-            # DB read per RESEARCH §Pattern 2.
+            # to paused/archived. A real running task self-terminates on its next
+            # DB read of compile_state.
             assert ws_after.compile_state == "paused"
             assert ws_after.compile_paused_reason == "archived"
 

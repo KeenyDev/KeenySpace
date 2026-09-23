@@ -1,4 +1,4 @@
-"""D-05 group entry gate in CompositeAuthBackend.authenticate.
+"""The group entry gate in CompositeAuthBackend.authenticate.
 
 The gate applies to every principal: OIDC users by their token's groups claim,
 API keys by their owner's group snapshot.

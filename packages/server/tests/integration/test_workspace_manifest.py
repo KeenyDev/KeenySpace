@@ -1,23 +1,25 @@
-"""Phase 5 workspace manifest endpoint integration tests (Plan 05-03 Task 1).
+"""Workspace manifest endpoint integration tests.
 
 Endpoint: GET /v1/api/workspaces/<slug>/manifest -> {files: {path: sha256:<hex>}, server_canon_at}.
 
-Per D-13: manifest scope = .md anywhere + raw/ subtree only; .obsidian / .keenyspace /
-logs / tmp top-level dirs MUST be excluded.
+Manifest scope is .md anywhere plus the raw/ subtree only; the .obsidian, .keenyspace,
+logs and tmp top-level directories MUST be excluded.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
-from datetime import UTC, datetime
-from pathlib import Path
-from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+
+from tests.conftest import _reset_schema
+from tests.integration.conftest import (
+    _seed_api_key_post_lifespan,
+    _seed_workspace,
+    _workspace_dir,
+)
 
 PG_URL = os.environ.get("KEENYSPACE_DB__URL")
 
@@ -25,78 +27,6 @@ pytestmark = [
     pytest.mark.asyncio,
     pytest.mark.skipif(not PG_URL, reason="postgres unavailable; KEENYSPACE_DB__URL not set"),
 ]
-
-
-async def _reset_schema(pg_url: str) -> None:
-    import sqlalchemy as sa
-
-    eng = create_async_engine(pg_url, isolation_level="AUTOCOMMIT")
-    async with eng.connect() as conn:
-        await conn.execute(sa.text("DROP SCHEMA public CASCADE"))
-        await conn.execute(sa.text("CREATE SCHEMA public"))
-    await eng.dispose()
-
-
-async def _seed_api_key_post_lifespan() -> tuple[str, str]:
-    import base64
-    import hashlib as _h
-    import secrets
-
-    from argon2 import PasswordHasher
-    from keenyspace_server.config import get_settings
-    from keenyspace_server.db.session import get_db_session
-
-    pepper = get_settings().auth.api_key_pepper.get_secret_value()
-    body = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
-    lookup_hash = _h.sha256(f"{body}{pepper}".encode()).hexdigest()
-    argon_hash = PasswordHasher().hash(body)
-    user_sub = f"manifest-{uuid4().hex[:8]}"
-    now = datetime.now(UTC)
-
-    async with get_db_session() as session:
-        await session.execute(
-            text(
-                "INSERT INTO users (sub, display_name, email, source, created_at) "
-                "VALUES (:sub, :dn, NULL, 'api_key', :now)"
-            ),
-            {"sub": user_sub, "dn": "manifest", "now": now},
-        )
-        await session.execute(
-            text(
-                "INSERT INTO api_keys (id, user_sub, name, prefix, hash, "
-                "lookup_hash, created_at) VALUES (:id, :sub, 'manifest', "
-                "'ks_live_', :h, :lh, :now)"
-            ),
-            {
-                "id": uuid4(),
-                "sub": user_sub,
-                "h": argon_hash,
-                "lh": lookup_hash,
-                "now": now,
-            },
-        )
-        await session.commit()
-
-    return user_sub, f"ks_live_{body}"
-
-
-async def _seed_workspace(client: AsyncClient, slug: str | None = None) -> str:
-    slug = slug or f"mf-{uuid4().hex[:8]}"
-    resp = await client.post("/v1/api/workspaces/", json={"slug": slug, "blueprint": "default"})
-    assert resp.status_code == 201, resp.text
-    return slug
-
-
-def _workspace_dir(app, slug: str) -> Path:
-    from keenyspace_server.db.models import Workspace as _Workspace  # noqa: F401
-
-    # Walk fs_root/workspaces, picking the dir whose .keenyspace/config.yaml mentions slug.
-    fs_root = Path(app.state.settings.fs.root) / "workspaces"
-    for entry in fs_root.iterdir():
-        cfg = entry / ".keenyspace" / "config.yaml"
-        if cfg.is_file() and f"slug: {slug}" in cfg.read_text():
-            return entry
-    raise AssertionError(f"workspace dir for {slug!r} not found under {fs_root}")
 
 
 async def test_manifest_returns_md_and_raw(app, pg_url) -> None:

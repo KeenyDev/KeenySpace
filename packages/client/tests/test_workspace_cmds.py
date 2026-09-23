@@ -159,13 +159,13 @@ def test_from_cwd_unresolved_exits_2(
 
 
 def test_workspace_subcommands_reachable_from_cli_entrypoint() -> None:
-    """Regression guard (Phase 6 dogfood P1): `workspace` subcommands must be
-    dispatchable through the real CLI entrypoint, not just importable.
+    """Regression guard: `workspace` subcommands must be dispatchable through the real
+    CLI entrypoint, not merely importable.
 
-    The WR-04 lazy import previously lived in @workspace_app.callback(), which
-    Click runs AFTER subcommand resolution, so `keenyspace workspace use` died
-    with "No such command 'use'". The fix imports keenyspace.cli.workspace
-    eagerly when sys.argv[1] == "workspace".
+    The lazy import that keeps CLI startup fast used to live in @workspace_app.callback(),
+    which Click runs AFTER subcommand resolution, so `keenyspace workspace use` died with
+    "No such command 'use'". The fix imports keenyspace.cli.workspace eagerly when
+    sys.argv[1] == "workspace".
 
     We invoke the entry point exactly as the console script does
     (`from keenyspace.__main__ import app; app()`) in a fresh process with a

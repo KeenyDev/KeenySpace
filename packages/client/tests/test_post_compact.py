@@ -2,7 +2,7 @@
 
 We stub get_instructions and run_server_driven_command at the
 keenyspace.daemon.post_compact module to keep the test deterministic and
-free of network/LLM dependencies. The CLI-13 + HK-12 invariant
+free of network/LLM dependencies. The instructions-first invariant
 (get_instructions called BEFORE the agent run) is asserted via a shared
 call-order list.
 """
@@ -256,7 +256,7 @@ async def test_server_driven_post_compact_calls_get_instructions_first(
     fake_transcript: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CLI-13 + HK-12 invariant: get_instructions BEFORE agent run."""
+    """Instructions-first invariant: get_instructions is called BEFORE the agent run."""
     order: list[str] = []
     _install_stubs(
         monkeypatch,
@@ -333,7 +333,7 @@ async def test_response_shape_serialisable(
     fake_transcript: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """F-09 JSONL response shape must survive json.dumps round-trip."""
+    """The JSONL response shape must survive a json.dumps round-trip."""
     _install_stubs(
         monkeypatch,
         instructions=_make_instructions(),

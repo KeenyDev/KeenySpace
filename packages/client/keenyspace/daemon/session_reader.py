@@ -5,7 +5,8 @@ maps each session's recorded ``cwd`` to a workspace slug (registered directories
 ONLY -- the workspace-map / slug-marker, never the ``default`` fallback), and
 ingests the bytes appended since the last cursor via the server-driven ``ingest``
 flow. Per-file byte cursors, pending text and retry state persist together in
-``ingest-state.json`` so a delta is never ingested twice. Distillation + the actual ``append_log`` happen server-side inside
+``ingest-state.json`` so a delta is never ingested twice. Distillation and the
+actual ``append_log`` happen server-side inside
 the ingest agent; compile then materialises pages on its own debounce/backstop.
 
 This is the implicit-capture write path. The hooks cover only post-compact

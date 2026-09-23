@@ -1,13 +1,12 @@
-"""Phase 4 UAT G-2 regression: identity resolution under real AuthMiddleware.
+"""Regression: identity resolution in the workspace endpoints under real AuthMiddleware.
 
-Drives each of the four endpoints added in Plans 04-02 (archive/unarchive),
-04-07 (export), 04-08 (import) end-to-end through Starlette
-AuthenticationMiddleware + CompositeAuthBackend + Bearer ks_live_* token, and
-asserts that none of them return HTTP 500 due to mis-read identity.
+Drives archive, unarchive, export and import end-to-end through Starlette
+AuthenticationMiddleware + CompositeAuthBackend with a Bearer ks_live_* token, and
+asserts none of them 500 because the handler read identity off the wrong place.
 
-NOTE: this test deliberately does NOT skip on health 500/503. That escape hatch
-in pre-UAT integration tests is what hid the original bug. If health is not
-green we want a hard failure surfacing the response body.
+NOTE: these tests deliberately do NOT skip on a 500/503 from /healthz. That escape hatch
+in the surrounding integration tests is what hid the original bug; if health is not green
+we want a hard failure that surfaces the response body.
 """
 
 from __future__ import annotations

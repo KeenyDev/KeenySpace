@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 
 def _set_auth_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Wave 0 introduced required AuthSettings fields (OIDC + pepper + session secret).
+    """AuthSettings requires the OIDC fields, the API-key pepper and the session secret.
     Tests that build Settings() must populate the full contract."""
     monkeypatch.setenv(
         "KEENYSPACE_AUTH__OIDC_ISSUER_URL",

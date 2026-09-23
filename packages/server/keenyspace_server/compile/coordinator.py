@@ -48,7 +48,8 @@ from keenyspace_server.observability.metrics import (
     COMPILE_RUNS_TOTAL,
 )
 
-# COMPILE_TOKENS_TOTAL increments deferred to v1.1 — real token accounting needs result.usage() wiring
+# COMPILE_TOKENS_TOTAL increments deferred to v1.1 — real token accounting
+# needs result.usage() wiring
 
 log = structlog.get_logger(__name__)
 
@@ -823,7 +824,8 @@ class CompileCoordinator:
                 ).scalar_one_or_none()
             if recorded is None:
                 raise CompileCursorConflictError(
-                    f"compile cursor for {ws_uuid} moved from {expected_last_wal_id!r} during the pass"
+                    f"compile cursor for {ws_uuid} moved "
+                    f"from {expected_last_wal_id!r} during the pass"
                 )
             await session.commit()
 
@@ -870,7 +872,8 @@ class CompileCoordinator:
             )
             if res.scalar_one_or_none() is None:
                 raise CompileCursorConflictError(
-                    f"compile cursor for {ws_uuid} moved from {expected_last_wal_id!r} during the pass"
+                    f"compile cursor for {ws_uuid} moved "
+                    f"from {expected_last_wal_id!r} during the pass"
                 )
             await session.commit()
 

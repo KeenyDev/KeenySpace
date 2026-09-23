@@ -21,9 +21,12 @@ defaults, `fs_root`, `pg_url`, `app`, the authenticated clients, API-key seeding
 Authentik provider) and this file.
 
 Fixtures stay as close to their users as possible: file-local first, then the package
-`conftest.py` (`integration/conftest.py` holds the alembic-subprocess helpers,
-`eval/conftest.py` the fixture roots), and only genuinely suite-wide setup in the root
-`conftest.py`.
+`conftest.py`, and only genuinely suite-wide setup in the root `conftest.py`. A helper
+used by more than one module in a package goes in that package's `conftest.py` and is
+imported explicitly (`from tests.auth.conftest import _make_client`) — never from a
+sibling test module. Today `auth/conftest.py` holds the OidcClient/keyset builders,
+`integration/conftest.py` the alembic-subprocess helpers and the post-lifespan API-key
+and workspace seeding, and `eval/conftest.py` the fixture roots.
 
 Running the suite needs a throwaway Postgres reachable via `KEENYSPACE_DB__URL`; the
 alembic and schema-reset helpers `DROP SCHEMA public CASCADE`, so never point it at a

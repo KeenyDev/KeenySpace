@@ -1,12 +1,12 @@
-"""AUTH-04 CompositeAuthBackend unit tests.
+"""CompositeAuthBackend unit tests.
 
-Покрытие:
-- Resolution order: cookie > api_key > oidc_bearer (Wave 2: cookie+oidc_bearer stubs)
+Covers:
+- Resolution order: cookie > api_key > oidc_bearer
 - API-key path: ks_live_* → User(source='api_key')
 - Anonymous → AuthenticationError
 - PUBLIC_PREFIXES bypass: /healthz, /readyz, /v1/api/auth/login, /v1/api/auth/callback
 - Invalid api-key (verify returns None) → AuthenticationError (no silent fallthrough)
-- Non-ks_live Bearer → не дёргает ApiKeyService.verify, проваливается на 401
+- Non-ks_live Bearer → ApiKeyService.verify is never called; the request 401s
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ async def test_api_key_path_returns_authenticated_user() -> None:
 
 @pytest.mark.asyncio
 async def test_resolution_order_api_key_short_circuits_oidc_bearer() -> None:
-    """api_key resolver hits before oidc_bearer; Wave 2 stub cookie returns None."""
+    """ks_live_* bearer wins over a ks_at cookie when no OIDC client is configured."""
     fake_user = User(sub="u", _display_name="u", source="api_key")
     fake_keys = AsyncMock()
     fake_keys.verify.return_value = fake_user
@@ -80,7 +80,7 @@ async def test_resolution_order_api_key_short_circuits_oidc_bearer() -> None:
 
 @pytest.mark.asyncio
 async def test_invalid_api_key_falls_through_to_401() -> None:
-    """T-3-23: ApiKeyService.verify returning None → AuthError, не silent anonymous."""
+    """verify() returning None raises AuthError — never a silent anonymous fallthrough."""
     fake_keys = AsyncMock()
     fake_keys.verify.return_value = None
     backend = CompositeAuthBackend(oidc_client=None, api_key_service=fake_keys)
@@ -94,8 +94,8 @@ async def test_invalid_api_key_falls_through_to_401() -> None:
 
 @pytest.mark.asyncio
 async def test_non_ks_live_bearer_does_not_invoke_api_key_verify() -> None:
-    """Wave 2: non-ks_live bearer → _try_api_key возвращает None без DB hit;
-    _try_oidc_bearer (stub) тоже None; результат — 401.
+    """A non-ks_live bearer makes _try_api_key return None without a DB hit; with no OIDC
+    client _try_oidc_bearer is None too, so the request 401s.
     """
     fake_keys = AsyncMock()
     backend = CompositeAuthBackend(oidc_client=None, api_key_service=fake_keys)
@@ -126,7 +126,7 @@ async def test_malformed_authorization_header_raises() -> None:
 
 
 def test_public_prefixes_constant_includes_required() -> None:
-    """T-3-25: prevent whitelist drift."""
+    """PUBLIC_PREFIXES still holds the four paths auth must never guard."""
     required = {
         "/healthz",
         "/readyz",
@@ -145,11 +145,11 @@ async def test_metrics_path_requires_credentials() -> None:
 
 
 def test_public_prefixes_is_tuple_for_immutability() -> None:
-    """T-3-25: tuple, not list — prevents accidental .append() drift."""
+    """PUBLIC_PREFIXES is a tuple, not a list — no accidental .append() drift."""
     assert isinstance(PUBLIC_PREFIXES, tuple)
 
 
-# Wave 3: cookie + oidc_bearer resolver coverage (03-04-04 wiring).
+# Cookie + oidc_bearer resolver coverage.
 
 
 def _conn_with_cookies(
@@ -205,7 +205,7 @@ async def test_cookie_resolver_tampered_jwt_falls_through_to_401() -> None:
 
 @pytest.mark.asyncio
 async def test_cookie_resolver_no_oidc_client_returns_none() -> None:
-    """Wave 2 posture: oidc_client=None → cookie resolver no-op."""
+    """oidc_client=None makes the cookie resolver a no-op, so a ks_at cookie still 401s."""
     fake_keys = AsyncMock()
     backend = CompositeAuthBackend(oidc_client=None, api_key_service=fake_keys)
     conn = _conn_with_cookies("/v1/api/workspaces/", cookies={"ks_at": "anything"})
@@ -250,7 +250,7 @@ async def test_oidc_bearer_resolver_tampered_jwt_falls_through_to_401() -> None:
 
 @pytest.mark.asyncio
 async def test_oidc_bearer_resolver_skips_ks_live_prefix() -> None:
-    """ks_live_* стартует api_key path; oidc_bearer не дёргается."""
+    """ks_live_* takes the api_key path; the oidc_bearer resolver is not invoked."""
     fake_oidc = AsyncMock()
     fake_keys = AsyncMock()
     fake_user = User(sub="u", _display_name="u", source="api_key")
@@ -268,7 +268,7 @@ async def test_oidc_bearer_resolver_skips_ks_live_prefix() -> None:
 
 @pytest.mark.asyncio
 async def test_resolver_order_cookie_before_api_key() -> None:
-    """Plan resolver chain: cookie > api_key > oidc_bearer."""
+    """Resolver chain: a valid ks_at cookie wins over a valid ks_live_* bearer."""
     fake_user_cookie = User(sub="u-c", _display_name="c", source="oidc")
     fake_oidc = AsyncMock()
     fake_oidc.validate_access_token.return_value = fake_user_cookie

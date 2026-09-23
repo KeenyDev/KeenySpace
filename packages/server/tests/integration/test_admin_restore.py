@@ -1,4 +1,4 @@
-"""POST /v1/admin/restore happy-path + version/schema/target checks (Phase 5 ADMIN-02)."""
+"""POST /v1/admin/restore happy-path plus version, schema and target checks."""
 
 from __future__ import annotations
 

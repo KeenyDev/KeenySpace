@@ -1,4 +1,4 @@
-"""Phase 4 workspace export endpoint integration tests (WS-04 / WS-06 / D-06).
+"""Workspace export endpoint integration tests.
 
 Full lifespan + real Postgres; uses ASGITransport with API-key Bearer auth.
 """

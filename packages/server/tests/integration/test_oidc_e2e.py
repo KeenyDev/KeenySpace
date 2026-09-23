@@ -1,4 +1,8 @@
-"""AUTH-01/02/04/06/07 OIDC e2e — pytest-httpserver mock Authentik."""
+"""OIDC end-to-end flows — login, bearer, refresh and logout — against a mock Authentik.
+
+The IdP is a pytest-httpserver stub signing real JWTs, so the browser and bearer paths
+run through the production OidcClient without network egress.
+"""
 
 from __future__ import annotations
 
@@ -28,7 +32,7 @@ async def test_login_redirects_to_authentik(app_with_mocked_authentik) -> None:
 
 @pytest.mark.asyncio
 async def test_pkce_s256_present(app_with_mocked_authentik) -> None:
-    """AUTH-04: PKCE S256 challenge мн в login redirect."""
+    """The login redirect carries a PKCE S256 code_challenge."""
     app, _provider = app_with_mocked_authentik
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(
@@ -44,7 +48,7 @@ async def test_pkce_s256_present(app_with_mocked_authentik) -> None:
 async def test_login_callback_sets_cookies_and_upserts_user(
     app_with_mocked_authentik, pg_url
 ) -> None:
-    """AUTH-01: full browser flow login → callback → ks_at+ks_rt cookies + users row."""
+    """Full browser flow: login → callback → ks_at + ks_rt cookies and a users row."""
     app, provider = app_with_mocked_authentik
     issuer = provider["issuer"]
     transport = ASGITransport(app=app, raise_app_exceptions=False)
@@ -118,7 +122,7 @@ async def test_login_callback_sets_cookies_and_upserts_user(
 
 @pytest.mark.asyncio
 async def test_oidc_bearer_validates_via_jwks(app_with_mocked_authentik, pg_url) -> None:
-    """AUTH-04: Authorization: Bearer <JWT> path."""
+    """Authorization: Bearer <JWT> validates against the IdP JWKS."""
     app, provider = app_with_mocked_authentik
     issuer = provider["issuer"]
     token = provider["sign_jwt"](
@@ -158,7 +162,7 @@ async def test_oidc_bearer_validates_via_jwks(app_with_mocked_authentik, pg_url)
 
 @pytest.mark.asyncio
 async def test_invalid_jwt_alg_none_returns_401(app_with_mocked_authentik) -> None:
-    """T-3-31 — alg=none не в whitelist; токен отвергнут."""
+    """alg=none is not in the accepted-algorithm list, so the token is rejected."""
     app, _ = app_with_mocked_authentik
     bad = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJoYWNrIn0."
     transport = ASGITransport(app=app, raise_app_exceptions=False)
@@ -173,7 +177,7 @@ async def test_invalid_jwt_alg_none_returns_401(app_with_mocked_authentik) -> No
 
 @pytest.mark.asyncio
 async def test_session_cookie_path_scoped(app_with_mocked_authentik) -> None:
-    """T-3-37: ks_oidc_session cookie path=/v1/api/auth — не уходит на /v1/mcp."""
+    """ks_oidc_session is scoped to path=/v1/api/auth, so it is never sent to /v1/mcp."""
     app, _ = app_with_mocked_authentik
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(
@@ -190,7 +194,7 @@ async def test_session_cookie_path_scoped(app_with_mocked_authentik) -> None:
 
 @pytest.mark.asyncio
 async def test_refresh_rotates_cookies(app_with_mocked_authentik, pg_url) -> None:
-    """AUTH-06 explicit /refresh endpoint via authed api-key + ks_rt cookie."""
+    """The explicit /refresh endpoint rotates cookies, given an api-key auth + ks_rt cookie."""
     app, provider = app_with_mocked_authentik
     issuer = provider["issuer"]
     new_at = provider["sign_jwt"](
@@ -272,7 +276,7 @@ async def test_refresh_rotates_cookies(app_with_mocked_authentik, pg_url) -> Non
 
 @pytest.mark.asyncio
 async def test_refresh_failure_returns_401(app_with_mocked_authentik, pg_url) -> None:
-    """AUTH-06 negative: token endpoint returns 401 → refresh fails."""
+    """Negative: the IdP token endpoint answering 401 makes /refresh fail with 401."""
     app, provider = app_with_mocked_authentik
     provider["httpserver"].expect_request("/application/o/test/token").respond_with_data(
         "invalid", status=401
@@ -332,7 +336,7 @@ async def test_refresh_failure_returns_401(app_with_mocked_authentik, pg_url) ->
 
 @pytest.mark.asyncio
 async def test_logout_calls_end_session(app_with_mocked_authentik, pg_url) -> None:
-    """AUTH-07: ks_idt cookie → logout_url → end_session 302."""
+    """With a ks_idt cookie, logout redirects (302) to the IdP end_session endpoint."""
     app, provider = app_with_mocked_authentik
     issuer = provider["issuer"]
     id_token = provider["sign_jwt"](
@@ -385,7 +389,7 @@ async def test_logout_calls_end_session(app_with_mocked_authentik, pg_url) -> No
 
 @pytest.mark.asyncio
 async def test_logout_no_id_token_still_clears(app_with_mocked_authentik, pg_url) -> None:
-    """T-3-36 degraded: без ks_idt — local clear + 302 на post_logout_redirect."""
+    """Degraded path: with no ks_idt, logout clears locally and 302s to post_logout_redirect."""
     app, _ = app_with_mocked_authentik
 
     import base64

@@ -167,10 +167,10 @@ async def _reset_schema(pg_url: str) -> None:
 
 @pytest_asyncio.fixture
 async def _engine_lifespan_ctx(app, pg_url):
-    """Reset schema -> engine_lifespan (с auto_migrate=true).
+    """Reset the schema, then enter engine_lifespan (with auto_migrate=true).
 
-    Каждый test получает чистый DB state; полный app_lifespan (scheduler,
-    coordinator) НЕ запускается — auth тесты этого не требуют.
+    Each test starts from clean DB state. The full app_lifespan (scheduler, compile
+    coordinator) is deliberately NOT started — the auth tests do not need it.
     """
     from keenyspace_server.db.session import engine_lifespan
 
@@ -181,7 +181,7 @@ async def _engine_lifespan_ctx(app, pg_url):
 
 @pytest_asyncio.fixture
 async def client(app, _engine_lifespan_ctx, api_key_user):
-    """Default client: authenticated через real CompositeAuthBackend + Bearer ks_live_*.
+    """Default client: authenticated via the real CompositeAuthBackend, Bearer ks_live_*.
 
     Integration tests go through the real auth chain, with no middleware
     bypass. Negative-auth assertions use `anon_client` instead.
@@ -198,7 +198,7 @@ async def client(app, _engine_lifespan_ctx, api_key_user):
 
 @pytest_asyncio.fixture
 async def anon_client(app, _engine_lifespan_ctx):
-    """Anonymous client для negative tests (auth_bypass, public endpoints)."""
+    """Anonymous client for negative tests (auth_bypass, public endpoints)."""
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -206,7 +206,7 @@ async def anon_client(app, _engine_lifespan_ctx):
 
 @pytest_asyncio.fixture
 async def api_key_client(app, _engine_lifespan_ctx, api_key_user):
-    """Router-level fast-path: authenticated через test-only AuthenticationBackend stub.
+    """Router-level fast path: authenticated via a test-only AuthenticationBackend stub.
 
     Used by router tests to isolate them from the composite resolver chain
     (fast feedback without the full DB verify roundtrip). The production path
@@ -455,10 +455,10 @@ async def app_with_mocked_authentik(mock_authentik_provider, fs_root, pg_url, mo
 
 @pytest.fixture
 def alembic_at_0002(pg_url, app_env):
-    """Применяет миграции до 0002 (НЕ до head) и вставляет seed api_keys row.
+    """Migrate to 0002 (NOT to head) and seed one api_keys row.
 
-    Используется в tests/auth/test_alembic_0003.py для проверки pre-assertion
-    (миграция 0003 raises RuntimeError при непустой api_keys table).
+    Used by tests/auth/test_alembic_0003.py to exercise the pre-migration assertion:
+    migration 0003 raises RuntimeError when api_keys is non-empty.
     """
     import asyncio
 

@@ -1,4 +1,4 @@
-"""Socket file mode invariants — T-05.05-02 mitigation (info disclosure)."""
+"""Socket file mode invariants — the daemon socket must not be readable by other users."""
 
 from __future__ import annotations
 

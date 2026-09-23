@@ -161,7 +161,7 @@ async def test_post_compact_fire_and_forget_no_stdout(
     monkeypatch,
     capsys,
 ) -> None:
-    """F-09: PostCompact stdout is ignored by Claude Code — never write to stdout."""
+    """Claude Code ignores PostCompact stdout, so the hook must never write to it."""
     handlers_mod, _ = await _reload_hooks_modules()
     _set_stdin(monkeypatch, {"cwd": "/tmp"})
     await handlers_mod.handle_post_compact()

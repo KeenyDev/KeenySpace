@@ -1,4 +1,4 @@
-"""dropped.json atomic counter — flock invariants + no-PII schema (T-05.05-08)."""
+"""dropped.json atomic counter — flock invariants plus a schema that carries no PII."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def test_dropped_json_only_counts_no_pii(_reload_dropped) -> None:
 
     state = json.loads(paths_mod.DROPPED_JSON.read_text())
     # Schema must contain only count + last_ts per kind. No payload, no transcript,
-    # no user identifiers — verifies T-05.05-08 mitigation.
+    # no user identifiers — the counter must not become a PII sink.
     allowed_keys = {"count", "last_ts"}
     for kind, bucket in state["by_kind"].items():
         assert set(bucket.keys()) <= allowed_keys, (

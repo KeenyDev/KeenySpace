@@ -1,8 +1,8 @@
 """
-Wave 2 early smoke test: validates combine_lifespans wiring against the skeleton app.
+Smoke test for the combine_lifespans wiring, run against a minimal app.
 
 Tests that the stub 'ping' tool works for >= 2 sequential calls in the same boot,
-which proves the FastMCP task group stays initialized (Pitfall #1).
+which proves the FastMCP task group stays initialized across calls.
 
 Also includes a negative-test: stripping mcp_app.lifespan from combine_lifespans
 causes the second call to fail, proving the test is load-bearing.

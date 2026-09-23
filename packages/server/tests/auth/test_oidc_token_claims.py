@@ -12,7 +12,7 @@ import time
 import pytest
 import structlog.testing
 
-from tests.auth.test_groups_claim import _auth, _fetch_keyset, _make_client
+from tests.auth.conftest import _auth, _fetch_keyset, _make_client
 
 ISSUER = "http://localhost:9000/application/o/keenyspace/"
 

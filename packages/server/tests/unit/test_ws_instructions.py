@@ -197,7 +197,7 @@ async def test_model_string_passes_through(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_rejects_template_with_too_many_ast_nodes(tmp_path: Path) -> None:
-    """WR-02/WR-13: AST node-count bound rejects unbounded templates.
+    """The AST node-count bound rejects an unbounded template.
 
     150 ``{{ xN }}`` interpolations expand to substantially more than 200
     nodes in Jinja's AST (each expression is wrapped in Output/Name nodes),
@@ -226,7 +226,7 @@ async def test_rejects_template_with_too_many_ast_nodes(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_rejects_template_with_loop_nesting_too_deep(tmp_path: Path) -> None:
-    """WR-02/WR-13: nested-for depth bound rejects pathological recursion.
+    """The nested-for depth bound rejects pathological loop recursion.
 
     Four nested ``{% for %}`` loops exceed the ``_TEMPLATE_MAX_LOOP_DEPTH``
     bound of 3. The complexity check runs BEFORE the asyncio.to_thread render
@@ -260,7 +260,7 @@ async def test_rejects_template_with_loop_nesting_too_deep(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_allows_template_within_complexity_bounds(tmp_path: Path) -> None:
-    """WR-02/WR-13: regression guard that idiomatic templates still render.
+    """Regression guard: an idiomatic template within the bounds still renders.
 
     Three nested loops are at (not over) the depth bound; ensures the bound
     is correctly applied as exclusive-on-overflow, not off-by-one strict.

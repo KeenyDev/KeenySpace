@@ -1,10 +1,10 @@
-"""Wave 0 exit smoke — фиксирует invariants для downstream waves.
+"""Auth boot invariants: dependencies, required settings, and the api_keys schema.
 
-Покрытие:
-- Все новые deps импортируются
-- AuthSettings boot'ает с required env
-- Settings.extra='forbid' блокирует старый dev-token env var
-- `api_keys.lookup_hash` колонка существует после `alembic upgrade head`
+Covers:
+- the auth dependencies import, and argon2 hashes at the cost parameters we expect
+- AuthSettings refuses to boot without the OIDC, pepper and session-secret env vars
+- Settings(extra='forbid') rejects the removed dev-token env var instead of ignoring it
+- `alembic upgrade head` leaves an `api_keys.lookup_hash` column in place
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def test_new_libs_importable() -> None:
 
 
 def test_auth_settings_requires_oidc_and_pepper(monkeypatch) -> None:
-    """Без env vars — boot fail."""
+    """Missing OIDC / pepper / session-secret env vars → ValidationError at boot."""
     from keenyspace_server.config import Settings, get_settings
 
     get_settings.cache_clear()
@@ -54,10 +54,10 @@ def test_auth_settings_requires_oidc_and_pepper(monkeypatch) -> None:
 
 
 def test_auth_settings_rejects_dev_token(monkeypatch, app_env) -> None:
-    """Удалённое поле dev-token в env → boot fail (T-3-05 residual signal).
+    """Setting the removed dev-token env var fails boot rather than being ignored.
 
-    Var name собирается из частей чтобы финальный grep audit Wave 2 (T-3-21)
-    не ловил bareword: production code (config + main) уже не ссылается на него.
+    The variable name is assembled from parts so that a grep audit for the bareword
+    stays clean: neither config nor main references it any more.
     """
     from keenyspace_server.config import Settings, get_settings
 
@@ -111,10 +111,10 @@ def _alembic_head(pg_url, app_env):
 
 
 def test_api_keys_lookup_hash_column_exists_after_head(pg_url, _alembic_head) -> None:
-    """alembic upgrade head даёт api_keys.lookup_hash CHAR(64) UNIQUE NOT NULL.
+    """`alembic upgrade head` leaves api_keys.lookup_hash NOT NULL with max length 64.
 
-    Wave 0 exit gate: проверяет инвариант миграции напрямую через alembic CLI
-    (без build_app() — оставлено независимо от auth wiring).
+    Driven through the alembic CLI rather than build_app(), so the migration invariant
+    holds independently of how auth is wired.
     """
     row = asyncio.run(_query_lookup_hash_column(pg_url))
     assert row is not None

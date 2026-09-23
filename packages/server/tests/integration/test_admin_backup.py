@@ -1,4 +1,4 @@
-"""POST /v1/admin/backup streaming tarball integration tests (Phase 5 ADMIN-01).
+"""POST /v1/admin/backup streaming tarball integration tests.
 
 Real Postgres; pg_dump invoked via subprocess. If pg_dump is unavailable in the
 test environment the tests skip cleanly.

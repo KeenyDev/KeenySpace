@@ -1,8 +1,8 @@
-"""CLI-13 invariant test across all three server-driven commands.
+"""The instructions-first invariant, across all three server-driven commands.
 
-Every non-trivial command (ingest, query, lint) MUST call `get_instructions`
-before any LLM work — the invariant that lets Phase 5's server-driven
-philosophy hold under regression.
+Every non-trivial command (ingest, query, lint) MUST call `get_instructions` before any
+LLM work: the server owns the prompt, the tool whitelist and the budgets, so a command
+that ran the model first would silently escape all three.
 """
 
 from __future__ import annotations

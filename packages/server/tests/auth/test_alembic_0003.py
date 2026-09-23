@@ -1,7 +1,8 @@
-"""AUTH-03 / Alembic 0003 — pre-migration assertion (Pitfall H).
+"""Migration 0003 (api_keys.lookup_hash) and its pre-migration guard.
 
-Wave 0 регрессионный тест: миграция 0003 проходит на ПУСТОЙ api_keys
-и явно falls на непустой (manual cleanup signal).
+Upgrading an EMPTY api_keys table succeeds and adds lookup_hash; on a seeded table the
+migration aborts with a RuntimeError naming the row count, so an operator cleans the
+un-rehashable rows up by hand instead of losing key material silently.
 """
 
 from __future__ import annotations

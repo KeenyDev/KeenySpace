@@ -122,7 +122,7 @@ async def test_budgets_valid_populated(tmp_path: Path) -> None:
     ["ingest", "query", "lint", "post-compact"],
 )
 async def test_default_blueprint_instructions_render_ok(tmp_path: Path, command: str) -> None:
-    """Each F-08 default-blueprint instruction renders with valid budgets."""
+    """Every instruction shipped with the default blueprint renders with valid budgets."""
 
     repo_root = Path(__file__).resolve().parents[4]
     src = repo_root / "blueprints" / "default" / "_instructions" / f"{command}.md"

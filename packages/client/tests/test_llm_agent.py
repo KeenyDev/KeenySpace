@@ -1,8 +1,8 @@
 """Tests for clients/llm.py — budget triple-guard and tool_whitelist enforcement.
 
-Pattern mirrors Phase 2 test_compile_agent.py: FunctionModel for deterministic
-behaviour. We inject a fake Agent factory so the test does not need to talk to
-a real MCP server.
+Follows the server's test_compile_agent.py pattern: FunctionModel for deterministic
+behaviour. We inject a fake Agent factory so the test does not need to talk to a real
+MCP server.
 """
 
 from __future__ import annotations
@@ -113,7 +113,10 @@ async def test_happy_path_returns_output() -> None:
 
 @pytest.mark.asyncio
 async def test_budget_step_limit_aborts() -> None:
-    """request_limit=2 with FunctionModel that emits a tool call → UsageLimitExceeded → BudgetAbort."""
+    """A FunctionModel that always emits a tool call runs out of the request budget.
+
+    request_limit=2 → UsageLimitExceeded from pydantic-ai → BudgetAbort.
+    """
 
     call_count = {"n": 0}
 

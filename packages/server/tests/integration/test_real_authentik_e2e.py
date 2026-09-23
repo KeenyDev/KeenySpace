@@ -1,13 +1,13 @@
-"""Real-Authentik e2e regression test (D-23, D-26 SC-3).
+"""End-to-end regression against a real Authentik.
 
 Uses testcontainers DockerCompose to spin up a real Authentik 2024.10 stack,
 applies the keenyspace blueprint, obtains a signed JWT via client_credentials,
 and validates it through OidcClient.validate_access_token.
 
-Critical regression: Authentik per_provider issuer_mode mints tokens with a
-trailing-slash `iss` (http://host/application/o/<slug>/). The D-22 fix handles
-this. This test proves a real Authentik-signed trailing-slash iss validates
-end-to-end through the D-22 path.
+The regression it guards: Authentik per_provider issuer_mode mints tokens whose `iss`
+carries a trailing slash (http://host/application/o/<slug>/), which a naive equality
+check against the configured issuer rejects. This proves a real Authentik-signed
+trailing-slash iss validates end-to-end through the custom iss validator.
 
 Acceptable gaps (by design):
   - Does NOT exercise interactive device-code approval UI (operator SMOKE.md owns that).
@@ -136,7 +136,7 @@ def authentik_stack(request: pytest.FixtureRequest) -> Generator[str]:
         # Static URL: docker-compose.authentik-test.yml pins host port 9000:9000.
         # Dynamic port discovery is forbidden here — a random mapped port would
         # change the per_provider token iss (Authentik builds it from request host)
-        # and break the D-22 trailing-slash assertion (RESEARCH Pitfall 3 / Open Q1).
+        # and break the trailing-slash iss assertion below.
         base_url = "http://localhost:9000"
         wait_for_blueprint(base_url, _TEST_BOOTSTRAP_TOKEN)
         yield base_url
@@ -144,12 +144,12 @@ def authentik_stack(request: pytest.FixtureRequest) -> Generator[str]:
 
 @pytest.mark.asyncio
 async def test_trailing_slash_iss_validates_end_to_end(authentik_stack: str) -> None:
-    """D-26 SC-3: real Authentik trailing-slash iss validates via D-22 path.
+    """A real Authentik trailing-slash iss validates through the custom iss validator.
 
     Asserts:
-    1. Authentik per_provider mints iss with trailing slash (the bug D-22 fixes).
-    2. OidcClient.validate_access_token accepts the real JWT and returns a User
-       with source="oidc" — no mock involved, real JWKS fetch + D-22 iss check.
+    1. Authentik per_provider really does mint an iss with a trailing slash.
+    2. OidcClient.validate_access_token accepts that real JWT and returns a User with
+       source="oidc" — no mock involved: a real JWKS fetch and a real iss check.
     """
     base_url = authentik_stack
     access_token = get_ks_access_token(base_url)
@@ -213,7 +213,7 @@ async def test_trailing_slash_iss_validates_end_to_end(authentik_stack: str) -> 
 
     assert user is not None, (
         "OidcClient.validate_access_token returned None for real Authentik JWT; "
-        "check auth.token.iss_mismatch in logs — D-22 path may not be wired"
+        "check auth.token.iss_mismatch in logs — the iss validator may not be wired"
     )
     assert user.source == "oidc", f"Expected source=oidc, got {user.source!r}"
     assert isinstance(user.sub, str) and len(user.sub) > 0, (

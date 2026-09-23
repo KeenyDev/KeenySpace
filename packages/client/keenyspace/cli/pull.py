@@ -103,7 +103,8 @@ async def run_pull(
                 table.add_row("removed", rel)
             console.print(table)
             console.print(
-                "[red]Refusing to overwrite dirty state. Use --force to stash + apply server canon.[/red]"
+                "[red]Refusing to overwrite dirty state. "
+                "Use --force to stash + apply server canon.[/red]"
             )
             sys.exit(EXIT_DIRTY)
 

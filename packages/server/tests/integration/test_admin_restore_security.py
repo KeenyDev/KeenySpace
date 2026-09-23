@@ -1,7 +1,7 @@
 """POST /v1/admin/restore security tests — Python 3.14 tarfile data filter.
 
-Covers T-05.07-01 (path traversal), T-05.07-02 (absolute path), T-05.07-03
-(symlink), missing manifest, and the anonymous 401 invariant.
+Covers the archive-extraction threats — path traversal, absolute member paths and
+symlink members — plus a missing manifest and the anonymous 401 invariant.
 """
 
 from __future__ import annotations

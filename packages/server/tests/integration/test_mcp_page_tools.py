@@ -611,7 +611,7 @@ async def test_search_workspace_regex_chars_treated_literally(tmp_path) -> None:
 
         transport = StreamableHttpTransport(f"http://127.0.0.1:{port}/v1/mcp/", headers=headers)
         async with Client(transport) as mcp_client:
-            # WR-08: search treats the query as a literal substring (regex
+            # search treats the query as a literal substring (regex
             # semantics were removed to close a ReDoS surface), so a
             # regex-special character must be handled safely and neither raise
             # nor return an error result.

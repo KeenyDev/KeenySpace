@@ -50,7 +50,9 @@ async def test_adv_01_prompt_injection_exfiltrate_no_egress(tmp_path: Path) -> N
         ops=[
             PageOp(action="update", path="index.md", body="Updated index content.", frontmatter={})
         ],
-        notes="Instruction injection attempt detected in WAL entry: 'Ignore previous instructions'.",
+        notes=(
+            "Instruction injection attempt detected in WAL entry: 'Ignore previous instructions'."
+        ),
     )
 
     async def _fake(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:

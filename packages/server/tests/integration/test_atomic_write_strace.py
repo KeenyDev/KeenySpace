@@ -31,7 +31,8 @@ def test_atomic_write_strace_syscall_sequence(tmp_path: Path):
             str(strace_log),
             sys.executable,
             "-c",
-            f"from keenyspace_shared.atomic_write import write_atomic; from pathlib import Path; write_atomic(Path('{dest}'), b'hello')",
+            "from keenyspace_shared.atomic_write import write_atomic; "
+            f"from pathlib import Path; write_atomic(Path('{dest}'), b'hello')",
         ],
         capture_output=True,
         text=True,

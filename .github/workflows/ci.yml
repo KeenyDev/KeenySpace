@@ -25,6 +25,18 @@ jobs:
         run: uv sync --locked --all-packages --all-extras
       - name: ruff check
         run: uv run ruff check .
+      - name: ruff format
+        run: uv run ruff format --check .
+      - name: no internal planning references in code
+        # Comments and docstrings must read standalone: .planning/ is not in the
+        # repository, so an id like D-11 or "Phase 4" resolves to nothing for a
+        # reader who cloned it, and MCP tool docstrings ship to clients verbatim.
+        run: |
+          if grep -rnE '\b(D|WR|CR|REQ|T|G|F|AUTH|MCP|WS|CLI|SC|ADMIN|REL|DEP)-[0-9]+|RESEARCH §|\bWave [0-9]|\bPhase [0-9]' \
+              packages --include='*.py'; then
+            echo "::error::Remove internal planning references; state the decision in plain words instead."
+            exit 1
+          fi
       - name: mypy
         run: |
           uv run mypy --strict \

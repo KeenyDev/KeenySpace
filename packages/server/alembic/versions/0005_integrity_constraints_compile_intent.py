@@ -52,7 +52,9 @@ WORKSPACE_CHECKS = {
     "ck_workspaces_status": _in_list("status", ("active", "archived")),
     "ck_workspaces_compile_state": _in_list("compile_state", ("idle", "running", "paused")),
     "ck_workspaces_archived_at_matches_status": "(status = 'archived') = (archived_at IS NOT NULL)",
-    "ck_workspaces_paused_has_reason": "compile_state <> 'paused' OR compile_paused_reason IS NOT NULL",
+    "ck_workspaces_paused_has_reason": (
+        "compile_state <> 'paused' OR compile_paused_reason IS NOT NULL"
+    ),
 }
 COMPILE_RUN_CHECKS = {
     "ck_compile_runs_status": _in_list("status", COMPILE_RUN_STATUSES),

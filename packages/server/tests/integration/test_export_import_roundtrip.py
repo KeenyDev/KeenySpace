@@ -1,7 +1,7 @@
-"""Phase 4 export->import roundtrip + import error-path integration tests
-(WS-06 / D-07 / D-08).
+"""Workspace export -> import roundtrip, plus the import error paths.
 
-Full lifespan + real Postgres; uses ASGITransport with API-key Bearer auth.
+Full lifespan against a real Postgres, driven over ASGITransport with API-key Bearer
+auth.
 """
 
 from __future__ import annotations
@@ -94,7 +94,11 @@ def _make_zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
 
 
 async def test_export_import_roundtrip_preserves_pages(app, pg_url) -> None:  # type: ignore[no-untyped-def]
-    """Source-of-truth test for ROADMAP Phase 4 success criterion #4."""
+    """Export a workspace, import it under a new slug: file bytes and audit trail survive.
+
+    The imported workspace gets a fresh uuid, sample.md comes back byte-identical, and
+    both workspace.exported and workspace.imported land in the audit log.
+    """
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.models import Workspace
     from keenyspace_server.db.session import get_db_session
@@ -367,14 +371,14 @@ async def test_import_unauthenticated_401(app, pg_url) -> None:  # type: ignore[
 
 
 async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> None:  # type: ignore[no-untyped-def]
-    """G-4 regression: the canonical default-blueprint workspace roundtrips.
+    """Regression: an untouched default-blueprint workspace roundtrips unchanged.
 
-    Reproduces UAT Test 13. Before the G-4 fix, this test returns 422
-    hidden_entry on raw/.gitkeep. After the fix, it returns 201 and the
-    nested dotfile survives.
+    Import used to reject any dotfile entry outright, which made the canonical blueprint
+    fail its own roundtrip with 422 hidden_entry on raw/.gitkeep. The rule is now scoped
+    to top-level dotfiles, so the nested .gitkeep survives and import answers 201.
 
-    Uses pytest.fail on non-200 health (NOT pytest.skip) -- the original UAT
-    bug was hidden by tests that skipped past 5xx responses.
+    Fails (rather than skips) on a non-200 /healthz: the original bug stayed hidden
+    because the surrounding tests skipped past 5xx responses.
     """
     from keenyspace_server.config import get_settings
     from keenyspace_server.db.models import AuditLog, Workspace
@@ -403,7 +407,7 @@ async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> No
             ws_a_dir = settings.fs.root / "workspaces" / str(ws_a.uuid)
             assert (ws_a_dir / "raw" / ".gitkeep").exists(), (
                 "default blueprint clone did not produce raw/.gitkeep -- "
-                "G-4 test prerequisite missing; investigate clone_default_blueprint"
+                "this test's prerequisite is missing; investigate clone_default_blueprint"
             )
 
             exp = await client.get(f"/v1/api/workspaces/{slug_a}/export")
@@ -423,10 +427,10 @@ async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> No
                 files={"file": ("a.zip", zip_bytes, "application/zip")},
             )
             assert imp.status_code == 201, (
-                f"G-4 regression: import returned {imp.status_code} "
+                f"roundtrip regression: import returned {imp.status_code} "
                 f"body={imp.text}. Expected 201. The canonical default-"
-                f"blueprint zip contains raw/.gitkeep which was rejected by "
-                f"the pre-G-4 blanket hidden_entry rule."
+                f"blueprint zip contains raw/.gitkeep, which a blanket "
+                f"hidden_entry rule would reject."
             )
 
             payload = imp.json()

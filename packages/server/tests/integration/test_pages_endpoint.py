@@ -7,8 +7,8 @@ import os
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from tests.integration.test_workspace_manifest import (
-    _reset_schema,
+from tests.conftest import _reset_schema
+from tests.integration.conftest import (
     _seed_api_key_post_lifespan,
     _seed_workspace,
     _workspace_dir,

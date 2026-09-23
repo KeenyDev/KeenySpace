@@ -61,7 +61,7 @@ def make_envelope(
     workspace_slug: str | None = "demo",
     **extra: Any,
 ) -> dict[str, Any]:
-    """Construct a JSONL hook envelope shaped like Phase 5 D-06 IPC.
+    """Construct a JSONL hook envelope in the shape the hook-to-daemon IPC uses.
 
     ``kind`` is the hook event (post-tool, session-start, ...); ``source`` is
     only present on session-start (compact|startup|resume|clear).

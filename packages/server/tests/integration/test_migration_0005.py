@@ -19,7 +19,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 _INSERT_WORKSPACE = (
-    "INSERT INTO workspaces (uuid, slug, display_name, blueprint_ref, status, created_at, archived_at) "
+    "INSERT INTO workspaces "
+    "(uuid, slug, display_name, blueprint_ref, status, created_at, archived_at) "
     "VALUES (:uuid, :slug, :slug, 'default', :status, now(), :archived_at)"
 )
 
@@ -84,7 +85,8 @@ def test_0005_downgrade_drops_intent_only_cursors_and_reupgrades() -> None:
                 {"uuid": intent_only_ws, "slug": "b", "status": "active", "archived_at": None},
             ),
             (
-                "INSERT INTO compile_cursors (workspace_uuid, last_wal_id, last_compile_hash, updated_at, "
+                "INSERT INTO compile_cursors (workspace_uuid, last_wal_id, "
+                "last_compile_hash, updated_at, "
                 "pending_wal_last_id, pending_plan_hash, pending_plan) VALUES "
                 "(:a, 'A', 'ha', now(), 'B', 'hb', '{\"ops\": []}'), "
                 "(:b, NULL, NULL, now(), 'C', 'hc', '{\"ops\": []}')",
@@ -115,7 +117,8 @@ def test_0005_cursor_rows_follow_workspace_deletion() -> None:
                 {"uuid": ws, "slug": "gone", "status": "active", "archived_at": None},
             ),
             (
-                "INSERT INTO compile_cursors (workspace_uuid, last_wal_id, last_compile_hash, updated_at) "
+                "INSERT INTO compile_cursors "
+                "(workspace_uuid, last_wal_id, last_compile_hash, updated_at) "
                 "VALUES (:ws, 'A', 'h', now())",
                 {"ws": ws},
             ),

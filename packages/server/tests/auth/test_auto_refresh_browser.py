@@ -1,7 +1,8 @@
-"""AUTH-06 + D-03 inline auto-refresh — browser path с cookie ks_at near expiry.
+"""Inline auto-refresh on the browser path, driven by a ks_at cookie near expiry.
 
-T-3-45 mitigation: stale ks_at в browser session НЕ приводит к user-visible 401
-если ks_rt valid; FastAPI Depends(refresh_if_needed) rotate'ает cookies inline.
+A stale ks_at in a browser session must not surface as a user-visible 401 while ks_rt is
+still valid: FastAPI Depends(refresh_if_needed) rotates the cookies inline on the way
+through the request.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ async def test_browser_path_inline_refresh_when_at_near_expiry(
     app_with_mocked_authentik,
     pg_url,
 ) -> None:
-    """ks_at exp - 30s (внутри 60s threshold) + valid ks_rt → 200 + Set-Cookie."""
+    """ks_at 30s from expiry (inside the 60s threshold) + valid ks_rt → 200 + new ks_at."""
     app, provider = app_with_mocked_authentik
     issuer = provider["issuer"]
     near_expiry_at = provider["sign_jwt"](
@@ -89,7 +90,7 @@ async def test_browser_path_no_refresh_when_at_fresh(
     app_with_mocked_authentik,
     pg_url,
 ) -> None:
-    """Sanity: ks_at exp далеко в будущем → НЕ trigger refresh + no Set-Cookie."""
+    """Sanity: ks_at far from expiry triggers no refresh and sets no ks_at cookie."""
     app, provider = app_with_mocked_authentik
     issuer = provider["issuer"]
     fresh = provider["sign_jwt"](
