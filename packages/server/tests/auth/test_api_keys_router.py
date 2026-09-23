@@ -99,11 +99,17 @@ async def test_audit_log_minted_no_plaintext(api_key_client, pg_url) -> None:
 
 @pytest.mark.asyncio
 async def test_audit_log_revoked_payload_shape(api_key_client, pg_url) -> None:
-    """Revoking a key writes an auth.api_key.revoked audit row naming that key_id."""
+    """The revoke audit row carries the key_id and nothing else.
+
+    Pinning the exact key set, not just the presence of key_id, is what makes this a
+    regression test: a future payload that also recorded the prefix, last4 or the key
+    material itself would still "name the key_id" and would pass a laxer assertion.
+    """
     import sqlalchemy as sa
     from sqlalchemy.ext.asyncio import create_async_engine
 
     minted = (await api_key_client.post("/v1/api/auth/api-keys", json={"name": "r"})).json()
+    plaintext = minted["key"]
     resp = await api_key_client.delete(f"/v1/api/auth/api-keys/{minted['id']}")
     assert resp.status_code == 204
     engine = create_async_engine(pg_url)
@@ -113,4 +119,9 @@ async def test_audit_log_revoked_payload_shape(api_key_client, pg_url) -> None:
         )
         payloads = [row[0] for row in r]
     await engine.dispose()
-    assert any(p.get("key_id") == minted["id"] for p in payloads)
+
+    assert len(payloads) == 1, f"expected exactly one revoke audit row, got {payloads}"
+    payload = payloads[0]
+    assert set(payload) == {"key_id"}, f"revoke payload grew new fields: {sorted(payload)}"
+    assert payload["key_id"] == minted["id"]
+    assert plaintext[len("ks_live_") :] not in str(payload)

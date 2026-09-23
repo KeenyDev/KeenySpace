@@ -70,6 +70,29 @@ def test_auth_settings_rejects_dev_token(monkeypatch, app_env) -> None:
         Settings()  # type: ignore[call-arg]
 
 
+_UNIQUE_ON_LOOKUP_HASH = """
+SELECT i.relname
+FROM pg_index x
+JOIN pg_class t ON t.oid = x.indrelid
+JOIN pg_class i ON i.oid = x.indexrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+WHERE t.relname = 'api_keys'
+  AND n.nspname = 'public'
+  AND x.indisunique
+  AND (
+    SELECT array_agg(a.attname::text ORDER BY a.attname)
+    FROM unnest(x.indkey) AS k
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k
+  ) = ARRAY['lookup_hash']
+"""
+"""Unique indexes covering exactly (lookup_hash).
+
+Matched by indexed columns rather than by name: a unique constraint and a bare unique
+index both enforce the invariant, and either may be renamed, but dropping uniqueness
+empties this result.
+"""
+
+
 async def _query_lookup_hash_column(pg_url: str) -> tuple[str, str, int] | None:
     import sqlalchemy as sa
     from sqlalchemy.ext.asyncio import create_async_engine
@@ -88,6 +111,18 @@ async def _query_lookup_hash_column(pg_url: str) -> tuple[str, str, int] | None:
     if row is None:
         return None
     return (row[0], row[1], row[2])
+
+
+async def _query_lookup_hash_unique_indexes(pg_url: str) -> list[str]:
+    import sqlalchemy as sa
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    eng = create_async_engine(pg_url)
+    async with eng.connect() as conn:
+        r = await conn.execute(sa.text(_UNIQUE_ON_LOOKUP_HASH))
+        names = [row[0] for row in r]
+    await eng.dispose()
+    return names
 
 
 @pytest.fixture
@@ -111,12 +146,19 @@ def _alembic_head(pg_url, app_env):
 
 
 def test_api_keys_lookup_hash_column_exists_after_head(pg_url, _alembic_head) -> None:
-    """`alembic upgrade head` leaves api_keys.lookup_hash NOT NULL with max length 64.
+    """`alembic upgrade head` leaves api_keys.lookup_hash a UNIQUE NOT NULL varchar(64).
 
+    Uniqueness is the load-bearing part: lookup_hash is what an incoming API key is
+    resolved by, so two rows sharing one hash would make the owner of a key ambiguous.
     Driven through the alembic CLI rather than build_app(), so the migration invariant
     holds independently of how auth is wired.
     """
     row = asyncio.run(_query_lookup_hash_column(pg_url))
     assert row is not None
-    assert row[1] == "NO"  # NOT NULL
-    assert row[2] == 64  # CHAR(64) max length
+    data_type, is_nullable, max_length = row
+    assert data_type == "character varying", f"lookup_hash is {data_type}, not a varchar"
+    assert is_nullable == "NO"
+    assert max_length == 64
+
+    unique_indexes = asyncio.run(_query_lookup_hash_unique_indexes(pg_url))
+    assert unique_indexes, "no unique constraint or index covers api_keys.lookup_hash"

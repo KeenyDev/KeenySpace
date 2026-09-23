@@ -420,7 +420,7 @@ async def test_unmodified_default_blueprint_roundtrip_no_skip(app, pg_url) -> No
                     f"have regressed; namelist={sorted(names)}"
                 )
 
-            slug_b = f"g4-dst-{uuid4().hex[:8]}"
+            slug_b = f"blueprint-dst-{uuid4().hex[:8]}"
             imp = await client.post(
                 "/v1/api/workspaces/import",
                 data={"slug": slug_b},

@@ -64,18 +64,32 @@ async def test_api_key_path_returns_authenticated_user() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolution_order_api_key_short_circuits_oidc_bearer() -> None:
-    """ks_live_* bearer wins over a ks_at cookie when no OIDC client is configured."""
+async def test_rejected_cookie_falls_through_to_a_valid_api_key() -> None:
+    """A ks_at cookie the IdP rejects must not block a valid ks_live_* key on the same request.
+
+    The resolver chain is an `or` of three attempts, so a cookie that fails validation
+    has to return None and let api_key resolve — not abort the request. A long-lived MCP
+    session carrying a stale browser cookie depends on this.
+    """
     fake_user = User(sub="u", _display_name="u", source="api_key")
     fake_keys = AsyncMock()
     fake_keys.verify.return_value = fake_user
-    backend = CompositeAuthBackend(oidc_client=None, api_key_service=fake_keys)
+    fake_oidc = AsyncMock()
+    fake_oidc.validate_access_token.return_value = None
+    backend = CompositeAuthBackend(oidc_client=fake_oidc, api_key_service=fake_keys)
     conn = _conn(
         "/v1/api/workspaces/",
-        headers={"Authorization": "Bearer ks_live_x", "Cookie": "ks_at=irrelevant-wave2"},
+        headers={"Authorization": "Bearer ks_live_x", "Cookie": "ks_at=stale-or-tampered"},
     )
+
     result = await backend.authenticate(conn)
+
     assert result is not None
+    _, user = result
+    assert user.source == "api_key"
+    fake_keys.verify.assert_awaited_once_with("ks_live_x")
+    fake_oidc.validate_access_token.assert_awaited_once()
+    assert fake_oidc.validate_access_token.await_args.args[0] == "stale-or-tampered"
 
 
 @pytest.mark.asyncio
