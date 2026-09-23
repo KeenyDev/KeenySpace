@@ -22,8 +22,21 @@ dist/
 # IDE
 .idea/
 
-# Local agent instructions (per-user, not part of the repo)
+# Local agent instructions and state (per-user, not part of the repo)
 CLAUDE.md
+.claude/agent-memory/
+
+# Obsidian per-user vault state
+.obsidian/
+
+# Local code-search index config
+.vex.toml
+
+# Pre-repo working material; the as-built design lives in docs/design/
+concepts/
+plans/
+vision.md
+open-questions.md
 
 
 # Local secrets / env overrides (compose interpolation) — never commit
