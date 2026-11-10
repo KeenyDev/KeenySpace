@@ -265,3 +265,4 @@ keenyspace workspace list
 - Wire an MCP client (Claude Code) to your server: [docs/mcp-setup.md](mcp-setup.md)
 - Set up backups before you put real data in: [docs/backup-restore.md](backup-restore.md)
 - Production hardening checklist: [docs/oidc-authentik-setup.md](oidc-authentik-setup.md)
+- Deploy on a single server behind a public domain: [docs/deploy-single-host.md](deploy-single-host.md)
