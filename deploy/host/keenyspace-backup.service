@@ -1,0 +1,11 @@
+[Unit]
+Description=KeenySpace scheduled backup (canon + Postgres + Authentik) to off-host storage
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# provision.sh replaces __REPO_DIR__ with the checkout path when installing the unit.
+ExecStart=__REPO_DIR__/deploy/scripts/scheduled-backup.sh
+TimeoutStartSec=1h
