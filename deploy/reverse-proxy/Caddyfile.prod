@@ -1,0 +1,16 @@
+# Public-domain Caddyfile, mounted by deploy/docker-compose.prod.yml.
+# Authentik gets its own hostname: a sub-path would change the token `iss` and
+# break every API call (see docs/oidc-authentik-setup.md).
+{$DOMAIN} {
+    reverse_proxy keenyspace:8000 {
+        flush_interval -1
+        transport http {
+            read_timeout 600s
+        }
+        header_up Host {upstream_hostport}
+    }
+}
+
+auth.{$DOMAIN} {
+    reverse_proxy authentik:9000
+}

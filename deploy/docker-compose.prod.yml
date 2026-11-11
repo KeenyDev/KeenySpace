@@ -1,0 +1,23 @@
+# Overlay for a single-host deployment behind a public domain.
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d
+#
+# Requires DOMAIN (bare hostname, no scheme or port) and KEENYSPACE_IMAGE in
+# deploy/.env, plus DNS records for both DOMAIN and auth.DOMAIN. See
+# docs/deploy-single-host.md.
+services:
+  keenyspace:
+    image: ${KEENYSPACE_IMAGE:?set KEENYSPACE_IMAGE, e.g. ghcr.io/keenydev/keenyspace:0.2.0-alpha.1}
+    # Production runs the published image; never build from source on the host.
+    build: !reset null
+    environment:
+      KEENYSPACE_SERVER__PUBLIC_URL: https://${DOMAIN:?set DOMAIN}
+      KEENYSPACE_AUTH__OIDC_ISSUER_URL: https://auth.${DOMAIN:?set DOMAIN}/application/o/keenyspace/
+      KEENYSPACE_AUTH__OIDC_REDIRECT_URI: https://${DOMAIN:?set DOMAIN}/v1/api/auth/callback
+      KEENYSPACE_AUTH__OIDC_POST_LOGOUT_REDIRECT_URI: https://${DOMAIN:?set DOMAIN}/
+
+  caddy:
+    volumes:
+      - ./reverse-proxy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}

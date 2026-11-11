@@ -72,6 +72,7 @@ Copy that file into every project that connects to a KeenySpace workspace.
 | Document | Description |
 |----------|-------------|
 | [docs/install.md](docs/install.md) | Full installation guide, environment variables, volumes |
+| [docs/deploy-single-host.md](docs/deploy-single-host.md) | Single-host deployment behind a public domain, with scheduled off-host backups |
 | [docs/oidc-authentik-setup.md](docs/oidc-authentik-setup.md) | Authentik IdP setup guide |
 | [docs/mcp-setup.md](docs/mcp-setup.md) | Connecting Claude Code or any MCP client |
 | [docs/keenyspace-agent-prompt.md](docs/keenyspace-agent-prompt.md) | Agent prompt for projects consuming KeenySpace via MCP |

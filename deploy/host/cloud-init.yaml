@@ -1,0 +1,24 @@
+#cloud-config
+# Optional user data for a Debian or Ubuntu VM on any cloud that supports
+# cloud-init. Review the runcmd lines before use:
+#   --branch    - the repository ref that supplies the deploy files; pin it to a
+#                 release tag
+#   DATA_DEVICE - stable path of a dedicated data disk (e.g. /dev/disk/by-id/...);
+#                 drop the variable to keep Docker data on the system disk
+# The server version is chosen separately, by KEENYSPACE_IMAGE in deploy/.env.
+# Holds no secrets: user data is usually readable from inside the VM.
+
+package_update: true
+package_upgrade: true
+packages:
+  - git
+  - curl
+  - jq
+  - rclone
+  - unattended-upgrades
+
+ssh_pwauth: false
+
+runcmd:
+  - git clone --depth 1 --branch main https://github.com/KeenyDev/KeenySpace.git /opt/keenyspace
+  - DATA_DEVICE= bash /opt/keenyspace/deploy/host/provision.sh
